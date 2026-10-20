@@ -59,7 +59,7 @@ Agents operate in one of three distinct modes. The **DEFAULT MODE IS ALWAYS PLAN
 - Agent must return to Planning Mode immediately upon reporting task completion. Never autonomously continue to the next task or milestone.
 
 ### C. RESTRICTED PRODUCTION OPERATIONS
-- **PERMANENTLY FORBIDDEN TO AI AGENTS:** Production cloud deployments (Cloudflare/Supabase production), executing production DDL migrations, deleting live data, provisioning paid third-party tiers, or rotating production secrets. *(Note: Committing and pushing verified, task-scoped changes to the GitHub repository `origin main` is explicitly authorized per founder directive).*
+- **PERMANENTLY FORBIDDEN TO AI AGENTS:** Production cloud deployments (Cloudflare/Supabase production), executing production DDL migrations, deleting live data, provisioning paid third-party tiers, rotating production secrets, or committing/pushing to git repositories without separate, explicit founder authorization.
 
 ---
 
@@ -229,10 +229,10 @@ No task may be marked DONE without automated test evidence meeting [docs/TEST_PL
 
 ---
 
-## 16. Git Safety, Branching & Repository Sync
+## 16. Git Safety, Branching & Dependency Management
 - **Pre-Execution Check:** Agent must inspect `git status` before touching files to ensure no uncommitted founder changes are overwritten.
-- **Founder Auto-Commit & Push Directive:** Per founder mandate, upon completing any authorized task or approved governance update, the agent must automatically stage verified files, create an atomic conventional commit scoped to the task (e.g., `docs(governance): ...` or `feat(auth): ...`), and push changes to the GitHub repository (`https://github.com/Sai-KT/QR_review.git`, `origin main`).
-- **Forbidden Git Actions:** Agents must never execute `git push --force`, `git reset --hard` (without explicit consent), delete branches, or rewrite history.
+- **Explicit Git Authorization Required:** Git commit and push operations may occur only after separate, explicit founder authorization. They must NEVER be inferred from task completion or executed automatically.
+- **Forbidden Git Actions:** Agents must never execute `git push --force`, `git reset --hard` (without explicit consent), delete branches, rewrite history, or perform unprompted commits/pushes.
 - **Dependency Vetting:** Dependencies require founder approval. Agents must inspect license compatibility (MIT/Apache-2.0 only), security vulnerabilities (`npm audit`), and bundle weight before proposing additions. Lockfiles (`package-lock.json`) must always be committed.
 
 ---
@@ -249,7 +249,7 @@ The following actions are strictly reserved for the human founder:
 ---
 
 ## 18. AI Agent Task Execution Protocol
-When authorized to work on a task, the agent must execute this disciplined 11-step protocol:
+When authorized to work on a task, the agent must execute this disciplined 10-step protocol:
 1. **Identify & Announce:** State the Roadmap Task ID (e.g., `M1-T03`), title, and prerequisites.
 2. **Read Specifications:** Read the exact sections in [docs/PRD.md](docs/PRD.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API_SPEC.md](docs/API_SPEC.md), [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md), [docs/UI_UX.md](docs/UI_UX.md), and [docs/TEST_PLAN.md](docs/TEST_PLAN.md) governing this task.
 3. **Verify Prerequisites:** Inspect repository files to ensure preceding tasks are complete and verified.
@@ -259,8 +259,7 @@ When authorized to work on a task, the agent must execute this disciplined 11-st
 7. **Execute Test Suite:** Run TypeScript compiler, linter, and Vitest/Playwright tests via `run_command`.
 8. **Verify Invariants:** Check security rules (RLS, DPDPA, anti-gating, input sanitization).
 9. **Capture Evidence:** Inspect actual terminal output for exit codes and failure logs.
-10. **Commit & Push:** Stage task-scoped changes, create an atomic commit matching the task ID, and push to GitHub (`origin main`).
-11. **Report & Stop:** Output the mandatory task completion report and STOP. Do not proceed to the next task without founder authorization.
+10. **Report & Stop:** Output the mandatory task completion report and STOP. Do not proceed to the next task, and do NOT commit or push without separate, explicit founder authorization.
 
 ---
 
@@ -288,10 +287,9 @@ Every completed task report must adhere to this standardized format:
 - Anti-Gating / Policy Invariant: [Verified / Status]
 - Bundle / Secret Leak Check: [Verified / Status]
 
-**5. Git Commit & Repository Push:**
-- Commit Hash: [short-sha]
-- Commit Message: `...`
-- Remote Push: Pushed to `origin/main`
+**5. Git Status (Requires Explicit Founder Authorization):**
+- Local Git Commit: `NOT COMMITTED` (Requires separate, explicit founder authorization)
+- Remote Push: `NOT PUSHED` (Requires separate, explicit founder authorization)
 
 **6. Blockers, Limitations & Known Risks:**
 - [None / Description of any minor limitation]
@@ -318,3 +316,4 @@ When specifications diverge or implementation edge cases arise:
 - Any change to the Gemini prompt template, safety parameters, or model choice.
 - Provisioning or altering staging/production cloud resources.
 - Authorizing commencement of a new milestone.
+- Executing any Git commit or Git push operation (strictly prohibited without separate, explicit founder authorization; never inferred from task completion).
