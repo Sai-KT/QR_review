@@ -1838,27 +1838,27 @@ The following 5 decisions from Stage 7 Section 32 require formal sign-off before
 ### Decision 1: Customer Note Retention Policy (DPDPA)
 - **Options:** Option A (Ephemeral, 0 days) vs. Option B (30 Days — Recommended) vs. Option C (90 Days).
 - **Recommendation:** **Option B (30 Days)**. Retaining notes for 30 days provides merchant value during the pilot while keeping personal data risk low. Daily pg_cron purges notes older than 30 days.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+- **Status:** `APPROVED (Signed off by Founder - 30-Day Purge via pg_cron)`
 
 ### Decision 2: Google Review Destination Verification Protocol
 - **Options:** Simple domain whitelist vs. Strict hostname whitelist + Place ID match + Interactive In-App Test Link.
 - **Recommendation:** **Strict hostname whitelist + Place ID match + Interactive In-App Test Link**. Guarantees patrons land on the correct merchant's review composer.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+- **Status:** `APPROVED (Signed off by Founder - Strict Hostname + Place ID + In-App Test Link)`
 
 ### Decision 3: Merchant Logo Upload Format Boundary
 - **Options:** Allow SVG with sanitization vs. PNG, JPEG, WebP only (Strictly No SVG).
 - **Recommendation:** **PNG, JPEG, WebP only (Strictly No SVG)**. Completely eliminates stored cross-site scripting (XSS) vectors without complex XML parsing.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+- **Status:** `APPROVED (Signed off by Founder - PNG/JPEG/WebP Only, 2 MB Limit, Magic Bytes, Strictly No SVG)`
 
 ### Decision 4: Provisional Gemini Model Selection
 - **Options:** `gemini-3.5-flash-lite` vs. `gemini-2.5-flash` vs. `gemini-1.5-flash`.
 - **Recommendation:** **`gemini-3.5-flash-lite` with zero thinking budget**. Delivers sub-2.0s generation times and lowest cost (~₹0.025/call); decoupled via `GEMINI_MODEL`.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+- **Status:** `APPROVED (Signed off by Founder - gemini-3.5-flash-lite, thinking_budget = 0, decoupled via GEMINI_MODEL)`
 
 ### Decision 5: Standee Physical Dimension Format
 - **Options:** International A6 (105 × 148 mm + 3mm bleed) vs. Standard Photo 4×6 inch (102 × 152 mm).
 - **Recommendation:** **International A6 (105 × 148 mm)**. Standard paper stock across Indian commercial print shops; fits acrylic counter stands perfectly.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+- **Status:** `APPROVED (Signed off by Founder - International A6 105x148mm with 3mm bleed)`
 
 ---
 
@@ -1931,9 +1931,9 @@ Prior to beginning Milestone M1, the founder and Antigravity must verify:
 +----------------------------------------------------------------------------------------------------------------------+
 | Category             | Specific Verification Item                                                    | Status        |
 |----------------------+-------------------------------------------------------------------------------+---------------|
-| **1. Governance**    | • All 5 Stage 7 founder decisions in §20 signed off.                          | PENDING       |
-|                      | • 5 Schema amendments verified in migration drafts.                           | PENDING       |
-|                      | • Master Roadmap v1.1 approved by founder.                                    | PENDING       |
+| **1. Governance**    | • All 5 Stage 7 founder decisions in §20 signed off.                          | APPROVED      |
+|                      | • 5 Schema amendments verified in migration drafts.                           | APPROVED      |
+|                      | • Master Roadmap v1.1 approved by founder.                                    | APPROVED      |
 |----------------------+-------------------------------------------------------------------------------+---------------|
 | **2. Local Tooling** | • Node.js v20+ LTS and npm v10+ installed (`node -v`, `npm -v`).              | Ready (macOS) |
 |                      | • Docker Desktop / OrbStack installed and running (`docker info`).           | Verified      |
@@ -1983,14 +1983,14 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 +----------------------------------------------------------------------------------------------------------------------+
 | Item                                                                                                   | Status      |
 |--------------------------------------------------------------------------------------------------------+-------------|
-| [ ] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | PENDING     |
-| [ ] 73 granular tasks and acceptance criteria reviewed and approved.                                   | PENDING     |
-| [ ] Pre-implementation schema amendments and M0 alignment gate approved.                               | PENDING     |
-| [ ] 5 Outstanding Founder Decisions (Note retention, destination check, logo format, etc.) approved.  | PENDING     |
-| [ ] 13-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | PENDING     |
-| [ ] Operational budget models (< ₹150/mo cloud opex) and physical standee strategy approved.           | PENDING     |
-| [ ] Stage-by-stage security release gates and Definition of Done approved.                             | PENDING     |
-| [ ] Permission granted to proceed to Stage 9 (Phase 2: Project Initialization & Foundation).           | PENDING     |
+| [x] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | APPROVED    |
+| [x] 73 granular tasks and acceptance criteria reviewed and approved.                                   | APPROVED    |
+| [x] Pre-implementation schema amendments and M0 alignment gate approved.                               | APPROVED    |
+| [x] 5 Outstanding Founder Decisions (Note retention, destination check, logo format, etc.) approved.  | APPROVED    |
+| [x] 11-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | APPROVED    |
+| [x] Operational budget models (< ₹150/mo cloud opex) and physical standee strategy approved.           | APPROVED    |
+| [x] Stage-by-stage security release gates and Definition of Done approved.                             | APPROVED    |
+| [x] Permission granted to proceed to Stage 9 (Phase 2: Project Initialization & Foundation).           | APPROVED    |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
