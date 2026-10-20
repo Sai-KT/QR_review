@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:tokens": "node --experimental-strip-types scripts/verify-design-tokens.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

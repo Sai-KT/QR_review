@@ -1,43 +1,194 @@
 @import 'tailwindcss';
 
+:root {
+  /* Surface and Background Roles */
+  --surface-base: #ffffff;
+  --surface-subtle: #f8fafc;
+  --surface-muted: #f1f5f9;
+
+  /* Brand Tokens */
+  --brand-primary: #18181b;
+  --brand-primary-fg: #ffffff;
+  --brand-secondary: #f4f4f5;
+  --brand-accent: #2563eb;
+
+  /* Border Tokens */
+  --border-subtle: #e2e8f0;
+  --border-strong: #94a3b8;
+
+  /* Typography / Text Roles */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #475569;
+  --ui-muted-icon: #94a3b8;
+
+  /* Semantic State Roles */
+  --state-success: #15803d;
+  --state-success-bg: #dcfce7;
+  --state-warning: #b45309;
+  --state-warning-bg: #fef3c7;
+  --state-danger: #dc2626;
+  --state-danger-bg: #fee2e2;
+
+  /* shadcn/ui Design System Compatibility Bindings */
+  --background: var(--surface-subtle);
+  --foreground: var(--text-primary);
+  --card: var(--surface-base);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-base);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--brand-primary);
+  --primary-foreground: var(--brand-primary-fg);
+  --secondary: var(--brand-secondary);
+  --secondary-foreground: var(--brand-primary);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--brand-secondary);
+  --accent-foreground: var(--brand-primary);
+  --destructive: var(--state-danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--border-subtle);
+  --input: var(--border-subtle);
+  --ring: var(--brand-accent);
+  --radius: 0.5rem;
+}
+
 @theme {
-  --color-brand-primary: #18181b;
-  --color-brand-primary-fg: #ffffff;
-  --color-brand-secondary: #f4f4f5;
-  --color-brand-accent: #2563eb;
-  --color-surface-base: #ffffff;
-  --color-surface-subtle: #f8fafc;
-  --color-surface-muted: #f1f5f9;
-  --color-border-subtle: #e2e8f0;
-  --color-border-strong: #94a3b8;
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #475569;
-  --color-text-muted: #475569;
-  --color-ui-muted-icon: #94a3b8;
-  --color-state-success: #15803d;
-  --color-state-success-bg: #dcfce7;
-  --color-state-warning: #b45309;
-  --color-state-warning-bg: #fef3c7;
-  --color-state-danger: #dc2626;
-  --color-state-danger-bg: #fee2e2;
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-primary-fg: var(--brand-primary-fg);
+  --color-brand-secondary: var(--brand-secondary);
+  --color-brand-accent: var(--brand-accent);
+
+  --color-surface-base: var(--surface-base);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-muted: var(--surface-muted);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-ui-muted-icon: var(--ui-muted-icon);
+
+  --color-state-success: var(--state-success);
+  --color-state-success-bg: var(--state-success-bg);
+  --color-state-warning: var(--state-warning);
+  --color-state-warning-bg: var(--state-warning-bg);
+  --color-state-danger: var(--state-danger);
+  --color-state-danger-bg: var(--state-danger-bg);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   --font-sans:
     'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display:
     'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     sans-serif;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
 }
 
-:root {
-  font-family: var(--font-sans);
-  color: #0f172a;
-  background-color: #f8fafc;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer utilities {
+  .text-display-1 {
+    font-family: var(--font-display, 'Plus Jakarta Sans', sans-serif);
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .text-heading-1 {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .text-heading-2 {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .text-heading-3 {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 1rem;
+    line-height: 1.5rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .text-body-large {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 1rem;
+    line-height: 1.5rem;
+    font-weight: 400;
+    letter-spacing: 0em;
+  }
+  .text-body-normal {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 400;
+    letter-spacing: 0em;
+  }
+  .text-body-small {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .text-footnote {
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    font-size: 0.6875rem;
+    line-height: 0.875rem;
+    font-weight: 400;
+    letter-spacing: 0.015em;
+  }
+  .touch-target-preferred {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  .touch-target-floor {
+    min-height: 24px;
+    min-width: 24px;
+  }
 }
 
 body {
-  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--surface-subtle);
+  color: var(--text-primary);
   min-height: 100vh;
-  min-height: 100dvh;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
