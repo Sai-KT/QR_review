@@ -33,7 +33,7 @@
 | **1.1** | Oct 19, 2026 | Principal QA Architect | **Final QA Audit & Hardened Baseline:**<br>1. **Authentication Architecture (§17):** Corrected `TC-SEC-01..08` to reflect deployed Supabase Gateway rules (`verify_jwt = false` public with app-level `apikey` checks; `verify_jwt = true` for owner/admin JWTs with `aal2` TOTP checks).<br>2. **Quota State Invariants (§15):** Replaced flawed `GREATEST(0, reserved_count - 1)` reliance with strictly atomic, exactly-once state transitions, duplicate release protection, and DB-level underflow constraints (`TC-QTA-10`).<br>3. **Google Destination Verification (§19):** Added `TC-DST-09` & `TC-DST-10` distinguishing approved Google hostnames from verified destinations for the specific merchant (shortlink redirect unfurling, matching Place ID, interactive test link verification).<br>4. **Requirement Traceability (§30):** Unbundled `NFR-001..008` into individual mappings; mapped `FR-CUST-008` (universal WhatsApp channel across all sentiments) and `FR-ADMIN-003` (standee fulfillment tracking pipeline: Requested $\to$ In Print $\to$ Dispatched $\to$ Delivered).<br>5. **Canonical Analytics Names (§16):** Standardized on exact canonical 8-event taxonomy (`EVENT_SURVEY_COMPLETED`, `EVENT_GENERATION_SUCCESS`, `EVENT_GOOGLE_REDIRECT_CLICK`); clarified conversion denominators.<br>6. **AI Grounding Fidelity (§14):** Tested with affirmed facts and explicitly forbidden claims without hardcoded sentences; strictly preserved truthful critical feedback without laundering.<br>7. **Accessibility Criteria (§20):** Corrected units to CSS px; distinguished WCAG 2.2 Level AA requirements from preferred 44×44 CSS px touch target design standards.<br>8. **Physical Print & Mobile Realities (§21, §23):** Disclaimed return from Maps as review publication; clarified vector PDF resolution independence with $\ge 300$ DPI embedded raster logos; clarified Google Cloud budget alert realities vs application-level rate limits.<br>9. **Deno Edge Mock Boundary (§7):** Specified local HTTP mock server for server-side Deno Edge Functions via `GEMINI_API_ENDPOINT`.<br>10. **Updated Inventory:** 196 unique traceable test cases, all explicitly labeled `NOT EXECUTED`. | **Under Review** |
 
 > [!IMPORTANT]
-> **Specification-Only Deliverable Notice:**  
+> **Specification-Only Deliverable Notice:**
 > This document represents a **specification-only testing and quality assurance architecture**. In strict compliance with Phase 1 governance, no test execution, test automation scripts, live API calls, dependencies installation, or database queries have been performed. All test cases are explicitly documented with status `NOT EXECUTED`.
 
 ---
@@ -356,12 +356,14 @@ The testing suite relies on a standardized, deterministic fixture catalog with r
 | `TC-OWN-10` | `SCR-OWN-05` (Preview| Owner tests destination preview link   | Click "Test Link" preview button in UI           | E2E /          | `NOT EXECUTED`  |
 |             |                      |                                        | Assert: Opens target URL with `rel="noopener"`.  | Automated      |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-OWN-11` | `SCR-OWN-06` (Standee| Standee Visual Preview rendering       | View Standee Studio                              | Visual / A11y  | `NOT EXECUTED`  |
-|             | Preview)             |                                        | Assert: Canvas renders business name, logo, QR.  | Manual         |                 |
+| `TC-OWN-11` | `SCR-OWN-06` (Digital | Digital QR Preview & Link Copy         | View Digital QR Screen; click Copy Link          | Visual / A11y  | `NOT EXECUTED`  |
+|             | QR Preview)          |                                        | Assert: Canvas renders business name, logo, QR.  | Automated      |                 |
+|             |                      |                                        | Copies `https://domain/q/:public_qr_id` to clip. |                |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-OWN-12` | `SCR-OWN-07` (Export)| Standee PDF Export download            | Click Download PDF (A6 format)                   | Functional /   | `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Generates vector PDF; embedded raster    | Automated      |                 |
-|             |                      |                                        | logo is $\ge 300$ DPI at physical print size.    |                |                 |
+| `TC-OWN-12` | `SCR-OWN-06` (PNG     | High-Resolution PNG QR Export Download | Click "Download QR (PNG)" button                 | Functional /   | `NOT EXECUTED`  |
+|             | Export)              |                                        | Assert: Downloads valid PNG (1024x1024 target);  | Automated      |                 |
+|             |                      |                                        | decodes to `https://domain/q/:public_qr_id`.     |                |                 |
+|             |                      |                                        | *(Note: PDF export SCR-OWN-07 deferred Post-MVP)*|                |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
 | `TC-OWN-13` | `SCR-OWN-08` (Feed)  | Owner views Customer Feedback Feed     | GET `survey_responses` via PostgREST             | Integration /  | `NOT EXECUTED`  |
 |             |                      |                                        | Assert: Returns validated affirmed facts; purged | Automated      |                 |
@@ -760,7 +762,7 @@ To ensure review drafts remain factually grounded, reproducible test fixtures co
 ## 19. Google Destination Security Suite (`TC-DST`)
 
 > [!IMPORTANT]
-> **Domain vs. Business Verification Law:**  
+> **Domain vs. Business Verification Law:**
 > A valid Google hostname alone does **not** prove the link directs to the intended merchant's business or review composer. The suite tests both domain safety and merchant destination authenticity.
 
 ```
@@ -925,31 +927,35 @@ All measurements represent **engineering targets** to be validated during pilot 
 
 ---
 
-## 23. QR Standee Physical Print & Scanning Suite (`TC-PRT`)
+## 23. QR Distribution & Physical Print Testing (`TC-PRT`)
+
+> **Digital-Only MVP Scope Note (Founder Decision M0-05):**
+> Physical acrylic standees, A6/4x6" cardstock print tests, digital caliper measurements, and acrylic glare tests are **DEFERRED TO POST-MVP** and do not block MVP release. The active MVP acceptance requirement is digital QR PNG generation, quiet-zone verification, and optical scan readability (`TC-PRT-05`). Physical tests (`TC-PRT-01..04`, `TC-PRT-06`) remain defined below for post-MVP traceability.
 
 ```
 +---------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                       PHYSICAL STANDEE PRINT TEST SUITE                                                                       |
+|                                                       PHYSICAL STANDEE PRINT TEST SUITE (DEFERRED POST-MVP EXCEPT TC-PRT-05)                                  |
 +---------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Test ID     | Target Attribute     | Physical Environmental Condition       | Inspection Steps & Acceptance Criteria           | Level / Type   | Execution Status|
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-PRT-01` | Print Dimensions     | A6 Acrylic Standee (105 × 148 mm)      | Measure printed output with digital caliper      | Physical Print/| `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Conforms to 105x148mm with 3mm bleed.    | Manual         |                 |
+| `TC-PRT-01` | Print Dimensions     | (DEFERRED — POST-MVP) A6 Standee       | Measure printed output with digital caliper      | Physical Print/| `NOT EXECUTED`  |
+|             |                      | (105 × 148 mm acrylic unit)            | Assert: Conforms to 105x148mm with 3mm bleed.    | Manual         | (Deferred)      |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-PRT-02` | Scan Distance        | Well-lit cafe counter (300–500 lux)    | Point phone camera at standee from 30 cm away    | Physical /     | `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Native camera recognizes QR in < 1.0s.   | Manual         |                 |
+| `TC-PRT-02` | Scan Distance        | (DEFERRED — POST-MVP) Cafe counter     | Point phone camera at standee from 30 cm away    | Physical /     | `NOT EXECUTED`  |
+|             |                      | Well-lit cafe counter (300–500 lux)    | Assert: Native camera recognizes QR in < 1.0s.   | Manual         | (Deferred)      |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-PRT-03` | Low-Light Ambience   | Dim evening salon lighting (50–100 lux)| Point budget phone camera from 25 cm away        | Physical /     | `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Camera sensor locks and decodes QR token.| Manual         |                 |
+| `TC-PRT-03` | Low-Light Ambience   | (DEFERRED — POST-MVP) Salon lighting   | Point budget phone camera from 25 cm away        | Physical /     | `NOT EXECUTED`  |
+|             |                      | Dim evening salon lighting (50–100 lux)| Assert: Camera sensor locks and decodes QR token.| Manual         | (Deferred)      |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-PRT-04` | Acrylic Glare        | Direct overhead spotlight reflection   | Scan standee at 45-degree angle to avoid glare   | Physical /     | `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Quiet zone contrast maintains readability| Manual         |                 |
+| `TC-PRT-04` | Acrylic Glare        | (DEFERRED — POST-MVP) Spotlight glare  | Scan standee at 45-degree angle to avoid glare   | Physical /     | `NOT EXECUTED`  |
+|             |                      | Direct overhead spotlight reflection   | Assert: Quiet zone contrast maintains readability| Manual         | (Deferred)      |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-PRT-05` | Permanent URL Token  | Decode printed QR binary matrix        | Scan with QR diagnostic reader                   | Diagnostic /   | `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Yields `https://domain.com/q/k9x2m4p7qz`.| Manual         |                 |
+| `TC-PRT-05` | Digital QR Decoding  | Decode exported QR PNG & screen preview| Scan with standard QR diagnostic reader on mobile| Diagnostic /   | `NOT EXECUTED`  |
+|             | & Optical Readability| (Android Chrome & iOS Safari screens)  | Assert: Yields `https://domain.com/q/:public_qr_id`| Automated /  |                 |
+|             |                      |                                        | and verifies mandatory 4-module quiet zone.      | Manual         |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-PRT-06` | Brand Logo Legibility| Custom merchant logo on standee        | Inspect embedded raster logo at physical print sz| Visual /       | `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Resolution $\ge 300$ DPI; unpixelated.   | Manual         |                 |
+| `TC-PRT-06` | Brand Logo Legibility| (DEFERRED — POST-MVP) Physical print   | Inspect embedded raster logo at physical print sz| Visual /       | `NOT EXECUTED`  |
+|             |                      | Custom merchant logo on standee        | Assert: Resolution $\ge 300$ DPI; unpixelated.   | Manual         | (Deferred)      |
 +---------------------------------------------------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -990,7 +996,7 @@ Testing against the three founder options under India's Digital Personal Data Pr
 ## 25. Backup & Disaster Recovery Testing (`TC-BKP`)
 
 > [!CAUTION]
-> **Supabase Free-Tier Backup Reality:**  
+> **Supabase Free-Tier Backup Reality:**
 > Supabase Free projects include **zero automated daily backups**. A scheduled logical export (`pg_dump`) via GitHub Actions is not verified until proven by an isolated restore drill.
 
 ```
@@ -1161,7 +1167,7 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 | `FR-OWNER-001`  | Secure Merchant Authentication & Sessions   | `TC-OWN-01`, `TC-OWN-02`, `TC-OWN-17`| TEST MAPPED  |
 | `FR-OWNER-002`  | Business Profile & Standee Vanity Slug      | `TC-OWN-05`, `TC-OWN-06`, `TC-OWN-07`| TEST MAPPED  |
 | `FR-OWNER-003`  | Google Review Destination Configuration     | `TC-OWN-08`, `TC-OWN-09`, `TC-OWN-10`| TEST MAPPED  |
-| `FR-OWNER-004`  | QR Standee Studio & Vector PDF Download     | `TC-OWN-11`, `TC-OWN-12`, `TC-PRT-01`| TEST MAPPED  |
+| `FR-OWNER-004`  | Digital QR Preview & PNG Export (PDF Deferred) | `TC-OWN-11`, `TC-OWN-12`, `TC-PRT-05`| TEST MAPPED  |
 | `FR-OWNER-005`  | Funnel Analytics & Conversion Overview      | `TC-OWN-04`, `TC-OWN-14`, `TC-ANA-07`| TEST MAPPED  |
 | `FR-OWNER-006`  | Aggregated Feedback Insights & Notes Feed   | `TC-OWN-13`, `TC-API-19`, `TC-PRV-02`| TEST MAPPED  |
 | `FR-OWNER-007`  | Plan & Fair-Use Monthly Quota Monitoring    | `TC-OWN-15`, `TC-OWN-16`, `TC-API-20`| TEST MAPPED  |
@@ -1194,7 +1200,7 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
-*Traceability Audit Summary: **0 Uncovered Requirements** (100% of functional, non-functional, security, and API requirements mapped to traceable tests).*  
+*Traceability Audit Summary: **0 Uncovered Requirements** (100% of functional, non-functional, security, and API requirements mapped to traceable tests).*
 *Status Definition: `TEST MAPPED` confirms that an actionable, traceable test case exists in this specification. All mapped tests have execution status `NOT EXECUTED`.*
 
 ---
@@ -1238,23 +1244,18 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 
 ---
 
-## 32. Outstanding Founder Decisions (Stage 7 Sign-Off)
+## 32. Founder Decisions Register & Outstanding Gates
 
-The following 5 strategic decisions require formal founder sign-off before Stage 8 implementation:
-
-1. **Customer Note Retention Policy:**
-   - [ ] **Option B (30 Days — Recommended):** Store notes pseudonymously; daily purge clears notes older than 30 days to minimize data liability under DPDPA.
-   - [ ] **Option C (90 Days — PRD Baseline):** Retain notes for 90 days before automated purge.
-   - [ ] **Option A (Purely Ephemeral):** Never save customer notes in the database; process transiently in memory via HMAC token for AI drafting only.
-2. **Review Destination Verification Protocol:**
-   - [ ] Approve strict server-side hostname whitelisting (`search.google.com`, `maps.google.com`, `www.google.com/maps`, `g.page/r/`, `maps.app.goo.gl`) and format validation via `API-OWN-03`.
-3. **Logo Upload Security Boundary:**
-   - [ ] Confirm SVG uploads remain **strictly disabled** for MVP, permitting PNG, JPEG, and WebP with structural validation via `API-OWN-07`.
-4. **Provisional Gemini Model Selection:**
-   - [ ] Approve `gemini-3.5-flash-lite` as the provisional preferred model with zero thinking budget for sub-2.5s generation, decoupled via `GEMINI_MODEL`.
-5. **Standee Format Selection:**
-   - [ ] Standard International A6 (105 x 148 mm) with 3mm bleed (Provisional Recommended).
-   - [ ] Standard Photo 4 x 6 inch (102 x 152 mm) with 3mm bleed.
+1. **Customer Note Retention Policy (Decision M0-01):**
+   - [x] **FOUNDER APPROVED (Option B — 30 Days):** Store notes pseudonymously in `survey_responses.optional_note`; automated daily purge clears notes older than 30 days. No final customer review text stored.
+2. **Review Destination Verification Protocol (Decision M0-02):**
+   - [x] **FOUNDER APPROVED:** Strict server-side verification + interactive merchant preview link (`API-OWN-03`). Place ID validated where reliably determinable (not restricted to `ChIJ`).
+3. **Logo Upload Security Boundary (Decision M0-03):**
+   - [x] **FOUNDER APPROVED:** SVG uploads strictly disabled for MVP; PNG, JPEG, WebP only (2 MB max) with server-side magic-bytes inspection (`API-OWN-07`). Platform QR export is PNG.
+4. **Gemini AI Model Configuration (Decision M0-04):**
+   - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; timeout 8000ms initial target; single draft strictly < 60 words.
+5. **QR Distribution Scope (Decision M0-05):**
+   - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees, A6/4x6" artwork, and print-ready PDFs are DEFERRED TO POST-MVP. Client-side QR PNG export adopted.
 
 ---
 
@@ -1273,5 +1274,5 @@ The following 5 strategic decisions require formal founder sign-off before Stage
 
 ---
 
-*End of Master Quality Assurance & Test Specification.*  
+*End of Master Quality Assurance & Test Specification.*
 *Ready for Phase 1 — Stage 8 (Implementation Planning & Staging Readiness) upon formal founder sign-off.*

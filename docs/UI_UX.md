@@ -42,7 +42,7 @@ The following table documents the resolution of technical discrepancies across p
 | **Journey Speed Claims** | 30-second target | Unverified performance target | "Under 30s Guaranteed" | **Reframed as Design Target.** Removed absolute speed guarantees from user-facing copy. |
 
 > [!IMPORTANT]
-> **Implementation Isolation Notice:**  
+> **Implementation Isolation Notice:**
 > This document represents a **specification-only deliverable**. In accordance with Phase 1 protocols, no application code, React components, CSS stylesheets, or visual assets have been created or installed. All components and layouts are specified for implementation in Phase 1 — Stage 7/8.
 
 ---
@@ -68,15 +68,15 @@ Our SaaS bridges a physical customer interaction at a checkout counter with digi
 
 ### 2.1 Core Design Principles
 
-1. **Frictionless Immediacy (Design Target: ~30 Seconds):**  
+1. **Frictionless Immediacy (Design Target: ~30 Seconds):**
    The customer journey requires **zero user registration**, **zero app downloads**, and minimal reading. The customer should be able to scan the counter standee, answer 3 category-specific questions with single taps, inspect an authentic AI-crafted draft, copy it, and transition to Google Maps rapidly.
-2. **Uncompromising Ethical Compliance (Anti-Gating by Design):**  
+2. **Uncompromising Ethical Compliance (Anti-Gating by Design):**
    We strictly comply with Google Maps Review Policies and FTC 16 CFR Part 465. The interface **never** filters or gates negative feedback. Direct Google review access is permanently visible. Positive, neutral, and negative selections generate authentically grounded drafts with equal access to the copy and handoff actions. We never preselect star ratings.
-3. **Subtle, Trustworthy SaaS Aesthetics:**  
+3. **Subtle, Trustworthy SaaS Aesthetics:**
    Avoiding generic "AI template" aesthetics, loud saturated gradients, and gratuitous animations. We utilize a crisp, modern typography system (Inter / Plus Jakarta Sans), a refined neutral surface scale with warm zinc undertones, crisp 1px borders, and deliberate micro-interactions that communicate state without delaying the user.
-4. **Mobile Browser Realism & Defensive UX:**  
+4. **Mobile Browser Realism & Defensive UX:**
    Mobile web browsers (iOS Safari, Android Chrome) aggressively restrict synthetic redirects and programmatic clipboard writes without direct user gestures. Our UI treats clipboard operations and external handoffs defensively: providing explicit, independent user-triggered actions with graceful manual copy fallbacks.
-5. **Clarity Over Complexity in Analytics:**  
+5. **Clarity Over Complexity in Analytics:**
    The merchant portal prioritizes clear operational numbers over complex multi-dimensional charts. Metrics are accurately labeled (e.g., *"Google Handoff Clicks"* rather than misleading claims like *"Published Reviews"*).
 
 ---
@@ -118,7 +118,7 @@ All color tokens have been rigorously evaluated against standard white (`#FFFFFF
 ```
 
 > [!TIP]
-> **Accessible Token Rationale:**  
+> **Accessible Token Rationale:**
 > In UI_UX v1.0, tokens such as `#94A3B8` (Slate-400, 2.58:1), `#D97706` (Amber-600, 3.39:1), and `#16A34A` (Emerald-600, 3.91:1) failed WCAG 2.2 AA normal text contrast (4.5:1). Revision 1.1 replaces normal text roles with `#475569` (Slate-600), `#B45309` (Amber-700), and `#15803D` (Emerald-700), preserving readability in outdoor glare.
 
 ### 3.2 Typography Scale
@@ -229,9 +229,9 @@ The customer flow operates within a single responsive view (`/q/:qrId`) driven b
 
 ```mermaid
 stateDiagram-v2
-    [*] --> StandeeScan: Customer scans physical acrylic standee
-    StandeeScan --> LookupGateway: Browser requests /q/:qrId
-    
+    [*] --> QRScanOrLink: Customer scans digital QR code or opens link
+    QRScanOrLink --> LookupGateway: Browser requests /q/:qrId
+
     state LookupGateway {
         [*] --> CheckStatus
         CheckStatus --> ActiveConfig: 200 OK (Cache 60s)
@@ -243,13 +243,13 @@ stateDiagram-v2
     ActiveConfig --> WelcomeScreen: Render Business Name, Logo & Direct Google Link
     WelcomeScreen --> DirectGoogleHandoff: Customer taps "Review Directly on Google"
     WelcomeScreen --> SurveyQuestion1: Customer taps "Start Quick Review"
-    
+
     SurveyQuestion1 --> SurveyQuestion2: Select Option & tap Next (or optional auto-advance)
     SurveyQuestion2 --> SurveyQuestion3: Select Option & tap Next
     SurveyQuestion3 --> OptionalNoteScreen: Select Option & tap Next
-    
+
     OptionalNoteScreen --> GenerateReview: Taps "Draft Review with AI"
-    
+
     state GenerateReview {
         [*] --> AtomicReservation: Edge Function locks quota row
         AtomicReservation --> GeminiCall: Prompt with grounded XML envelope
@@ -261,16 +261,16 @@ stateDiagram-v2
     EditableDraftScreen --> EditableDraftScreen: Customer refines or edits text
     EditableDraftScreen --> CopyConfirmation: Customer taps "Copy Review"
     CopyConfirmation --> GoogleMapsHandoff: Customer taps "Open Google Reviews"
-    
+
     GenerationFailure --> FallbackScreen: Show error + Direct Google Link + Retry
     DirectGoogleHandoff --> GoogleMapsExternal: Opens Google Maps review form
     GoogleMapsHandoff --> GoogleMapsExternal: Opens Google Maps (User pastes & rates)
 ```
 
 > [!IMPORTANT]
-> **Journey Reliability & Offline Realism:**  
+> **Journey Reliability & Offline Realism:**
 > - **Navigation Agency:** All survey questions feature explicit `← Back` and `Next →` controls. Automatic 200ms progression on option selection is an optional experiment and must never prevent customers from reviewing or altering selections.
-> - **First-Time Connectivity:** A first-time customer scanning an acrylic standee requires cellular or Wi-Fi connectivity to resolve `/q/:qrId`. The offline recovery state (`SCR-CUST-15`) specifically addresses in-flight cellular dropouts after initial page load.
+> - **First-Time Connectivity:** A first-time customer scanning a digital QR code or opening the link requires cellular or Wi-Fi connectivity to resolve `/q/:qrId`. The offline recovery state (`SCR-CUST-15`) specifically addresses in-flight cellular dropouts after initial page load.
 
 ---
 
@@ -478,7 +478,7 @@ The 15 customer screen states are specified below in a rigorous, implementation-
 #### `SCR-CUST-14`: Direct-Only Mode (Lapsed Subscription)
 - **Route:** `/q/:qrId` (Direct-Only Flag)
 - **User Role:** Public Anonymous Patron
-- **Primary Purpose:** Provide direct Google review routing when a merchant subscription has lapsed but the acrylic standee remains physically present on the counter.
+- **Primary Purpose:** Provide direct Google review routing when a merchant subscription has lapsed but digital QR codes or links remain actively distributed.
 - **Key Components:** `BrandHeader` (`CMP-01`), Direct Destination Card, `GoogleHandoffButton` (`CMP-07`).
 - **Required Data:** `business.name`, `business.logo_url`, `business.google_review_url`.
 - **Primary Actions:** Tap `Open Google Maps to Review →`.
@@ -515,7 +515,7 @@ The Business Owner Portal (`/dashboard`) is designed for non-technical retail pr
 
 ### 8.1 Key UX Requirements
 - **Fast Daily Inspection:** Overview screen loads immediately with 5 core conversion metrics.
-- **Effortless Standee Generation:** 1-click preview and PDF download of the physical counter standee.
+- **Digital QR Management & Sharing:** Instant preview, copyable first-party link, and high-resolution PNG QR download (physical standees deferred to Post-MVP).
 - **Direct Feedback Reading:** Chronological feed of customer survey responses and optional notes.
 - **Safe Review Link Configuration:** Secure destination update gateway with real-time URL syntax validation.
 
@@ -534,8 +534,8 @@ The Business Owner Portal (`/dashboard`) is designed for non-technical retail pr
 | `SCR-OWN-03`  | Dashboard Overview             | Metric summary cards, 30-day funnel, recent notes |
 | `SCR-OWN-04`  | Business Profile & Logo        | Business name, WhatsApp phone, logo upload (PNG)  |
 | `SCR-OWN-05`  | Google Review Destination      | Verified URL configuration with preview link      |
-| `SCR-OWN-06`  | QR Standee Preview             | Interactive visual rendering of physical standee  |
-| `SCR-OWN-07`  | Print-Ready Standee Download   | PDF export options (A6, 4x6", CMYK/RGB print)     |
+| `SCR-OWN-06`  | Digital QR & Sharing           | Permanent QR preview, high-res PNG download, link copy  |
+| `SCR-OWN-07`  | Print-Ready Standee Download   | (DEFERRED — POST-MVP) PDF export (A6, 4x6", print bleed)|
 | `SCR-OWN-08`  | Customer Feedback Feed         | Chronological list of answers & notes (purge tag) |
 | `SCR-OWN-09`  | Conversion & Usage Analytics   | Funnel drop-off visualization & quota burn rate   |
 | `SCR-OWN-10`  | Subscription & Plan Status     | Pilot tier indicator, quota meter (150/month)     |
@@ -586,36 +586,30 @@ The Business Owner Portal (`/dashboard`) is designed for non-technical retail pr
 - **Live Test Action:** `Test Review Link` opens the entered URL in a new window so the owner verifies their Google Maps listing opens directly before saving.
 - **Traceability:** `FR-OWNER-003`, `TC-02`, `GC-01`.
 
-#### `SCR-OWN-06`: QR Standee Interactive Preview
+#### `SCR-OWN-06`: Digital QR & Sharing
 - **Route:** `/dashboard/qr`
 - **User Role:** Authenticated Merchant (`merchant`)
-- **Primary Purpose:** Visually preview the printable acrylic counter standee with uploaded logo, customized store name, and live QR code.
-- **Key Components:** `StandeePreviewCanvas` (`CMP-14`), Dimension Toggle (A6 vs 4x6"), CTA: `Download Standee PDF` (`CMP-15`).
-- **Required Data:** `business.name`, `business.logo_url`, `business.public_qr_id`, `business.slug`.
-- **Primary Actions:** Tap `Download Print-Ready PDF` (opens `SCR-OWN-07`).
-- **Secondary Actions:** Toggle preview format between A6 and 4x6"; copy permanent QR URL (`/q/:qrId`).
-- **Loading Behavior:** Canvas renders QR matrix client-side using native vector library.
+- **Primary Purpose:** Visually preview the merchant's permanent QR code, copy the first-party HTTPS customer review URL, and download a high-resolution PNG image for digital sharing or independent printing.
+- **Key Components:** `DigitalQRPreviewCard` (`CMP-14`), QR matrix display (with 4-module quiet zone), `CopyLinkButton`, `DownloadPngButton`.
+- **Required Data:** `business.name`, `business.logo_url`, `business.public_qr_id`, `business.vanity_slug`.
+- **Primary Actions:**
+  - Tap `Download QR (PNG)`: downloads high-resolution PNG QR asset (1024×1024 initial target).
+  - Tap `Copy Review Link`: copies `https://[app-domain]/q/:public_qr_id` to clipboard with success toast.
+- **Secondary Actions:** Open link in new tab to inspect customer survey experience.
+- **Loading Behavior:** Client-side generation of QR code with skeleton shimmer.
 - **Empty State:** Default brand monogram rendered if logo not uploaded.
-- **Error State:** Canvas generation alert if browser canvas fails.
+- **Error State:** Accessible error notice if canvas generation or download fails.
 - **Authorization Dependency:** Merchant session (`owner_id = auth.uid()`).
-- **Mobile/Responsive Behavior:** Responsive preview card scaling down to fit mobile viewports.
-- **Acceptance Criteria:** Encoded QR matches `https://[domain]/q/:qrId`; displays mandatory 4-module quiet zone.
+- **Mobile/Responsive Behavior:** Responsive preview card scaling down cleanly to 320px viewports.
+- **Acceptance Criteria:** Encoded QR matches `https://[domain]/q/:public_qr_id`; includes adequate quiet zone; downloadable PNG is valid and decodes to correct destination URL; scan-readable on Android and iPhone; tenant-isolated.
 - **Traceability:** `FR-OWNER-004`, `CMP-14`.
 
-#### `SCR-OWN-07`: Print-Ready Standee Download Modal
-- **Route:** Modal / action within `/dashboard/qr`
+#### `SCR-OWN-07`: Print-Ready Standee Download Modal (DEFERRED — POST-MVP)
+- **Status:** **DEFERRED — POST-MVP** (Founder Decision M0-05). Physical counter standees, A6 and 4x6" artwork, print bleeds, and vector PDF exports are deferred from the initial MVP. Retained in specification inventory for traceability without renumbering other screens.
+- **Route:** (Deferred) Modal / action within `/dashboard/qr`
 - **User Role:** Authenticated Merchant (`merchant`)
 - **Primary Purpose:** Export high-resolution vector PDF configured with print bleeds and CMYK/sRGB settings for print shops.
-- **Key Components:** `PdfExportControls` (`CMP-15`), Format Radio Group (A6 vs 4x6"), Bleed Toggle (+3mm bleed), Download Trigger.
-- **Required Data:** Vector SVG layout, logo URL, standee text.
-- **Primary Actions:** Tap `Generate & Download PDF`.
-- **Secondary Actions:** Download raw PNG QR code (for custom acrylic engraving/etching).
-- **Loading Behavior:** Shows progress spinner during client-side PDF compilation.
-- **Empty State:** N/A.
-- **Error State:** Toast notification if PDF generation fails.
-- **Authorization Dependency:** Merchant session.
-- **Mobile/Responsive Behavior:** Modal dialog accessible on mobile and desktop.
-- **Acceptance Criteria:** Vector text and QR; raster logo minimum 300 DPI at physical scale.
+- **Key Components:** `PdfExportControls` (`CMP-15`, deferred).
 - **Traceability:** `FR-OWNER-004`, `CMP-15`.
 
 #### `SCR-OWN-08`: Customer Feedback & Notes Browser
@@ -885,8 +879,8 @@ All 22 components are specified for implementation with React, TypeScript, and T
 | `CMP-11`     | `MetricSummaryCard`     | Dashboard metric tile with trend indicator & tooltip      |
 | `CMP-12`     | `QuotaMeterBar`         | Progress bar tracking monthly generation consumption      |
 | `CMP-13`     | `FeedbackCardItem`      | Chronological customer answer feed card with purge badge  |
-| `CMP-14`     | `StandeePreviewCanvas`  | Client-rendered visual canvas of physical print standee   |
-| `CMP-15`     | `PdfExportControls`     | Paper size selector and PDF download trigger              |
+| `CMP-14`     | `DigitalQRPreviewCard`  | Client-rendered digital QR preview, PNG download & link copy |
+| `CMP-15`     | `PdfExportControls`     | (DEFERRED — POST-MVP) Standee PDF vector export controls  |
 | `CMP-16`     | `DestinationUrlInput`   | Form input with real-time Google Maps regex validator     |
 | `CMP-17`     | `LogoUploadDropzone`    | File picker with client-side magic byte & size validation |
 | `CMP-18`     | `AdminBusinessTable`    | Paginated, filterable tenant directory with status badges |
@@ -926,18 +920,18 @@ The user interfaces adapt across six standardized viewport tiers:
 
 ## 15. Accessibility Architecture (WCAG 2.2 AA Target)
 
-1. **Color Contrast Compliance:**  
+1. **Color Contrast Compliance:**
    - All body text and headings achieve a minimum contrast ratio of **4.5:1** against their background (text `#0F172A` on `#FFFFFF` achieves **15.4:1**, exceeding WCAG AAA).
    - Interactive borders and icons achieve at least **3.0:1** against adjacent surfaces.
-2. **Focus Visibility:**  
+2. **Focus Visibility:**
    - All interactive controls feature a prominent 2px focus ring with 2px offset (`ring-2 ring-blue-600 ring-offset-2`).
-3. **Screen Reader Architecture:**  
+3. **Screen Reader Architecture:**
    - The AI generation waiting state utilizes an `aria-live="polite"` container so vision-impaired users receive audible progress updates without disruptive alert spamming.
    - All icon-only buttons include explicit `aria-label` attributes (e.g., `aria-label="Copy review text"`).
-4. **Touch Ergonomics:**  
+4. **Touch Ergonomics:**
    - Preferred physical touch target of **48 x 48 px** for all tap actions on mobile screens; strict floor of **24 x 24 px** under WCAG 2.2 SC 2.5.8.
    - Generous vertical separation (minimum 12px) between MCQ option cards to prevent accidental taps.
-5. **Reduced Motion Support:**  
+5. **Reduced Motion Support:**
    - All transitions respect `@media (prefers-reduced-motion: reduce)`. Pulsing spinners and progress bars transition instantly without CSS animations.
 
 ---
@@ -1188,7 +1182,7 @@ The following three examples demonstrate the AI prompt grounding pipeline across
 | **FR-OWNER-001**| Email/password merchant authentication | `SCR-OWN-01`, `SCR-OWN-02` | Supabase Auth password & reset endpoints |
 | **FR-OWNER-002**| Profile management and logo upload | `SCR-OWN-04`, `CMP-17` | Storage bucket upload + magic byte validation |
 | **FR-OWNER-003**| Google review destination link configuration | `SCR-OWN-05`, `CMP-16` | `POST /functions/v1/update-destination` gateway |
-| **FR-OWNER-004**| Print-ready PDF standee download | `SCR-OWN-06`, `SCR-OWN-07`, `CMP-15` | Client-side vector PDF generation library |
+| **FR-OWNER-004**| Digital QR preview & PNG export | `SCR-OWN-06`, `CMP-14` (`SCR-OWN-07`/`CMP-15` deferred) | Client-side QR generation & PNG export    |
 | **FR-OWNER-005**| Overview metrics dashboard & conversion funnel | `SCR-OWN-03`, `SCR-OWN-09`, `CMP-11` | Aggregated analytics RPC with denominators |
 | **FR-OWNER-006**| Customer feedback stream & notes browser | `SCR-OWN-08`, `CMP-13` | Filterable `survey_responses` query |
 | **FR-ADMIN-001**| Super-admin login with mandatory TOTP MFA | `SCR-ADM-01`, `CMP-20` | Supabase Auth MFA challenge + `aal2` verification |
@@ -1238,21 +1232,20 @@ Before launching the commercial pilot, the founder will conduct voluntary on-sit
 
 ---
 
-## 23. Outstanding Founder Design Decisions (Stage 5 Sign-Off)
+## 23. Founder Design Decisions Register & Outstanding Gates
 
-The following 4 design decisions are submitted for formal founder sign-off:
-
-1. **Customer Note Retention Disclosure:**
-   - [ ] **Option B (30 Days — Recommended):** Render notice stating notes are purged after 30 days to align with DPDPA minimization.
-   - [ ] **Option B (90 Days — PRD Baseline):** Render notice stating notes are retained for 90 days.
-   - [ ] **Option A (Ephemeral):** Never store notes in database; omit retention notice.
-2. **Physical Standee Standard Size:**
-   - [ ] Standard A6 (105 x 148 mm) vertical acrylic stands (Provisional Recommended).
-   - [ ] Standard 4 x 6 inch (102 x 152 mm) photo-size acrylic stands.
-3. **SVG Logo Upload Policy:**
-   - [ ] Confirm SVG uploads remain **strictly disabled** for MVP (PNG, JPEG, WebP only) to eliminate XML-based XSS attack vectors.
-4. **WhatsApp Support Placement:**
-   - [ ] Retain direct WhatsApp manager link as a subtle, neutral footer link on customer survey screens.
+1. **Customer Note Retention Disclosure (Decision M0-01):**
+   - [x] **FOUNDER APPROVED (Option B — 30 Days):** Render notice stating notes are purged after 30 days. Canonical field: `survey_responses.optional_note`.
+2. **Google Destination Verification (Decision M0-02):**
+   - [x] **FOUNDER APPROVED:** In-app interactive test link allows merchant to inspect Google destination before confirmation. Place ID verified without forcing `ChIJ` prefix. Anti-gating strictly maintained.
+3. **SVG Logo Upload Policy (Decision M0-03):**
+   - [x] **FOUNDER APPROVED:** SVG uploads remain strictly disabled for MVP (PNG, JPEG, WebP only, 2 MB max, server-side magic-bytes inspection).
+4. **Gemini AI Configuration (Decision M0-04):**
+   - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; single draft strictly < 60 words.
+5. **QR Distribution Scope (Decision M0-05):**
+   - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable first-party link). Physical standees, A6/4x6" artwork, and print-ready PDFs are DEFERRED TO POST-MVP. Active MVP screens: 32 active states/screens, 1 deferred (`SCR-OWN-07`).
+6. **WhatsApp Support Placement:**
+   - [x] Retain direct WhatsApp manager link as a subtle, neutral footer link on customer survey screens.
 
 ---
 
@@ -1269,5 +1262,5 @@ The following 4 design decisions are submitted for formal founder sign-off:
 
 ---
 
-*End of UI/UX Design Specification.*  
+*End of UI/UX Design Specification.*
 *Ready for Phase 1 — Stage 6 (API & Integration Specification) upon formal founder sign-off.*

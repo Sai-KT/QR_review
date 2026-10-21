@@ -29,16 +29,16 @@
 | **1.1** | Oct 17, 2026 | Principal Security Auditor | **Stage 4 Security & Consistency Audit Applied:**<br/>1. **Markdown Formatting Repair:** Cleaned syntax, standardizing headers, unescaped tables, and code blocks for GitHub previews.<br/>2. **Numbered Security Control Register:** Built complete 32-control numbered register (AC-01..05, TC-01..06, GC-01..04, AIC-01..05, QC-01..04, PC-01..04, OSC-01..04) with threat mappings, enforcement layers, and test IDs.<br/>3. **Merchant URL Update Bypass Closed:** Revoked direct owner update on `google_review_url`; routed destination changes via authenticated serverless Edge Function with URL parser and hostname whitelisting.<br/>4. **Admin Update Execution Context Resolved:** Formally specified dedicated administrative procedure validating caller identity and `aal2` TOTP MFA, ensuring `public_qr_id` remains immutable.<br/>5. **Removal of Absolute Security Claims:** Replaced unsupported claims (e.g., "air-gapped", "bulletproof", "guaranteed zero hallucinations") with precise risk-reduction and defense-in-depth terminology.<br/>6. **AI Pipeline Security Hardened:** Enhanced structured XML envelope with developer role separation, Zod input/output validation, and non-caching provider terms.<br/>7. **CSP & Frontend Origins Corrected:** Removed unnecessary direct Gemini domain from frontend CSP `connect-src`; specified magic-byte image validation for logo uploads.<br/>8. **Safe Dynamic QR Caching:** Formulated no-store caching for suspended merchants and 60-second TTL for healthy public survey configurations.<br/>9. **DPDPA 2023 Realism & Disclosures:** Documented privacy notice requirements and pseudonymous personal data handling; flagged 30-day note retention for founder approval.<br/>10. **Backup & Recovery Accuracy:** Corrected Supabase Free (zero automated daily backups; daily GitHub Actions pg_dump target RPO 24h, RTO 2h) vs Pro (7 days daily).<br/>11. **Expanded Security Test Matrix:** Expanded test catalog to 15 traceable scenarios mapped to STRIDE threats, all labeled `NOT EXECUTED`.<br/>12. **Database Amendments Documented:** Formally recorded the 5 required schema amendments for Stage 5 planning.<br/>13. **Google Review Policy Risk Formalized:** Documented FTC 16 CFR Part 465 and Google Maps Anti-Gating safeguards.<br/>14. **Phase Nomenclature Aligned:** Clarified Phase 1 sequential stages (Stage 5 UI/UX, Stage 6 API, Stage 7 Testing, Stage 8 Roadmap, Stage 9 AGENTS.md). | **Under Review** |
 
 > [!IMPORTANT]
-> **Security Realism & Disclaimer:**  
+> **Security Realism & Disclaimer:**
 > Security is achieved through defense-in-depth, least-privilege scoping, and continuous validation. No software system is 100% impenetrable. This specification defines commercial-grade defensive controls tailored to our solo-founder operating model. Controls documented herein represent **specifications to be implemented and tested**, not verified operational reality, until formal execution of the Security Acceptance Tests.
 
 ---
 
 ## 2. Executive Security Summary
 
-Our SaaS bridges physical retail storefronts and digital reputation platforms. Patrons scan physical acrylic standees at checkout counters, answer 3 category-specific MCQs, receive a strictly grounded AI-drafted review, and copy it to Google Maps. 
+Our SaaS bridges local SMB storefronts and digital reputation platforms. Patrons access a business's feedback flow via distributed digital QR codes or shareable links, answer 3 category-specific MCQs, receive a strictly grounded AI-drafted review, and copy it to Google Maps. (Physical acrylic standees and print-ready PDFs are deferred to Post-MVP).
 
-Because the service operates in physical environments (unattended acrylic counter standees, shared cafe Wi-Fi networks) and processes public user inputs, our security architecture is built on six foundational defensive pillars:
+Because the service operates in public retail environments (customer smartphone access, shared cafe Wi-Fi networks) and processes public user inputs, our security architecture is built on six foundational defensive pillars:
 
 ```
 +---------------------------------------------------------------------------------------------------+
@@ -178,7 +178,7 @@ We evaluated our multi-tenant SaaS architecture against the **STRIDE** methodolo
 | **TH-11**| GEMINI_API_KEY extracted via     | Client Bundle  | Low        | Extreme| **CRITICAL**| Key stored exclusively in Deno environment|
 |          | frontend decompilation / inspect.| & Repo         |            |        |          | secrets; zero VITE_* AI credentials.      |
 |----------+----------------------------------+----------------+------------+--------+----------+-------------------------------------------|
-| **TH-12**| Suspended business standee       | Edge Function  | High       | Medium | **MEDIUM**| Edge Function returns no-cache headers on |
+| **TH-12**| Suspended business QR asset      | Edge Function  | High       | Medium | **MEDIUM**| Edge Function returns no-cache headers on |
 |          | served active from edge cache.   | Gateway        |            |        |          | dynamic status; returns safe inactive UI. |
 |----------+----------------------------------+----------------+------------+--------+----------+-------------------------------------------|
 | **TH-13**| Fake analytics event injection   | track-event    | Medium     | Low    | **MEDIUM**| Event deduplication hash; analytics never |
@@ -260,7 +260,7 @@ If authenticated merchants are granted direct database `UPDATE` permissions on `
    ALTER TABLE public.businesses
    ADD CONSTRAINT businesses_google_review_url_check
    CHECK (
-       google_review_url IS NULL OR 
+       google_review_url IS NULL OR
        google_review_url ~ '^https://(search\.google\.com/local/writereview\?placeid=|g\.page/r/|maps\.app\.goo\.gl/|www\.google\.com/maps/).+'
    );
    ```
@@ -294,7 +294,7 @@ PostgreSQL Procedure: `admin_update_business_profile(...)`
 Database Updates Applied (public_qr_id remains permanently immutable).
 ```
 
-- **Permanent Token Immutability:** Even under the administrative update pathway, `public_qr_id` is **never modifiable**. If a merchant rebrands, a new business profile is created; printed standee tokens are hardware-immutable.
+- **Permanent Token Immutability:** Even under the administrative update pathway, `public_qr_id` is **never modifiable**. If a merchant rebrands, a new business profile is created; distributed QR tokens are permanently immutable.
 
 ---
 
@@ -420,13 +420,14 @@ The Indian DPDP Act 2023 regulates the processing of digital personal data. Whil
 
 ## 13. Retention and Deletion Architecture
 
-### 13.1 Retention Conflict Evaluation
+### 13.1 Retention Conflict Evaluation & Founder Approval
 - **PRD v1.1 Baseline:** 90-day retention purge (`SEC-003`, `FR-CUST-004`).
 - **Architecture v1.1:** 30-day rolling purge (§14.1).
 
-#### Architectural Recommendation:
-We recommend **Option B with a 30-day retention window**. Local salon and cafe owners review operational feedback weekly; 30 days is more than sufficient for operational utility while significantly reducing privacy exposure.  
-*Decision Status:* **REQUIRES FOUNDER APPROVAL**. Schema defaults to 90 days until founder sign-off.
+#### Approved Policy (Founder Decision M0-01):
+The founder explicitly approved **Option B with a 30-day retention window** for `survey_responses.optional_note`, after which contents are automatically purged. Local salon and cafe owners review operational feedback weekly; 30 days is sufficient for operational utility while significantly reducing privacy exposure under DPDPA 2023.
+*Decision Status:* **FOUNDER APPROVED (M0-01)**.
+*(Important qualification: Approving 30-day note retention does not itself establish legal compliance or approve the detailed retention implementation. Privacy notices, backup copies, deletion controls, operational verification, failure monitoring, and recovery implications remain technical implementation and verification requirements. The daily cron job is proposed, not yet configured or deployed).*
 
 ---
 
@@ -455,18 +456,19 @@ Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
 ### 14.2 XSS Defense & React Rendering Safety
 - **Zero Raw HTML Injection:** Prohibition of `dangerouslySetInnerHTML`. User strings are escaped by React's JSX engine.
 - **Input Sanitization:** Rich-text or customer note strings pass through `DOMPurify` before display.
-- **Safe Vector Standee Generation:** PDF standees are rendered client-side using `@react-pdf/renderer` with strict vector shape and text primitives, avoiding SVG script injection vectors.
+- **Safe Digital QR Generation:** Digital QR codes are rendered client-side into preview canvases and exported as high-resolution PNGs without loading untrusted third-party scripts. Physical vector standee PDF generation (`@react-pdf/renderer`) is deferred to Post-MVP.
 
 ---
 
 ## 15. Secure File & Asset Handling
 
-### 15.1 Business Logo Upload Restrictions
-When merchants upload brand logos for counter standees:
-1. **File Type Whitelisting:** Permitted MIME types are strictly limited to `image/png`, `image/jpeg`, and `image/webp`. SVG uploads are **strictly prohibited** in the MVP to eliminate XML-based Cross-Site Scripting (XSS) vectors.
-2. **Magic-Byte Verification:** Serverless Edge Function inspects the first 16 bytes of the binary payload to verify actual image signatures (PNG `89 50 4E 47`, JPEG `FF D8 FF`, WebP `RIFF....WEBP`), preventing renamed executable uploads.
-3. **File Size Enforcement:** Maximum upload size capped at **2.0 MB**.
-4. **Storage Isolation:** Uploads are stored in a dedicated Supabase Storage bucket (`business-logos`) with public read access but update/delete access restricted to the verified `owner_id`.
+### 15.1 Business Logo Upload Restrictions (Founder Decision M0-03)
+When merchants upload brand logos for digital QR preview and customer cards:
+1. **File Type Whitelisting:** Permitted formats are strictly limited to `image/png`, `image/jpeg`, and `image/webp`. SVG uploads are **strictly prohibited** in the MVP to eliminate XML-based Cross-Site Scripting (XSS) vectors.
+2. **Magic-Byte & Image Decoding Verification:** Serverless Edge Function inspects the binary payload to verify actual image signatures (PNG `89 50 4E 47`, JPEG `FF D8 FF`, WebP `RIFF....WEBP`) and decodes image data to reject malformed or unsupported content, preventing renamed executable uploads. *(Note: Storage RLS alone does NOT validate image magic bytes; server-side inspection is mandatory).*
+3. **File Size Enforcement:** Maximum upload size capped strictly at **2.0 MB**.
+4. **Storage Isolation & Authorization:** Uploads are stored in a dedicated Supabase Storage bucket (`business-logos`) in tenant-isolated paths, with update/delete access restricted to the verified `owner_id`. Safe re-encoding is applied where appropriate.
+5. **Platform QR Generation Distinction:** This decision governs merchant-uploaded logos. The platform generates digital QR codes internally; approved MVP QR download format is PNG.
 
 ---
 
@@ -627,8 +629,8 @@ The following five technical adjustments were identified during the security aud
 - **Amendment:** Replace the strict unique constraint with a **partial unique index**:
   ```sql
   ALTER TABLE public.survey_questions DROP CONSTRAINT survey_questions_cat_order_uq;
-  CREATE UNIQUE INDEX survey_questions_active_order_uq 
-  ON public.survey_questions (category_id, display_order) 
+  CREATE UNIQUE INDEX survey_questions_active_order_uq
+  ON public.survey_questions (category_id, display_order)
   WHERE is_active = TRUE;
   ```
 
@@ -678,18 +680,22 @@ The following five technical adjustments were identified during the security aud
 
 ---
 
-## 25. Outstanding Founder Decisions (Phase 1 Stage 4 Sign-Off)
+## 25. Founder Decision Register & Outstanding Gates
 
-1. **Customer Note Retention Policy:**
-   - [ ] **Option B (30 Days — Recommended):** Store notes pseudonymously; automated daily purge clears notes older than 30 days to minimize data liability.
-   - [ ] **Option B (90 Days — PRD v1.1 Baseline):** Retain notes for 90 days before automated purge.
-   - [ ] **Option A (Purely Ephemeral):** Never save customer notes to the database; process transiently in memory for AI drafting only.
-2. **SVG Logo Upload Policy:**
-   - [ ] Confirm SVG uploads are **strictly disabled** for MVP, allowing only PNG, JPEG, and WebP to eliminate XML XSS vectors.
-3. **Database Backup Strategy for Pilot:**
-   - [ ] Approve scheduled GitHub Actions logical export (`pg_dump` with GPG encryption) to private offsite storage for the 3–5 merchant pilot on Supabase Free tier.
-4. **Administrative Update Pathway:**
-   - [ ] Approve implementing administrative profile updates via dedicated Edge Function with verified `aal2` MFA assurance before executing service-role updates.
+1. **Customer Note Retention Policy (Decision M0-01):**
+   - [x] **FOUNDER APPROVED:** Store notes pseudonymously in `survey_responses.optional_note`; automated daily purge clears notes older than 30 days. No customer final review text is stored.
+2. **Google Destination Verification (Decision M0-02):**
+   - [x] **FOUNDER APPROVED:** Strict server-side verification + interactive merchant preview link. Place ID verified where reliably determinable (not restricted to `ChIJ`). Direct Google access maintained without gating.
+3. **SVG Logo Upload Policy (Decision M0-03):**
+   - [x] **FOUNDER APPROVED:** SVG uploads are strictly disabled for MVP; permitted formats are PNG, JPEG, and WebP (2 MB max) with server-side magic-bytes inspection.
+4. **Gemini AI Model Configuration (Decision M0-04):**
+   - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; timeout 8000ms initial target; server-side grounding validation (<60 words).
+5. **QR Distribution Scope (Decision M0-05):**
+   - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees and vector PDFs deferred to Post-MVP.
+6. **Database Backup Strategy for Pilot:**
+   - [ ] PENDING: Approve scheduled GitHub Actions logical export (`pg_dump` with GPG encryption) to private offsite storage for the 3–5 merchant pilot on Supabase Free tier.
+7. **Administrative Update Pathway:**
+   - [ ] PENDING: Approve implementing administrative profile updates via dedicated Edge Function with verified `aal2` MFA assurance before executing service-role updates.
 
 ---
 
@@ -707,5 +713,5 @@ The following five technical adjustments were identified during the security aud
 
 ---
 
-*End of Security, Privacy & Threat Model Specification.*  
+*End of Security, Privacy & Threat Model Specification.*
 *Ready for Phase 1 — Stage 5 (UI/UX Specification) upon formal founder sign-off.*

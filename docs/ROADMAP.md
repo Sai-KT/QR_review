@@ -34,7 +34,7 @@
 | **1.1** | Oct 19, 2026 | Principal Delivery Architect | **Comprehensive Stage 8 Master Implementation Delivery Plan:**<br/>1. **Detailed Work Breakdown Structure (§10):** Expanded all 73 atomic tasks across M0–M9 with full engineering specifications: target file paths, prerequisite dependencies, complexity ratings, referenced API endpoints (`API-*`), database tables (`public.*`), UI screens (`SCR-*`), test IDs (`TC-*`), and verifiable acceptance criteria.<br/>2. **Comprehensive Milestone Profiles (§9):** Fully articulated all 10 milestones with goals, deliverables, prerequisites, 3-point effort estimates, test suites, quality gates, milestone DoD, technical risks/fallbacks, and concrete Antigravity agent instructions.<br/>3. **Development Workflow & Tooling (§6):** Specified toolchain versions, TDD vs test-after boundaries, multi-environment secrets matrix (Local vs Staging vs Prod), and dual data seeding architecture separating production reference data (`007_reference_data.sql`) from synthetic local test fixtures (`local_seed.sql`).<br/>4. **AI Agent Implementation Protocol (§17):** Established 13-step Antigravity execution protocol, context-loading document matrix, strict scope guardrails, and human-in-the-loop checkpoints.<br/>5. **Risk Contingency Blueprints (§13):** Added trigger conditions, immediate recovery actions, and fallback architectures for the top 8 technical risks.<br/>6. **100% Traceability & Coverage (§21):** Mapped all 28 FRs, 8 NFRs, 5 SECs, and 18 test suites (`TC-*`), confirming complete coverage with zero orphaned requirements. | **Under Review** |
 
 > [!IMPORTANT]
-> **Planning-Only Deliverable Notice:**  
+> **Planning-Only Deliverable Notice:**
 > In strict adherence to Phase 1 governance, this document is a **planning and scheduling specification only**. No application code, database migrations, package installations, repository initializations, or live cloud configurations have been executed. Implementation commences only upon formal founder approval of this roadmap.
 
 ---
@@ -82,13 +82,14 @@ This roadmap bridges our eight comprehensive architectural specifications into a
 
 ### 3.1 In-Scope (Pilot MVP Boundaries)
 
-- **Customer Journey:** Anonymous mobile web flow via `/q/:qrId`, category-specific 3-MCQ questionnaire, 150-character optional note, grounded Gemini review generation, in-place editing, native clipboard copy, assisted Google Maps handoff, unassisted direct Google review bypass, and neutral WhatsApp direct contact.
-- **Merchant Owner Portal:** Magic link and password authentication, single-business dashboard, safe business profile updates, Google review link configuration with Place ID validation and interactive preview, 2 MB logo upload with magic-bytes validation, Standee Studio with client-side vector PDF export (A6 / 4×6 inch), aggregated feedback feed, funnel analytics, and subscription quota status.
+- **Customer Journey:** Anonymous mobile web flow via `/q/:qrId`, category-specific 3-MCQ questionnaire, 150-character optional note (`survey_responses.optional_note`), grounded Gemini review generation (`gemini-3.5-flash-lite`), in-place editing, native clipboard copy, assisted Google Maps handoff, unassisted direct Google review bypass, and neutral WhatsApp direct contact.
+- **Merchant Owner Portal:** Magic link and password authentication, single-business dashboard, safe business profile updates, Google review link configuration with Place ID validation and interactive preview, 2 MB logo upload with magic-bytes validation (PNG/JPEG/WebP only, no SVG), Digital QR Studio with in-dashboard preview, high-res PNG export (1024×1024), copyable `/q/:public_qr_id` link, aggregated feedback feed, funnel analytics, and subscription quota status.
 - **Super-Admin Console:** Dedicated MFA-gated (`aal2`) administrative login, merchant onboarding workflow, recoverable owner invitations, instant business suspension killswitch, manual subscription/quota overrides, system health telemetry, and immutable administrative audit logs.
-- **Physical Fulfillment:** High-contrast A6 acrylic standee printing with verified quiet zones, embedded $\ge 300$ DPI merchant logos, and local optical camera scanning resilience across budget smartphones.
+- **Digital QR Distribution:** First-party permanent `/q/:public_qr_id` URL sharing, in-dashboard SVG/canvas preview, downloadable 1024×1024 PNG with adequate quiet zone for digital sharing (WhatsApp, social media, independent signage).
 
 ### 3.2 Out-of-Scope (Strictly Deferred Beyond Initial Pilot)
 
+- ❌ **Physical Counter Standees & Print-Ready PDF Generation:** Acrylic counter standees, A6 and 4×6 inch print artwork, bleed/crop marks, physical manufacturing, shipping, counter installation, and print-ready PDF export (`SCR-OWN-07`) are DEFERRED TO POST-MVP.
 - ❌ **Automated Google Review Publishing:** Technically impossible without violating Google Terms of Service; review publication remains an unmonitored patron action inside Google's native composer.
 - ❌ **Review Gating or Sentiment Trapping:** Strictly forbidden; negative feedback must never be intercepted, concealed, or redirected away from Google Maps.
 - ❌ **Automated Payment Gateways (Razorpay/Stripe):** Unnecessary for 3–5 pilot stores; subscription billing is handled via manual UPI QR transfers logged in the Super-Admin Console. Eliminates payment aggregator underwriting delays.
@@ -133,28 +134,33 @@ As documented in [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/A
 
 ## 5. Pre-Implementation Alignment Gate (Milestone M0)
 
-Before executing a single database migration or writing application code, the founder must formally review and resolve the five core architectural decisions specified in Stage 7:
+The founder has explicitly approved the five core product decisions M0-01 through M0-05 (Product decisions approved; full M0 milestone remains pending technical/security verification):
 
 ```
 +----------------------------------------------------------------------------------------------------------------------+
 |                                            PRE-IMPLEMENTATION ALIGNMENT GATE                                         |
 +----------------------------------------------------------------------------------------------------------------------+
-| Decision Item              | Recommended Option         | Alternative Options        | Technical Impact & Action     |
+| Decision Item              | Approved Policy (M0-01..05)| Alternative Options        | Technical Impact & Action     |
 |----------------------------+----------------------------+----------------------------+-------------------------------|
 | **1. Note Retention**      | **Option B (30 Days)**     | Option A (Ephemeral, 0d)   | Activates daily pg_cron purge |
-|    (DPDPA Compliance)      | Pseudonymous store for 30d | Option C (90 Days - PRD)   | on `survey_responses.note`.   |
+|    (Decision M0-01)        | Pseudonymous in DB for 30d | Option C (90 Days - PRD)   | on `survey_responses.optional_|
+|                            | (FOUNDER APPROVED)         |                            | note` (not 'note').           |
 |----------------------------+----------------------------+----------------------------+-------------------------------|
-| **2. Google Destination**  | **Server Whitelist +**     | Domain whitelist only      | Enforces Place ID matching in |
-|    Verification Strategy   | **Interactive In-App Test**| (Rejects wrong businesses) | `API-OWN-03` and Settings UI. |
+| **2. Google Destination**  | **Server Whitelist +**     | Domain whitelist only      | Enforces server verification, |
+|    Verification Strategy   | **Interactive In-App Test**| (Rejects wrong businesses) | Place ID match (no ChIJ req), |
+|    (Decision M0-02)        | (FOUNDER APPROVED)         |                            | in `API-OWN-03` and Settings. |
 |----------------------------+----------------------------+----------------------------+-------------------------------|
 | **3. Logo Format Boundary**| **PNG, JPEG, WebP Only**   | Allow SVG (Rejected due    | Enforces magic bytes decoding |
-|    (Storage Security)      | (Strictly No SVG for MVP)  | to stored XSS vector risk) | & 2 MB bounds in storage RLS. |
+|    (Decision M0-03)        | (Strictly No SVG for MVP)  | to stored XSS vector risk) | & 2 MB bounds (Storage RLS    |
+|                            | (FOUNDER APPROVED)         |                            | alone does not verify bytes). |
 |----------------------------+----------------------------+----------------------------+-------------------------------|
-| **4. AI Model Selection**  | **gemini-3.5-flash-lite**  | gemini-2.5-flash           | Decouples model via Edge Fn   |
-|    (Speed & Economics)     | (Zero thinking budget)     | gemini-1.5-flash           | environment variable.         |
+| **4. AI Model Selection**  | **gemini-3.5-flash-lite**  | gemini-3.1-flash-lite (b/u)| Decoupled via `GEMINI_MODEL`; |
+|    (Decision M0-04)        | thinkingLevel: "minimal"   | gemini-3.8-flash           | timeout 8000ms initial target;|
+|                            | (FOUNDER APPROVED)         |                            | draft strictly < 60 words.    |
 |----------------------------+----------------------------+----------------------------+-------------------------------|
-| **5. Standee Dimensions**  | **International A6**       | Standard Photo 4×6 inch    | Calibrates Standee Studio PDF |
-|    (Physical Counter Fit)  | (105 × 148 mm + 3mm bleed) | (102 × 152 mm + 3mm bleed) | layout canvas dimensions.     |
+| **5. QR Distribution**     | **Digital QR Distribution**| Physical Acrylic Standees  | Delivers in-dashboard preview,|
+|    (Decision M0-05)        | (Preview, PNG, Link Copy)  | (A6 / 4×6 inch, bleed,     | high-res PNG (1024x1024), and |
+|                            | (FOUNDER APPROVED)         | PDFs deferred to Post-MVP) | first-party URL (/q/:qrId).   |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -225,11 +231,11 @@ Before executing a single database migration or writing application code, the fo
 | **M2**       | Database, Security & Core RPCs    | Migrations, RLS, quota & admin procs     | M1                     |
 | **M3**       | Public Customer Journey Slice     | QR resolve, survey flow, feedback submit | M2                     |
 | **M4**       | AI Generation & Quota Engine      | Gemini Edge Fn, 2-phase locks, clipboard | M2, M3                 |
-| **M5**       | Merchant Owner Portal             | Auth, dashboard, Google link, Standee PDF| M2, M3, M4             |
+| **M5**       | Merchant Owner Portal             | Auth, dashboard, Google link, Digital QR | M2, M3, M4             |
 | **M6**       | Super-Admin Console & Ops         | Admin login, MFA, onboarding, suspension | M2, M5                 |
-| **M7**       | Master QA Hardening & Audit       | 196 tests, a11y, mobile, print, backup QA| M3, M4, M5, M6         |
+| **M7**       | Master QA Hardening & Audit       | 196 tests, a11y, mobile, QR, backup QA   | M3, M4, M5, M6         |
 | **M8**       | Staging & Deployment Readiness    | Cloudflare staging, secret audit, smoke  | M7                     |
-| **M9**       | Controlled 3–5 Merchant Pilot     | Physical standees, merchant onboarding   | M8                     |
+| **M9**       | Controlled 3–5 Merchant Pilot     | Digital QR sharing, merchant onboarding  | M8                     |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -249,27 +255,27 @@ graph TD
 
     M0[M0: Pre-Implementation Alignment Gate]:::gate --> M1[M1: Project Foundation & Toolchain]:::crit
     M1 --> M2[M2: Database, RLS & Core Stored Procedures]:::crit
-    
+
     %% Public Customer Path
     M2 --> M3[M3: Public Customer Survey & QR Resolution Slice]:::crit
     M3 --> M4[M4: AI Generation Engine & Quota Controls]:::crit
-    
+
     %% Merchant Owner Portal Path (Can start after M2 & M3 shell)
     M2 --> M5A[M5-T01..T03: Owner Auth & Profile Shell]:::owner
     M3 --> M5A
-    M4 --> M5B[M5-T04..T09: Standee Studio, Analytics & Feed]:::owner
+    M4 --> M5B[M5-T04..T09: Digital QR Studio, Analytics & Feed]:::owner
     M5A --> M5B
-    
+
     %% Super-Admin Console Path (Independent from Merchant UI)
     M2 --> M6A[M6-T01..T04: Admin Auth, Directory & Wizard]:::admin
     M5B --> M6B[M6-T05..T07: Admin Suspensions & Overrides]:::admin
     M6A --> M6B
-    
+
     %% Critical Path Converges at QA Hardening
     M4 --> M7[M7: Master QA Hardening & Verification Audit]:::crit
     M5B --> M7
     M6B --> M7
-    
+
     M7 --> M8[M8: Staging Deployment & Pilot Readiness]:::gate
     M8 --> M9[M9: Controlled 3-5 Merchant Live Pilot]:::gate
 
@@ -278,7 +284,7 @@ graph TD
 ```
 
 ### 8.1 Critical Path Identification
-The absolute critical path governing delivery timeline is:  
+The absolute critical path governing delivery timeline is:
 **`M0 (Alignment)` $	o$ `M1 (Foundation)` $	o$ `M2 (Database & RLS)` $	o$ `M3 (Customer Survey Slice)` $	o$ `M4 (AI & Quota Engine)` $	o$ `M7 (QA Hardening)` $	o$ `M8 (Staging)` $	o$ `M9 (Pilot)`**.
 
 - Any delay in M2 (Database migrations) or M4 (Gemini Edge Function & Quota locking) propagates day-for-day to the pilot launch date.
@@ -289,17 +295,19 @@ The absolute critical path governing delivery timeline is:
 
 ### 9.1 Milestone M0: Pre-Implementation Alignment & Governance Resolution
 - **Milestone Identifier:** `M0`
-- **Goals & Strategic Objectives:** Secure formal founder resolution on all 5 outstanding Stage 7 design decisions; verify that database schema amendments match API contracts before code generation starts.
+- **Status:** **PARTIALLY COMPLETED (Product Decisions M0-01..M0-05 Founder Approved; Full Milestone M0 NOT APPROVED)**
+- **Goals & Strategic Objectives:** Secure formal founder resolution on the 5 core product decisions (M0-01..M0-05, including digital-only QR distribution); align all 10 specification documents; verify pending database schema amendments and technical gates before implementation authorization.
 - **Deliverables:**
-  - Documented sign-off records in [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) Section 20.
-  - Finalized SQL migration blueprints reflecting 5 schema amendments.
+  - Documented sign-off records for M0-01 through M0-05 in [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) Section 20.
+  - Aligned specification corpus across PRD, Architecture, Tech Stack, Schema, Security, UI/UX, API Spec, Test Plan, Roadmap, and AGENTS.md reflecting digital-only MVP.
+  - Finalized SQL migration blueprints reflecting 5 schema amendments (pending technical sign-off).
 - **Prerequisites & Dependencies:** Completed Phase 1 architectural specifications (`PRD.md` v1.1 through `TEST_PLAN.md` v1.1).
 - **Estimated Effort:** Optimistic: 2 hrs | Expected: 4 hrs | Conservative: 8 hrs
 - **Test Suites to Validate:** `TC-PRV-01..03` (Retention baseline), `TC-DST-01..10` (Destination criteria), `TC-UPL-01..08` (Upload boundary).
-- **Security & Quality Gates:** 100% of founder decisions signed off; zero unresolved conflicts across specification documents.
-- **Definition of Done:** Founder decision register updated to `APPROVED`; implementation-critical schema amendments verified in migration drafts.
-- **Risks & Fallbacks:** Founder unavailable for review $	o$ Fallback: Adopt default recommended options (Option B 30-day note, strict Place ID check, PNG/JPEG/WebP only, gemini-3.5-flash-lite, A6 standee) to prevent project stall.
-- **Antigravity Execution Guidance:** Read Section 5 and Section 20 of this document; prompt founder for approval; do not touch application code or package managers.
+- **Security & Quality Gates:** 100% of founder product decisions signed off; specification documents aligned; zero unauthorized code or migrations.
+- **Definition of Done:** Founder product decision register updated to `APPROVED` for M0-01..M0-05; full M0 technical gates pending formal sign-off.
+- **Risks & Fallbacks:** Scope creep beyond digital MVP $	o$ Fallback: Strictly enforce digital-only deliverables (dashboard preview, PNG export, shareable link) and defer physical standee tooling to Post-MVP.
+- **Antigravity Execution Guidance:** Read Section 5 and Section 20 of this document; maintain Planning Mode; do not start M1 development or execute git commits/pushes without explicit founder authorization.
 
 ---
 
@@ -384,24 +392,24 @@ The absolute critical path governing delivery timeline is:
 
 ---
 
-### 9.6 Milestone M5: Merchant Owner Portal & Standee Studio
+### 9.6 Milestone M5: Merchant Owner Portal & Digital QR Sharing
 - **Milestone Identifier:** `M5`
-- **Goals & Strategic Objectives:** Deliver the authenticated merchant dashboard, profile settings, verified Google destination gateway, 2 MB logo upload, and client-side vector Standee Studio.
+- **Goals & Strategic Objectives:** Deliver the authenticated merchant dashboard, profile settings, verified Google destination gateway, 2 MB logo upload, and client-side digital QR sharing studio (in-dashboard preview, high-res PNG download, copyable link). Note: Print-Ready Standee PDF Export (`SCR-OWN-07`) and physical standees are DEFERRED to Post-MVP.
 - **Deliverables:**
   - Merchant Supabase Auth integration (`SCR-OWN-01`, `SCR-OWN-02`, `SCR-OWN-11`).
   - Navigation shell and authenticated layout guard (`SCR-OWN-03`, `API-OWN-01`).
   - Business profile editor with vanity slug management (`SCR-OWN-04`, `API-OWN-02`).
   - Google Destination Gateway modal (`SCR-OWN-05`, `API-OWN-03`) with Place ID format validation and interactive test link.
-  - Supabase Storage logo gateway (`API-OWN-07`, `08`) with magic-bytes validation (PNG/JPEG/WebP only, no SVG).
-  - Standee Studio with live preview (`SCR-OWN-06`) and client-side vector PDF generation (`SCR-OWN-07`, A6 / 4×6 inch).
+  - Supabase Storage logo gateway (`API-OWN-07`, `08`) with magic-bytes validation (PNG/JPEG/WebP only, 2 MB max, no SVG).
+  - Digital QR Studio with live preview, copy link, and high-res PNG download (`SCR-OWN-06`, `TC-OWN-11`, `TC-OWN-12`). `SCR-OWN-07` (Print-Ready Standee PDF) is DEFERRED — POST-MVP.
   - Feedback feed (`SCR-OWN-08`, `API-OWN-05`), funnel analytics (`SCR-OWN-09`, `API-OWN-04`), and quota monitor (`SCR-OWN-10`, `API-OWN-06`, `09`).
 - **Prerequisites & Dependencies:** Milestones M2, M3, and M4 complete.
-- **Estimated Effort:** Optimistic: 16 hrs | Expected: 26 hrs | Conservative: 40 hrs
-- **Test Suites to Validate:** `TC-API-13..21`, `TC-OWN-01..18`, `TC-DST-01..10`, `TC-UPL-01..08`, `TC-PRT-01..06`.
+- **Estimated Effort:** Optimistic: 14 hrs | Expected: 22 hrs | Conservative: 34 hrs
+- **Test Suites to Validate:** `TC-API-13..21`, `TC-OWN-01..18`, `TC-DST-01..10`, `TC-UPL-01..08`, `TC-PRT-05` (digital QR verification; physical print tests deferred).
 - **Security & Quality Gates:** RLS strictly isolates owner data; logo upload rejects SVGs and files > 2 MB; Google link requires passing interactive test link verification.
-- **Definition of Done:** Merchant can log in, edit profile, upload valid logo, configure Google link, download high-res A6 PDF standee, and view analytics.
-- **Risks & Fallbacks:** jsPDF font rendering differences across browsers $	o$ Fallback: Use standard Helvetica/Arial fonts with embedded base64 geometric vector QR.
-- **Antigravity Execution Guidance:** Use jsPDF for PDF generation; test storage upload with real image binaries and non-image polyglot files to prove magic-bytes rejection.
+- **Definition of Done:** Merchant can log in, edit profile, upload valid logo, configure Google link, preview digital QR, copy first-party link, download high-res PNG QR, and view analytics.
+- **Risks & Fallbacks:** Browser clipboard API permissions blocked $	o$ Fallback: Render accessible input with select-all text (`SCR-OWN-06`).
+- **Antigravity Execution Guidance:** Use lightweight QR generator for canvas/PNG export; do not implement jsPDF standee generator for MVP; test storage upload with real image binaries and non-image polyglot files to prove magic-bytes rejection.
 
 ---
 
@@ -470,20 +478,20 @@ The absolute critical path governing delivery timeline is:
 
 ### 9.10 Milestone M9: Controlled 3–5 Merchant Pilot Execution
 - **Milestone Identifier:** `M9`
-- **Goals & Strategic Objectives:** Conduct a supervised 14-day live pilot across 3–5 brick-and-mortar salons and cafes using physical counter standees to validate conversion, reliability, and unit economics.
+- **Goals & Strategic Objectives:** Conduct a supervised 14-day live pilot across 3–5 brick-and-mortar salons and cafes using digital QR assets (in-dashboard preview, high-res PNG export, shareable link) to validate conversion, reliability, and unit economics without physical hardware overhead. Physical standees are deferred to Post-MVP.
 - **Deliverables:**
   - 3–5 Onboarded pilot merchant accounts (2 Salons, 2 Cafes, 1 Casual Dining).
-  - 5 High-resolution physical A6 acrylic standees printed, inspected, and placed at billing counters.
-  - Merchant staff training guide and 3-minute briefing completed.
+  - Digital QR assets (in-dashboard preview, 1024×1024 PNG download, copyable link) generated and distributed to merchants for digital sharing and independent counter signage.
+  - Merchant staff digital onboarding guide and 3-minute briefing completed.
   - Daily telemetry and AI token cost monitoring log.
   - Merchant mid-pilot and exit interview notes.
-  - Final Pilot Retrospective & Unit Economics Evaluation Report.
+  - Final Pilot Retrospective & Unit Economics Evaluation Report (zero physical unit manufacturing/shipping costs).
 - **Prerequisites & Dependencies:** Milestone M8 deployed and verified.
 - **Estimated Effort:** Elapsed Calendar Time: 14–21 days | Active Engineering: 10–16 hrs
 - **Test Suites to Validate:** `TC-UAT-01..08`, `TC-ANA-01..08`.
-- **Security & Quality Gates:** Zero cross-tenant data leaks; zero broken QR standee links; zero unhandled crashes; monthly cloud spend remains under ₹150.
-- **Definition of Done:** 14-day pilot successfully completed; verified Google review generation validated by merchants; founder sign-off on Phase 3 commercial rollout.
-- **Risks & Fallbacks:** Standee placed away from customer view $	o$ Fallback: Provide staff incentives and reposition standees directly adjacent to UPI payment terminal.
+- **Security & Quality Gates:** Zero cross-tenant data leaks; zero broken QR links; zero unhandled crashes; monthly cloud spend remains under ₹150.
+- **Definition of Done:** 14-day pilot successfully completed; verified Google review outbound redirects validated by merchants; founder sign-off on Phase 3 commercial rollout.
+- **Risks & Fallbacks:** Merchant unaccustomed to digital image/link distribution $	o$ Fallback: Provide WhatsApp-ready graphic and link sharing walkthrough.
 - **Antigravity Execution Guidance:** Maintain daily operational log; do not apply production code changes during the pilot without formal change management approval.
 
 ---
@@ -494,67 +502,67 @@ The absolute critical path governing delivery timeline is:
 #### Task M0-T01: Customer Note Retention Policy Sign-Off (DPDPA 30-Day Purge)
 - **Task ID:** `M0-T01`
 - **Title:** Customer Personal Note Retention Policy Founder Resolution
-- **Description:** Formally sign off on Option B (30-day pseudonymous retention with daily `pg_cron` purge on `survey_responses.note`) to satisfy Digital Personal Data Protection Act (DPDPA) data minimization while retaining commercial merchant value.
-- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/SECURITY.md`](file:///Users/mrugmaythere/work/QRs/docs/SECURITY.md) §7.
+- **Description:** Formally sign off on Option B (30-day pseudonymous retention with daily `pg_cron` purge on `survey_responses.optional_note`) to satisfy Digital Personal Data Protection Act (DPDPA) data minimization while retaining commercial merchant value.
+- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/SECURITY.md`](file:///Users/mrugmaythere/work/QRs/docs/SECURITY.md) §13.
 - **Prerequisites:** Completed Stage 7 Security & Privacy audit.
 - **Complexity & Effort:** Low | 0.5 hr
 - **API Endpoints Involved:** None (`API-PUB-04`, `API-OWN-05` reference this policy).
 - **Database Tables Involved:** `public.survey_responses`.
 - **Screens Involved:** `SCR-CUST-05`, `SCR-OWN-08`.
 - **Associated Test Cases:** `TC-PRV-01`, `TC-PRV-02`, `TC-PRV-03`.
-- **Acceptance Criteria:** Founder approval status in Section 20 updated from `PENDING` to `APPROVED`; 30-day purge invariant locked.
+- **Status:** **FOUNDER APPROVED (Decision M0-01)**. Canonical field `survey_responses.optional_note` locked with 30-day rolling purge via daily `pg_cron`.
 
 #### Task M0-T02: Google Destination Verification Protocol Sign-Off
 - **Task ID:** `M0-T02`
 - **Title:** Google Review Destination URL & Place ID Verification Protocol Sign-Off
-- **Description:** Sign off on the dual-layer destination verification architecture: server-side hostname whitelisting (`search.google.com`, `maps.app.goo.gl`) + Place ID regex format validation + mandatory interactive in-app test link confirmation before activation.
-- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/API_SPEC.md) §4.3.
+- **Description:** Sign off on destination verification: server-side validation + interactive in-app preview link confirmation before activation. Place ID checked where reliably determinable (without forcing `ChIJ` prefix).
+- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/API_SPEC.md) §7.3.
 - **Prerequisites:** Completed Stage 6 API specification audit.
 - **Complexity & Effort:** Low | 0.5 hr
 - **API Endpoints Involved:** `API-OWN-03`.
 - **Database Tables Involved:** `public.businesses`.
 - **Screens Involved:** `SCR-OWN-05`.
 - **Associated Test Cases:** `TC-DST-01`, `TC-DST-02`, `TC-DST-09`, `TC-DST-10`.
-- **Acceptance Criteria:** Founder approval recorded; verification rules locked for `API-OWN-03` implementation.
+- **Status:** **FOUNDER APPROVED (Decision M0-02)**. Verification rules locked for `API-OWN-03` implementation; strict anti-gating preserved.
 
 #### Task M0-T03: Merchant Logo Upload Format Boundary Sign-Off
 - **Task ID:** `M0-T03`
 - **Title:** Logo Upload File Format Boundary & Magic-Bytes Inspection Sign-Off
 - **Description:** Formally approve restricting merchant logo uploads strictly to PNG, JPEG, and WebP formats with magic-bytes decoding and a 2 MB ceiling, strictly rejecting SVG files to prevent stored XSS vulnerabilities.
-- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/SECURITY.md`](file:///Users/mrugmaythere/work/QRs/docs/SECURITY.md) §8.
+- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/SECURITY.md`](file:///Users/mrugmaythere/work/QRs/docs/SECURITY.md) §15.
 - **Prerequisites:** Completed Stage 4 Security audit.
 - **Complexity & Effort:** Low | 0.5 hr
 - **API Endpoints Involved:** `API-OWN-07`, `API-OWN-08`.
 - **Database Tables Involved:** `storage.objects`, `public.businesses`.
 - **Screens Involved:** `SCR-OWN-04`, `SCR-OWN-06`.
 - **Associated Test Cases:** `TC-UPL-01`, `TC-UPL-02`, `TC-UPL-03`, `TC-UPL-04`.
-- **Acceptance Criteria:** Founder approval recorded; storage security rules locked in migration specs.
+- **Status:** **FOUNDER APPROVED (Decision M0-03)**. Storage security rules locked (PNG/JPEG/WebP, 2 MB max, server magic bytes; no SVG). Platform QR export format is PNG.
 
-#### Task M0-T04: Provisional Gemini Model Configuration Sign-Off
+#### Task M0-T04: Gemini Model Configuration Sign-Off
 - **Task ID:** `M0-T04`
-- **Title:** Gemini Flash Model Selection & Zero-Thinking Configuration Sign-Off
-- **Description:** Approve setting `gemini-3.5-flash-lite` (with `thinking_budget = 0`) as the provisional AI model for sub-2.0s generation latency and ₹0.025 per-call economics, decoupled via `GEMINI_MODEL` environment variable.
-- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/TECH_STACK.md`](file:///Users/mrugmaythere/work/QRs/docs/TECH_STACK.md) §3.
+- **Title:** Gemini Flash Model Selection & Minimal Thinking Configuration Sign-Off
+- **Description:** Approve setting `gemini-3.5-flash-lite` (default) and `gemini-3.1-flash-lite` (backup) with `thinkingLevel: "minimal"`, 8000ms initial timeout target, and strict server-side grounding (<60 words), decoupled via `GEMINI_MODEL`.
+- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/TECH_STACK.md`](file:///Users/mrugmaythere/work/QRs/docs/TECH_STACK.md) §5.
 - **Prerequisites:** Stage 2 Technology audit.
 - **Complexity & Effort:** Low | 0.5 hr
 - **API Endpoints Involved:** `API-PUB-03`.
 - **Database Tables Involved:** None.
 - **Screens Involved:** `SCR-CUST-06`, `SCR-ADM-02`.
 - **Associated Test Cases:** `TC-AI-01`, `TC-AI-07`, `TC-PRF-01`.
-- **Acceptance Criteria:** Model choice approved; Edge Function decoupled environment variable specified.
+- **Status:** **FOUNDER APPROVED (Decision M0-04)**. Model identifiers and thinking configuration locked.
 
-#### Task M0-T05: Physical Standee Dimension Standard Sign-Off
+#### Task M0-T05: Digital QR Distribution for MVP Sign-Off
 - **Task ID:** `M0-T05`
-- **Title:** Physical Standee Print Dimension Standard Sign-Off
-- **Description:** Approve the International A6 standard (105 × 148 mm with 3 mm bleed margin) as the default physical standee layout format for Indian commercial print shops and standard acrylic T-stands.
-- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/UI_UX.md`](file:///Users/mrugmaythere/work/QRs/docs/UI_UX.md) §10.
+- **Title:** Digital QR Distribution for MVP Sign-Off
+- **Description:** Approve digital-only QR distribution for the initial MVP: in-dashboard digital preview (`SCR-OWN-06`), downloadable high-resolution PNG asset (1024×1024 target), and copyable first-party HTTPS URL (`/q/:public_qr_id`). Defer physical acrylic counter standees, A6/4x6" artwork, bleeds, and print-ready PDFs (`SCR-OWN-07`) to Post-MVP.
+- **Target Files / Directories:** [`docs/ROADMAP.md`](file:///Users/mrugmaythere/work/QRs/docs/ROADMAP.md) §20, [`docs/UI_UX.md`](file:///Users/mrugmaythere/work/QRs/docs/UI_UX.md) §9.
 - **Prerequisites:** Stage 5 UI/UX design audit.
 - **Complexity & Effort:** Low | 0.5 hr
 - **API Endpoints Involved:** None.
-- **Database Tables Involved:** None.
-- **Screens Involved:** `SCR-OWN-06`, `SCR-OWN-07`.
-- **Associated Test Cases:** `TC-PRT-01`, `TC-PRT-02`.
-- **Acceptance Criteria:** A6 format locked; Standee Studio vector PDF canvas dimensions calibrated.
+- **Database Tables Involved:** `public.businesses(public_qr_id)`.
+- **Screens Involved:** `SCR-OWN-06` (active), `SCR-OWN-07` (deferred).
+- **Associated Test Cases:** `TC-PRT-05`, `TC-OWN-11`, `TC-OWN-12`.
+- **Status:** **FOUNDER APPROVED (Decision M0-05)**. Digital QR distribution locked for MVP; physical standees deferred.
 
 #### Task M0-T06: Pre-Implementation Schema Blueprint & Migration Alignment Review
 - **Task ID:** `M0-T06`
@@ -976,7 +984,7 @@ The absolute critical path governing delivery timeline is:
 
 ---
 
-### 10.6 Milestone M5: Merchant Owner Portal & Standee Studio (9 Tasks)
+### 10.6 Milestone M5: Merchant Owner Portal & Digital QR Sharing (9 Tasks)
 
 #### Task M5-T01: Merchant Supabase Auth Views & Magic Link Flow
 - **Task ID:** `M5-T01`
@@ -1043,18 +1051,18 @@ The absolute critical path governing delivery timeline is:
 - **Associated Test Cases:** `TC-UPL-01`, `TC-UPL-02`, `TC-UPL-03`, `TC-UPL-04`, `TC-UPL-07`.
 - **Acceptance Criteria:** Accepts valid 1.5 MB PNG; rejects SVG with error; rejects files $> 2$ MB; updates logo preview immediately.
 
-#### Task M5-T06: Standee Studio: Vector PDF Generation Engine
+#### Task M5-T06: Digital QR Management & PNG Export Engine
 - **Task ID:** `M5-T06`
-- **Title:** Implement Standee Studio Interactive Preview & Client-Side Vector PDF Export
-- **Description:** Build `src/pages/merchant/StandeeStudioPage.tsx` (`SCR-OWN-06`, `07`). Renders interactive A6 (105 × 148 mm) standee preview with merchant logo, QR code, and neutral anti-gating copy (*"Scan to share your feedback & Google review"*). Generates print-ready vector PDF using `jsPDF` with resolution-independent vector QR geometry, 3 mm bleed margins, and $\ge 300$ DPI embedded raster logo.
-- **Target Files / Directories:** `src/pages/merchant/StandeeStudioPage.tsx`, `src/lib/pdfGenerator.ts`.
+- **Title:** Implement Digital QR Interactive Preview & High-Resolution PNG Export
+- **Description:** Build `src/pages/merchant/DigitalQRPage.tsx` (`SCR-OWN-06`). Renders interactive digital QR preview with merchant logo, public QR code, and copyable first-party link (`https://[domain]/q/:public_qr_id`). Generates client-side high-resolution PNG export (1024×1024 initial target) with mandatory 4-module quiet zone. Physical standees and vector PDF export (`SCR-OWN-07`, `pdfGenerator.ts`) are DEFERRED TO POST-MVP.
+- **Target Files / Directories:** `src/pages/merchant/DigitalQRPage.tsx`, `src/lib/qrGenerator.ts`.
 - **Prerequisites:** M5-T02, M5-T05.
-- **Complexity & Effort:** High | 4.0 hrs
-- **API Endpoints Involved:** None (client-side PDF generation).
+- **Complexity & Effort:** Medium | 2.5 hrs
+- **API Endpoints Involved:** None (client-side QR canvas generation).
 - **Database Tables Involved:** None.
-- **Screens Involved:** `SCR-OWN-06`, `SCR-OWN-07`.
-- **Associated Test Cases:** `TC-PRT-01`, `TC-PRT-02`, `TC-PRT-06`, `TC-OWN-11`.
-- **Acceptance Criteria:** Exported PDF opens in Adobe Acrobat with exact 105 × 148 mm trim dimensions; QR code remains sharp at 1200% zoom; scan test succeeds.
+- **Screens Involved:** `SCR-OWN-06` (active); `SCR-OWN-07` (deferred).
+- **Associated Test Cases:** `TC-PRT-05`, `TC-OWN-11`, `TC-OWN-12`.
+- **Acceptance Criteria:** Exported PNG decodes reliably to `https://[domain]/q/:public_qr_id`; QR preview card allows one-tap link copying; scan test succeeds from screen.
 
 #### Task M5-T07: Feedback Feed & Privacy Note Display
 - **Task ID:** `M5-T07`
@@ -1150,18 +1158,18 @@ The absolute critical path governing delivery timeline is:
 - **Associated Test Cases:** `TC-ADM-06`, `TC-ADM-07`.
 - **Acceptance Criteria:** Successfully provisions all 3 tenant records in a single database transaction; generates unique hardware token; emits audit log entry.
 
-#### Task M6-T05: Merchant Management, Standee Tracking & Emergency Suspension
+#### Task M6-T05: Merchant Management & Emergency Suspension Killswitch
 - **Task ID:** `M6-T05`
-- **Title:** Implement Merchant Detail View, Standee Pipeline & Suspension Killswitch
-- **Description:** Build `src/pages/admin/MerchantDetailPage.tsx` (`SCR-ADM-05`). Displays full business profile; standee fulfillment pipeline selector (`Requested` $\to$ `In Print` $\to$ `Dispatched` $\to$ `Delivered`, `API-ADM-07`); and emergency suspension toggle (`API-ADM-04`). Suspending sets `account_status = 'suspended'` and immediately returns HTTP 403 on public QR endpoints.
+- **Title:** Implement Merchant Detail View & Suspension Killswitch
+- **Description:** Build `src/pages/admin/MerchantDetailPage.tsx` (`SCR-ADM-05`). Displays full business profile and emergency suspension toggle (`API-ADM-04`). Suspending sets `account_status = 'suspended'` and immediately returns neutral inactive notice on public QR endpoints without 404 or data leakage. (Physical standee fulfillment pipeline is DEFERRED TO POST-MVP).
 - **Target Files / Directories:** `src/pages/admin/MerchantDetailPage.tsx`.
 - **Prerequisites:** M6-T02.
-- **Complexity & Effort:** High | 3.0 hrs
-- **API Endpoints Involved:** `API-ADM-04`, `API-ADM-07`.
+- **Complexity & Effort:** Medium | 2.0 hrs
+- **API Endpoints Involved:** `API-ADM-04`.
 - **Database Tables Involved:** `public.businesses`, `public.admin_audit_logs`.
 - **Screens Involved:** `SCR-ADM-05`.
 - **Associated Test Cases:** `TC-ADM-08`, `TC-ADM-09`, `TC-ADM-11`.
-- **Acceptance Criteria:** Activating suspension immediately blocks public customer flow with HTTP 403; changing standee fulfillment state records audit entry.
+- **Acceptance Criteria:** Activating suspension immediately blocks public customer flow with neutral inactive notice; audit entry recorded with actor role.
 
 #### Task M6-T06: Subscription Extension, UPI Billing & Quota Override Panel
 - **Task ID:** `M6-T06`
@@ -1271,18 +1279,18 @@ The absolute critical path governing delivery timeline is:
 - **Associated Test Cases:** `TC-MOB-01` through `TC-MOB-08`.
 - **Acceptance Criteria:** Native camera opens URL in $< 1.5$s; keyboard does not cover primary CTA; clipboard copy succeeds; Google Maps handoff works.
 
-#### Task M7-T07: Physical Standee Print Inspection & Optical Scan Verification (`TC-PRT-01..06`)
+#### Task M7-T07: Digital QR Asset Inspection & Optical Screen Readability (`TC-PRT-05`)
 - **Task ID:** `M7-T07`
-- **Title:** Inspect Physical Standee Prints & Test Optical QR Scanning Resilience
-- **Description:** Print A6 test standees on 300 GSM matte cardstock. Test optical QR code recognition using native smartphone camera apps under varied real-world store lighting conditions: 50 lux (dim restaurant), 300 lux (standard cafe), and 500 lux with direct 45-degree spotlight glare.
-- **Target Files / Directories:** Print inspection log, photos of test prints.
+- **Title:** Inspect Digital QR PNG Assets & Verify Optical Screen Readability
+- **Description:** Export digital QR PNG assets. Test optical QR code recognition using native smartphone camera apps scanning from desktop and mobile screens under varied lighting conditions. (Cardstock print, caliper measurement, and physical acrylic glare tests `TC-PRT-01..04`, `06` are DEFERRED TO POST-MVP).
+- **Target Files / Directories:** QR image test logs and optical scan verification records.
 - **Prerequisites:** M5-T06.
-- **Complexity & Effort:** Medium | 2.5 hrs
+- **Complexity & Effort:** Low | 1.5 hrs
 - **API Endpoints Involved:** None.
 - **Database Tables Involved:** None.
-- **Screens Involved:** `SCR-OWN-07`.
-- **Associated Test Cases:** `TC-PRT-01` through `TC-PRT-06`.
-- **Acceptance Criteria:** Standee scans successfully in $< 2.0$ seconds from 15–40 cm distance across all lighting levels; quiet zone $\ge 4$ modules verified.
+- **Screens Involved:** `SCR-OWN-06`.
+- **Associated Test Cases:** `TC-PRT-05` (active); `TC-PRT-01..04`, `06` deferred.
+- **Acceptance Criteria:** Exported digital QR PNG renders cleanly with $\ge 4$-module quiet zone; decodes to `https://[domain]/q/:public_qr_id`; scans successfully from screen in $< 1.5$ seconds on Android and iPhone.
 
 #### Task M7-T08: Automated Disaster Recovery & Docker Logical Restore Drill (`TC-BKP-01..05`)
 - **Task ID:** `M7-T08`
@@ -1409,31 +1417,31 @@ The absolute critical path governing delivery timeline is:
 - **Associated Test Cases:** `TC-UAT-01`, `TC-ADM-06`.
 - **Acceptance Criteria:** Exactly 3–5 merchant records provisioned; unique hardware tokens generated; Google destination links verified.
 
-#### Task M9-T02: High-Resolution Standee Print Production & Acrylic Hardware Assembly
+#### Task M9-T02: Digital QR Asset Generation & Merchant Distribution Package
 - **Task ID:** `M9-T02`
-- **Title:** Print Physical A6 Standees & Assemble into Clear Acrylic Counter T-Stands
-- **Description:** Export vector PDFs from Standee Studio (`SCR-OWN-07`) for each onboarded merchant with high-res logos. Print on 300 GSM cardstock with matte lamination at local commercial print shop. Assemble into clear acrylic A6 T-stands; inspect optical contrast and quiet zones.
-- **Target Files / Directories:** 5 Physical acrylic counter standees.
+- **Title:** Generate Digital QR Packages & Deliver to Onboarded Merchants
+- **Description:** Export digital QR assets from `SCR-OWN-06` for each onboarded merchant (high-resolution 1024×1024 PNG with quiet zone and verified permanent URL `/q/:public_qr_id`). Deliver digital assets to merchants via email/WhatsApp for digital displays, website integration, social sharing, or independent printing. (Physical acrylic standee printing and hardware assembly are DEFERRED TO POST-MVP).
+- **Target Files / Directories:** 5 Digital merchant QR asset packages.
 - **Prerequisites:** M9-T01.
-- **Complexity & Effort:** Medium | 2.5 hrs
+- **Complexity & Effort:** Low | 1.5 hrs
 - **API Endpoints Involved:** None.
 - **Database Tables Involved:** None.
-- **Screens Involved:** `SCR-OWN-07`.
-- **Associated Test Cases:** `TC-PRT-01`, `TC-PRT-04`.
-- **Acceptance Criteria:** 5 Physical standees produced; zero optical defects; camera scan test verifies instant URL loading on each standee.
+- **Screens Involved:** `SCR-OWN-06`.
+- **Associated Test Cases:** `TC-OWN-11`, `TC-OWN-12`, `TC-PRT-05`.
+- **Acceptance Criteria:** Digital QR PNG assets delivered to 3–5 pilot merchants; URL destination verified; zero physical manufacturing costs incurred in MVP budget.
 
-#### Task M9-T03: In-Person Merchant Delivery, Counter Placement & Staff Onboarding
+#### Task M9-T03: Digital Merchant Onboarding & Front-Desk Staff Briefing
 - **Task ID:** `M9-T03`
-- **Title:** Deliver Standees to Store Counters & Brief Front-Desk Staff
-- **Description:** Hand-deliver physical acrylic standees to store owners. Position standees directly on billing counters adjacent to UPI QR payment terminals. Conduct 3-minute briefing with counter staff on prompting patrons (*"Scan here to share your feedback in 30 seconds"*). Provide 1-page merchant reference cheat sheet.
-- **Target Files / Directories:** 1-Page Merchant Reference Guide PDF.
+- **Title:** Brief Front-Desk Staff & Activate Digital Feedback Touchpoints
+- **Description:** Onboard pilot merchants with their digital QR assets and first-party links. Guide owners on digital distribution (WhatsApp business messaging, digital counter displays, or independent tabletop placement). Conduct briefing with counter staff on prompting patrons (*"Scan here to share your feedback in 30 seconds"*). Provide 1-page digital reference cheat sheet.
+- **Target Files / Directories:** 1-Page Merchant Reference Guide PDF/Image.
 - **Prerequisites:** M9-T02.
-- **Complexity & Effort:** High | 4.0 hrs
+- **Complexity & Effort:** Medium | 2.5 hrs
 - **API Endpoints Involved:** None.
 - **Database Tables Involved:** None.
 - **Screens Involved:** None.
 - **Associated Test Cases:** `TC-UAT-02`.
-- **Acceptance Criteria:** Standees placed on billing counters across all pilot venues; store cashiers understand customer flow.
+- **Acceptance Criteria:** Digital QR touchpoint operational across all pilot venues; store cashiers briefed on customer flow.
 
 #### Task M9-T04: Real-Time Funnel Telemetry, Quota & Token Cost Monitoring
 - **Task ID:** `M9-T04`
@@ -1536,8 +1544,8 @@ Cost calculations are based on published vendor pricing (October 2026) for Supab
 |                            |                      | (150 gens/biz @ ₹0.025)| (150 gens/biz @ ₹0.025)| (150 gens/biz @ ₹0.025)| (150 gens/biz @ ₹0.025)|
 | **Custom Domain**          | ₹0                   | ₹100 / mo (₹1,200/yr)| ₹100 / mo (₹1,200/yr)| ₹100 / mo (₹1,200/yr)| ₹100 / mo (₹1,200/yr) |
 | **GPG Backup Storage**     | ₹0 (Local)           | ₹0 (GitHub Private)  | ₹0 (GitHub Private)  | ₹0 (GitHub Private)  | ₹0 (GitHub Private)   |
-| **Physical Standees**      | ₹0                   | ₹450 (One-time)      | ₹750 (One-time)      | ₹3,750 (One-time)    | ₹7,500 (One-time)     |
-| (Acrylic A6 @ ₹150/unit)   |                      | (Self-funded pilot)  | (Self-funded pilot)  | (Covered by setup fee)(Covered by setup fee)  |
+| **Physical Standees**      | ₹0                   | ₹0 (Deferred Post-MVP)| ₹0 (Deferred Post-MVP)| Post-MVP Option      | Post-MVP Option       |
+| (Digital QR Only in MVP)   |                      | (Digital QR MVP)     | (Digital QR MVP)     | (Commercial TBD)     | (Commercial TBD)      |
 |----------------------------+----------------------+----------------------+----------------------+----------------------+-----------------------|
 | **ESTIMATED MONTHLY OPEX** | **₹0 / month**       | **~₹112 / month**    | **~₹120 / month**    | **~₹195 / month**    | **~₹2,390 / month**   |
 +----------------------------------------------------------------------------------------------------------------------+
@@ -1665,10 +1673,10 @@ Cost calculations are based on published vendor pricing (October 2026) for Supab
 - **Immediate Action:** Frontend file picker rejects non-raster extensions. Server-side storage hook reads the file's first 12 bytes and validates file magic numbers (`89 50 4E 47`, `FF D8 FF`, `52 49 46 46`).
 - **Fallback Architecture:** Non-conforming files are rejected with HTTP 415 Unsupported Media Type before being written to persistent storage.
 
-#### 6. Contingency for Physical Standee Scan Failure Under Low Light (`RSK-10`)
-- **Trigger Condition:** Standee placed in a dimly lit cocktail lounge or cafe corner (50 lux) or under severe overhead spotlight glare.
-- **Immediate Action:** Standee Studio renders high-contrast black vector modules on pure white substrate with an oversized 4-module quiet zone.
-- **Fallback Architecture:** Physical standees include a human-readable short URL (`domain.com/q/ABC123XYZ`) printed below the QR code so patrons can type the link manually in $< 5$ seconds if camera focus fails.
+#### 6. Contingency for Digital QR Scan / Screen Readability Failure (`RSK-10`) [Physical Standees Deferred to Post-MVP]
+- **Trigger Condition:** Digital QR displayed on a dim mobile/counter screen (50 lux) or under severe overhead spotlight glare.
+- **Immediate Action:** Digital QR Studio renders high-contrast black modules on pure white substrate with an oversized 4-module quiet zone in 1024×1024 PNG export.
+- **Fallback Architecture:** Digital QR view and exported image include the human-readable first-party URL (`domain.com/q/ABC123XYZ`) so patrons can type or open the link directly if camera focus fails. (Physical standee printing contingencies deferred to Post-MVP).
 
 #### 7. Contingency for Google Gemini Service Outage or Severe Latency (`RSK-15`)
 - **Trigger Condition:** Google Cloud Gemini API latency spikes past 8.0 seconds or returns HTTP 500/503.
@@ -1677,7 +1685,7 @@ Cost calculations are based on published vendor pricing (October 2026) for Supab
 
 #### 8. Contingency for DPDPA Note Retention Non-Compliance (`RSK-14`)
 - **Trigger Condition:** Unpurged customer personal notes remain in database past 30 days due to scheduler failure.
-- **Immediate Action:** Automated daily `pg_cron` execution (`0 3 * * *`) executes `UPDATE survey_responses SET note = NULL WHERE created_at < NOW() - INTERVAL '30 days'`.
+- **Immediate Action:** Automated daily `pg_cron` execution (`0 3 * * *`) executes `UPDATE survey_responses SET optional_note = NULL WHERE created_at < NOW() - INTERVAL '30 days'`.
 - **Fallback Architecture:** Merchant feed API (`API-OWN-05`) enforces application-level date masking: if `created_at` $> 30$ days, the note field is returned as `null` regardless of underlying table state, rendering the privacy fallback badge in the UI.
 
 ---
@@ -1833,32 +1841,27 @@ To prevent silent divergence between our eight baseline specifications during im
 
 ## 20. Founder Decision Register
 
-The following 5 decisions from Stage 7 Section 32 require formal sign-off before Stage 9 coding:
+The founder has explicitly approved the five core product decisions (M0-01 through M0-05) as recorded below. This constitutes product-decision approval only; full Milestone M0 sign-off and implementation authorization remain pending completion and review of all remaining technical, security, testing, and schema gates.
 
-### Decision 1: Customer Note Retention Policy (DPDPA)
-- **Options:** Option A (Ephemeral, 0 days) vs. Option B (30 Days — Recommended) vs. Option C (90 Days).
-- **Recommendation:** **Option B (30 Days)**. Retaining notes for 30 days provides merchant value during the pilot while keeping personal data risk low. Daily pg_cron purges notes older than 30 days.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+### Decision 1: Customer Note Retention Policy (Decision M0-01)
+- **Approved Policy:** **Option B (30 Days)**. Customer optional notes are stored pseudonymously in `survey_responses.optional_note` for 30 days, after which contents are automatically purged via daily `pg_cron`. No final customer review text is stored.
+- **Status:** `FOUNDER APPROVED (M0-01)`
 
-### Decision 2: Google Review Destination Verification Protocol
-- **Options:** Simple domain whitelist vs. Strict hostname whitelist + Place ID match + Interactive In-App Test Link.
-- **Recommendation:** **Strict hostname whitelist + Place ID match + Interactive In-App Test Link**. Guarantees patrons land on the correct merchant's review composer.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+### Decision 2: Google Review Destination Verification Protocol (Decision M0-02)
+- **Approved Policy:** **Server validation + Interactive In-App Test Link**. Strict HTTPS and Google destination format validation; Place ID checked where reliably determinable (without requiring `ChIJ` prefix); merchant inspects destination before confirming. Anti-gating strictly maintained.
+- **Status:** `FOUNDER APPROVED (M0-02)`
 
-### Decision 3: Merchant Logo Upload Format Boundary
-- **Options:** Allow SVG with sanitization vs. PNG, JPEG, WebP only (Strictly No SVG).
-- **Recommendation:** **PNG, JPEG, WebP only (Strictly No SVG)**. Completely eliminates stored cross-site scripting (XSS) vectors without complex XML parsing.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+### Decision 3: Merchant Logo Upload Format Boundary (Decision M0-03)
+- **Approved Policy:** **PNG, JPEG, WebP only, 2 MB max, server-side magic-bytes inspection**. Strictly no SVG logo uploads for MVP. Platform digital QR code export format is PNG.
+- **Status:** `FOUNDER APPROVED (M0-03)`
 
-### Decision 4: Provisional Gemini Model Selection
-- **Options:** `gemini-3.5-flash-lite` vs. `gemini-2.5-flash` vs. `gemini-1.5-flash`.
-- **Recommendation:** **`gemini-3.5-flash-lite` with zero thinking budget**. Delivers sub-2.0s generation times and lowest cost (~₹0.025/call); decoupled via `GEMINI_MODEL`.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+### Decision 4: Gemini AI Model Configuration (Decision M0-04)
+- **Approved Policy:** Default **`gemini-3.5-flash-lite`**, backup **`gemini-3.1-flash-lite`**; `thinkingLevel: "minimal"`; timeout 8000ms initial technical target; review draft strictly < 60 words, strictly grounded.
+- **Status:** `FOUNDER APPROVED (M0-04)`
 
-### Decision 5: Standee Physical Dimension Format
-- **Options:** International A6 (105 × 148 mm + 3mm bleed) vs. Standard Photo 4×6 inch (102 × 152 mm).
-- **Recommendation:** **International A6 (105 × 148 mm)**. Standard paper stock across Indian commercial print shops; fits acrylic counter stands perfectly.
-- **Status:** `PENDING FOUNDER SIGN-OFF`
+### Decision 5: QR Distribution Architecture for MVP (Decision M0-05)
+- **Approved Policy:** **Digital QR Distribution for MVP**. Delivers in-dashboard preview (`SCR-OWN-06`), downloadable high-res PNG (1024×1024 initial target), and copyable first-party link (`/q/:public_qr_id`). Physical counter standees, A6/4x6" artwork, bleeds, and print-ready PDFs (`SCR-OWN-07`) are **DEFERRED TO POST-MVP**.
+- **Status:** `FOUNDER APPROVED (M0-05)`
 
 ---
 
@@ -1881,15 +1884,15 @@ Every requirement across our foundational documents is mapped to its implementin
 | `FR-CUST-007`   | Resilient Clipboard Copy & Google Handoff   | M4        | `M4-T07`            | `TC-CUST-14..16`   |
 | `FR-CUST-008`   | Universal Owner WhatsApp Channel Link       | M3        | `M3-T05`            | `TC-CUST-01, 21`   |
 | `FR-OWNER-001`  | Secure Merchant Authentication & Sessions   | M5        | `M5-T01`, `M5-T02`  | `TC-OWN-01..03`    |
-| `FR-OWNER-002`  | Business Profile & Standee Vanity Slug      | M5        | `M5-T03`            | `TC-OWN-05..07`    |
+| `FR-OWNER-002`  | Business Profile & Vanity Slug              | M5        | `M5-T03`            | `TC-OWN-05..07`    |
 | `FR-OWNER-003`  | Google Review Destination Configuration     | M5        | `M5-T04`            | `TC-OWN-08..10`    |
-| `FR-OWNER-004`  | QR Standee Studio & Vector PDF Download     | M5        | `M5-T06`            | `TC-OWN-11, 12`    |
+| `FR-OWNER-004`  | Digital QR Preview & PNG Export (Standee PDF Deferred) | M5 | `M5-T06`         | `TC-OWN-11, 12`    |
 | `FR-OWNER-005`  | Funnel Analytics & Conversion Overview      | M5        | `M5-T08`            | `TC-OWN-14`        |
 | `FR-OWNER-006`  | Aggregated Feedback Insights & Notes Feed   | M5        | `M5-T07`            | `TC-OWN-13`        |
 | `FR-OWNER-007`  | Plan & Fair-Use Monthly Quota Monitoring    | M5        | `M5-T09`            | `TC-OWN-15, 16`    |
 | `FR-ADMIN-001`  | Super-Admin Login & Mandatory TOTP MFA      | M6        | `M6-T01`, `M6-T02`  | `TC-ADM-01..03`    |
 | `FR-ADMIN-002`  | Multi-Tenant Directory & Recoverable Invite | M6        | `M6-T03`, `M6-T04`  | `TC-ADM-05..07`    |
-| `FR-ADMIN-003`  | Standee Fulfillment & Instant Suspension    | M6        | `M6-T05`            | `TC-ADM-08..11`    |
+| `FR-ADMIN-003`  | Tenant Status Management & Suspension (Standee Fulfillment Deferred) | M6 | `M6-T05` | `TC-ADM-08..11` |
 | `FR-ADMIN-004`  | Platform Health & AI Token Cost Monitor     | M6        | `M6-T07`            | `TC-ADM-04, 12`    |
 | `FR-AI-001`     | Decoupled Gemini Flash Model Integration    | M4        | `M4-T01`            | `TC-AI-01, 07`     |
 | `FR-AI-002`     | Anti-Hallucination Grounded Prompt Engine   | M4        | `M4-T01`            | `TC-AI-01..03`     |
@@ -1986,9 +1989,9 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 | [ ] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | PENDING      |
 | [ ] 73 granular tasks and acceptance criteria reviewed and approved.                                   | PENDING      |
 | [ ] Pre-implementation schema amendments and M0 alignment gate approved.                               | NOT APPROVED |
-| [ ] 5 Outstanding Founder Decisions (Note retention, destination check, logo format, etc.) approved.  | PENDING      |
+| [x] 5 Founder Product Decisions (M0-01 through M0-05) approved.                                        | FOUNDER APPROVED (M0-01..05 Only)|
 | [ ] 10-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | PENDING      |
-| [ ] Operational budget models (< ₹150/mo cloud opex) and physical standee strategy approved.           | PENDING      |
+| [ ] Operational budget models (< ₹150/mo cloud opex) and digital QR strategy approved.                 | PENDING      |
 | [ ] Stage-by-stage security release gates and Definition of Done approved.                             | PENDING      |
 | [ ] Permission granted to proceed to Stage 9 (Phase 2: Project Initialization & Foundation).           | NOT GRANTED  |
 +----------------------------------------------------------------------------------------------------------------------+
@@ -1996,5 +1999,5 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 
 ---
 
-*End of Master Development Roadmap & Implementation Plan.*  
+*End of Master Development Roadmap & Implementation Plan.*
 *Ready for Phase 2: Implementation upon formal founder review and sign-off.*

@@ -47,7 +47,7 @@ We conducted an architectural comparison between two modern web application stac
 ---
 
 ### 2.2 Definitive Recommendation
-**Option A (React + Vite + TypeScript + Cloudflare Pages + Supabase)** is the **definitive recommended stack**.  
+**Option A (React + Vite + TypeScript + Cloudflare Pages + Supabase)** is the **definitive recommended stack**.
 It eliminates artificial commercial licensing costs, avoids cold-start latency for patrons scanning QR codes at physical counters, simplifies multi-tenant security via PostgreSQL Row Level Security (RLS), and provides a clean separation of concerns tailored for a solo student founder.
 
 ---
@@ -68,14 +68,15 @@ It eliminates artificial commercial licensing costs, avoids cold-start latency f
 | Client-Side Routing      | React Router                 | React Router v7.x (SPA Library Mode)   |
 | Form Management          | React Hook Form              | React Hook Form v7.x                   |
 | Schema Validation        | Zod                          | Zod v3.23+                             |
-| Client PDF Studio        | @react-pdf/renderer or jsPDF | Client-Side Vector PDF Engine          |
+| Client PDF Studio        | @react-pdf/renderer or jsPDF | (DEFERRED — POST-MVP) Standee Vector PDF Engine|
+| Digital QR Generator     | Client-side QR generator     | Canvas/PNG QR preview & high-res PNG export   |
 | Icons                    | Lucide React                 | Lucide React v0.4x                     |
 | Hosting & Edge CDN       | Cloudflare Pages             | Cloudflare Edge Network (Standard)     |
 | Database Engine          | PostgreSQL                   | PostgreSQL 15+ (via Supabase)          |
 | Multi-Tenant Security    | Row Level Security (RLS)     | Engine-Level Declarative Policies      |
 | Backend Functions        | Supabase Edge Functions      | Deno Runtime (TypeScript)              |
 | Authentication           | Supabase Auth                | Email Magic Link / Password + JWT      |
-| AI Generation Engine     | Google Gemini API            | gemini-3.5-flash-lite / gemini-3.8-flash|
+| AI Generation Engine     | Google Gemini API            | gemini-3.5-flash-lite (Default) / 3.1 (Backup)|
 | AI Official SDK          | @google/genai                | Official Google GenAI SDK v0.1+        |
 +---------------------------------------------------------------------------------------------------+
 ```
@@ -131,11 +132,16 @@ Accordingly, we evaluate the currently supported modern Gemini Flash models:
 
 | Model Identifier | Official Role & Purpose | Input Price (per 1M tokens) | Output Price (per 1M tokens, inc. thinking) | Context Window | Structured JSON Output | Evaluator Assessment |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
-| **`gemini-3.5-flash-lite`** | Cost-efficient model optimized for high-volume agentic tasks, translation, and structured data processing. | **$0.30** (~₹25.50) | **$2.50** (~₹212.50) | 1,048,576 | Native Schema Support | **Recommended Primary Model**: Exceptionally low input/output cost, fast turnaround, excellent structured JSON compliance. |
-| **`gemini-3.8-flash`** | Intelligent Flash model engineered for complex reasoning, autonomous agents, and enterprise workflows. | **$0.75** (~₹63.75) | **$3.75** (~₹318.75) | 1,048,576 | Native Schema Support | **Recommended Premium Alternative**: Higher reasoning depth; promo pricing ($0.75/$3.75) valid through Dec 31, 2026. |
-| **`gemini-3.5-flash`** | Earlier foundational Flash model built for speed and routine workloads. | **$1.50** (~₹127.50) | **$9.00** (~₹765.00) | 1,048,576 | Native Schema Support | **Not Recommended for MVP**: Substantially higher price per million tokens than `3.5-flash-lite` with no distinct advantage for short review drafts. |
+| **`gemini-3.5-flash-lite`** | Cost-efficient model optimized for high-volume agentic tasks, translation, and structured data processing. | **$0.30** (~₹25.50) | **$2.50** (~₹212.50) | 1,048,576 | Native Schema Support | **Approved Default Model (M0-04)**: Exceptionally low input/output cost, fast turnaround, excellent structured JSON compliance. |
+| **`gemini-3.1-flash-lite`** | Highly optimized lightweight Flash model providing dependable high-speed structured drafting. | **$0.25** (~₹21.25) | **$2.00** (~₹170.00) | 1,048,576 | Native Schema Support | **Approved Backup Model (M0-04)**: Resilient fallback if 3.5 experiences transient service throttling or regional outages. |
+| **`gemini-3.8-flash`** | Intelligent Flash model engineered for complex reasoning, autonomous agents, and enterprise workflows. | **$0.75** (~₹63.75) | **$3.75** (~₹318.75) | 1,048,576 | Native Schema Support | **Alternative Model**: Higher reasoning depth; available if complex multilingual expansion is explored Post-MVP. |
 
 *(Citations verified from official Google Gemini documentation `gemini-api-guides/pricing.md` and `gemini-api-guides/models.md`)*.
+
+> **Thinking & Latency Configuration (Founder Decision M0-04):**
+> - For Gemini 3.x Flash-Lite models, configure `thinkingLevel: "minimal"` as the intended GenerateContent setting (`thinkingBudget = 0` assumption is deprecated; incompatible legacy settings must not be mixed). Minimal thinking does not guarantee zero internal reasoning tokens.
+> - The 8000ms timeout is an initial technical target (not a guaranteed response latency).
+> - Pre-production benchmarking is required to measure response latency, draft quality, input/output tokens, thinking tokens, API failures, retry costs, actual paid usage, and behavior when the backup model is invoked. Token cost calculations below are modeled estimates, not guarantees.
 
 ---
 
@@ -252,7 +258,7 @@ All calculations reflect verified vendor pricing tiers and operational dependenc
 | **Supabase 7-Day Inactivity Pausing** | High | Medium | Pilot phase uses an automated external health-check ping (via GitHub Actions cron every 48 hours). Upgrade to Supabase Pro ($25/mo) is budgeted upon reaching 20 paying merchants. |
 | **Mobile Popup Blocker Interception** | Medium | High | Two-step or fallback handoff: If `window.open` is blocked by iOS Safari / Android Chrome, parent screen immediately displays a persistent, prominent *"Tap here to open Google Reviews"* button. |
 | **Shared Customer Wi-Fi Throttling** | Medium | Medium | Rate limiting uses ephemeral hashed IP keys (`SHA-256(IP + salt)`) with sliding-window burst allowances to avoid blocking multiple customers on the same cafe Wi-Fi. |
-| **Client-Side PDF Compatibility** | Low | Low | Uses standard `@react-pdf/renderer` or `jsPDF` canvas rendering directly in the browser, eliminating server-side headless browser rendering costs. |
+| **Client-Side PDF Compatibility** | Low | Low | (DEFERRED — POST-MVP) Physical standees and vector PDF export deferred per Founder Decision M0-05. MVP uses lightweight client-side QR PNG generation. |
 
 ---
 
@@ -270,15 +276,24 @@ DECISION AREA                   STATUS                 DECISION & RATIONALE
                                                        Guarantees 48px tap targets, WCAG 2.1 AA a11y.
 3. AI Generation Engine         APPROVED               Supabase Edge Functions + Google GenAI SDK.
                                                        Isolated server-side secrets, zero client exposure.
-4. Primary AI Model             PROVISIONAL            gemini-3.5-flash-lite (Primary) / gemini-3.8-flash.
-                                                       Configurable via GEMINI_MODEL_NAME environment key.
+4. Primary AI Model             FOUNDER APPROVED       gemini-3.5-flash-lite (Default) / gemini-3.1-flash-lite
+                                                       (Backup); thinkingLevel: "minimal" (M0-04).
 5. Client-Side Routing          APPROVED               React Router v7 (Library SPA mode).
 6. State Management             APPROVED               React Context / TanStack Query (no complex Redux).
-7. Standee PDF Engine           APPROVED               Client-side vector generation (@react-pdf/renderer).
+7. Standee PDF Engine           DEFERRED — POST-MVP    Physical standees and vector PDF export deferred to
+                                                       Post-MVP (M0-05); client-side QR PNG adopted for MVP.
+8. Customer Note Retention      FOUNDER APPROVED       30-day automated rolling purge of
+                                                       `survey_responses.optional_note` via daily pg_cron (M0-01).
+9. Destination Verification     FOUNDER APPROVED       Strict server-side validation + interactive merchant
+                                                       preview (M0-02).
+10. Merchant Logo Upload        FOUNDER APPROVED       PNG/JPEG/WebP only, 2 MB max, server-side magic bytes
+                                                       inspection, SVG excluded from MVP (M0-03).
+11. QR Distribution (M0-05)     FOUNDER APPROVED       Digital-only QR distribution for MVP (Preview,
+                                                       High-Res PNG, Copyable Link). Standees deferred.
 ===================================================================================================
 ```
 
 ---
 
-*End of Technology Stack Specification & Evaluation Document.*  
+*End of Technology Stack Specification & Evaluation Document.*
 *Reference for Architecture Specification ([`docs/ARCHITECTURE.md`](file:///Users/mrugmaythere/work/QRs/docs/ARCHITECTURE.md)).*

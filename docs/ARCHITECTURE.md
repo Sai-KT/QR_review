@@ -41,10 +41,11 @@
 |                                | within serverless Edge Functions, never exposed in client code.  |
 | 4. DEFENSIVE PRIVILEGE SCOPING | Privileged service-role operations must enforce imperative       |
 |                                | server-side tenant validation to prevent horizontal escalation.  |
-| 5. GRACEFUL DEGRADATION        | Physical standees never produce dead ends; if AI is offline or   |
+| 5. GRACEFUL DEGRADATION        | Permanent QR routes never produce dead ends; if AI is offline or |
 |                                | quota exhausted, UI offers direct Google review navigation.      |
 | 6. DATA MINIMIZATION & PRIVACY | Zero customer account creation; optional free-text notes treated |
-|                                | as pseudonymous data subject to automated 30-day rolling purges. |
+|                                | as pseudonymous data (`survey_responses.optional_note`) subject   |
+|                                | to automated 30-day rolling purges via daily pg_cron.            |
 | 7. MOBILE BROWSER RESILIENCE   | Defensive handoff handling mobile clipboard permission rejections|
 |                                | and aggressive popup blockers on iOS Safari and Android Chrome.  |
 | 8. ATOMIC RESOURCE ACCOUNTING  | Quotas reserved and reconciled atomically in database transactions|
@@ -62,9 +63,9 @@ The following C4-style context diagram illustrates the interactions between end 
 C4Context
     title System Context Diagram: Multi-Tenant AI Review SaaS
 
-    Person(customer, "End Customer / Patron", "Scans physical counter standee, answers 3 MCQs, edits and copies review draft.")
-    Person(owner, "Local Business Owner", "Configures business profile, reviews aggregated feedback insights, downloads standee PDFs.")
-    Person(admin, "Super-Admin Founder", "Oversees tenants, manages standee fulfillment, tracks API costs, monitors platform health.")
+    Person(customer, "End Customer / Patron", "Scans digital QR code or accesses link, answers 3 MCQs, edits and copies review draft.")
+    Person(owner, "Local Business Owner", "Configures business profile, reviews aggregated feedback insights, previews & downloads digital QR PNGs.")
+    Person(admin, "Super-Admin Founder", "Oversees tenants, manages platform health, tracks API costs, controls emergency suspension.")
 
     Enterprise_Boundary(saas_boundary, "AI Review SaaS Platform") {
         System(web_app, "Single-Page Web Application", "React 19 + Vite deployed on Cloudflare Pages. Serves Customer Flow (/q/:qrId), Merchant Dashboard (/dashboard), and Admin Console (/admin).")
@@ -73,7 +74,7 @@ C4Context
     }
 
     System_Ext(google_maps, "Google Maps / Local Reviews", "Official review write interface for verified customer star rating and review publication.")
-    System_Ext(gemini_api, "Google Gemini Flash API", "Large language model endpoint (gemini-3.5-flash-lite / gemini-3.8-flash) generating grounded review drafts.")
+    System_Ext(gemini_api, "Google Gemini Flash API", "Large language model endpoint (gemini-3.5-flash-lite / gemini-3.1-flash-lite) generating grounded review drafts.")
     System_Ext(whatsapp, "WhatsApp Web / Mobile App", "Direct customer-to-owner operational feedback side-channel.")
 
     Rel(customer, web_app, "Scans QR / Loads /q/:qrId", "HTTPS / Cloudflare CDN (<100ms TTFB)")
@@ -106,7 +107,7 @@ graph TB
 
         subgraph Owner_Portal ["Merchant Dashboard (/dashboard)"]
             UI_OwnerAuth["Owner Auth & Profile<br/>(Supabase Auth Session)"]
-            UI_QRStudio["Standee Vector PDF Studio<br/>(Client-Side PDF Export)"]
+            UI_QRStudio["Digital QR & Sharing<br/>(Preview, PNG Export & Link Copy)"]
             UI_Analytics["Funnel Metrics & Insights<br/>(Aggregated Non-PII Ratios)"]
             UI_Quota["Quota & Plan Status<br/>(150 Monthly Cap Tracker)"]
         end
@@ -114,7 +115,7 @@ graph TB
         subgraph Admin_Portal ["Super-Admin Console (/admin)"]
             UI_AdminAuth["Admin Auth Guard<br/>(Supabase Auth MFA aal2 Required)"]
             UI_TenantMgr["Tenant Management Directory<br/>(Status, Quotas, Plans)"]
-            UI_Fulfill["Standee Fulfillment Tracker<br/>(Acrylic Standee Dispatch)"]
+            UI_Fulfill["Standee Fulfillment Tracker<br/>(DEFERRED — POST-MVP)"]
             UI_CostMon["Gemini Token & Cost Monitor<br/>(Real Consumption vs COGS)"]
         end
     end
@@ -146,7 +147,7 @@ graph TB
     end
 
     subgraph External_Services ["External Cloud Services"]
-        EXT_Gemini["Google Gemini API<br/>(gemini-3.5-flash-lite / 3.8-flash)"]
+        EXT_Gemini["Google Gemini API<br/>(gemini-3.5-flash-lite / 3.1-flash-lite)"]
         EXT_GoogleMaps["Google Maps Platform<br/>(Write Review Web Intent)"]
     end
 
@@ -184,12 +185,12 @@ The frontend is built as a single-page web application using **React 19 + Vite 6
 
 ```
 src/
-├── assets/                  # Brand vectors, icons, standee template assets
+├── assets/                  # Brand vectors, icons, digital QR assets
 ├── components/
 │   ├── ui/                  # Reusable shadcn/ui primitives (Button, Card, Dialog, Toast)
 │   ├── customer/            # Customer survey card, draft editor, handoff button, bypass link
-│   ├── owner/               # Metric summary cards, PDF standee preview, profile form, insights
-│   ├── admin/               # Merchant directory table, fulfillment kanban, cost charts
+│   ├── owner/               # Metric summary cards, digital QR preview, profile form, insights
+│   ├── admin/               # Merchant directory table, cost charts
 │   └── shared/              # ErrorBoundary, LoadingSkeleton, OfflineNotice
 ├── hooks/
 │   ├── usePublicBusiness.ts # Fetches and caches public business projection by QR token
@@ -203,7 +204,8 @@ src/
 │   └── AdminLayout.tsx      # Super-admin master console layout with system status badges
 ├── lib/
 │   ├── supabaseClient.ts    # Initialized Supabase JS client (Publishable Anon key)
-│   ├── pdfGenerator.ts      # Client-side A6 standee PDF vector generation engine
+│   ├── qrGenerator.ts       # Client-side digital QR generation and high-res PNG export
+│   ├── pdfGenerator.ts      # (DEFERRED — POST-MVP) Standee PDF vector generation engine
 │   └── validators.ts        # Shared Zod validation schemas matching backend contracts
 ├── routes/
 │   ├── AppRoutes.tsx        # Central React Router v7 configuration
@@ -223,12 +225,13 @@ Route Path                  Access Scope            Layout / Screen Description
 /r/:slug                    Anonymous Public        Vanity slug route: resolves business by slug
 /r/:slug/fallback           Anonymous Public        Graceful degradation: direct Google review handoff
 /auth/login                 Anonymous Public        Merchant & Admin authentication (Magic Link / Pass)
-/dashboard                  Authenticated Merchant   Owner Overview: Funnel metrics & active standee
+/dashboard                  Authenticated Merchant   Owner Overview: Funnel metrics & digital QR link
 /dashboard/profile          Authenticated Merchant   Business settings, Google Place ID, WhatsApp setup
-/dashboard/standee          Authenticated Merchant   Standee Studio: Live preview & vector PDF export
+/dashboard/qr               Authenticated Merchant   Digital QR & Sharing: Live preview, PNG export, link copy
+/dashboard/standee          Authenticated Merchant   (DEFERRED — POST-MVP) Standee Studio & PDF export
 /dashboard/insights         Authenticated Merchant   Aggregated customer feedback percentage insights
 /admin                      Super-Admin Only (MFA)   Founder Master Console: Merchant directory
-/admin/fulfillment          Super-Admin Only (MFA)   Standee print & dispatch fulfillment pipeline
+/admin/fulfillment          Super-Admin Only (MFA)   (DEFERRED — POST-MVP) Standee print & dispatch
 /admin/costs                Super-Admin Only (MFA)   Gemini API token consumption & cost analytics
 /*                          Anonymous Public        Universal 404 / Recovery screen
 ```
@@ -294,7 +297,7 @@ All server-side business logic is implemented via **Supabase Edge Functions** ru
 ### 6.2 Trust Boundary Enforcement & Service-Role Isolation
 
 #### The `service_role` Key Architecture & Risks:
-The Supabase `service_role` key grants administrative superuser access to the PostgreSQL database, **completely bypassing all Row Level Security (RLS) policies**. 
+The Supabase `service_role` key grants administrative superuser access to the PostgreSQL database, **completely bypassing all Row Level Security (RLS) policies**.
 
 ```
 +---------------------------------------------------------------------------------------------------+
@@ -325,13 +328,13 @@ The Supabase `service_role` key grants administrative superuser access to the Po
 
 ## 7. Permanent QR Architecture & Lifecycle Engine
 
-Physical standees placed on retail checkout counters are durable hardware assets. Re-printing acrylic standees due to software configuration changes or expired plans destroys the economic viability of the SaaS. We implement an **Immutable Identifier Routing Architecture** to guarantee standee durability.
+Distributed QR identifiers must remain permanently operational. Changing business names, cosmetic slugs, or subscription lapses must never break existing distributed links or exported QR codes. We implement an **Immutable Identifier Routing Architecture** (`/q/:public_qr_id`) to guarantee digital permanence and eliminate broken links.
 
 ```
-PHYSICAL STANDEE                    PERMANENT RESOLVER                 RESOLVED DESTINATION
+PERMANENT QR ASSET                  PERMANENT RESOLVER                 RESOLVED DESTINATION
 +-----------------------+           +----------------------+           +----------------------+
-| Acrylic Counter Stand |           | Cloudflare Edge Route|           | Active State Check:  |
-| Printed QR Code:      | --------> | https://domain/q/    | --------> | • Active: Survey Flow|
+| Digital QR Code /     |           | Cloudflare Edge Route|           | Active State Check:  |
+| Distributed Link:     | --------> | https://domain/q/    | --------> | • Active: Survey Flow|
 | /q/nano_8x9k2m        |           | [public_qr_id]       |           | • Lapsed: Direct Link|
 +-----------------------+           +----------------------+           | • Banned: Inactive   |
                                                                        +----------------------+
@@ -341,14 +344,14 @@ PHYSICAL STANDEE                    PERMANENT RESOLVER                 RESOLVED 
 
 ### 7.1 Lifecycle State Machine & Degradation Matrix
 
-| Business Lifecycle State | Public Resolver Response (`/q/:qrId`) | Customer Mobile Experience | Hardware Standee Integrity |
+| Business Lifecycle State | Public Resolver Response (`/q/:qrId`) | Customer Mobile Experience | Permanent QR Integrity |
 | :--- | :--- | :--- | :--- |
-| **`active` (Normal)** | HTTP 200: Full public projection with survey schema. | Standard 3-MCQ single-card flow with AI review draft generation. | Standee functions fully as intended. |
-| **`active` (Quota Reached)**| HTTP 200: Public projection with `quota_exhausted: true`. | Displays survey with instant **affirmed-facts draft** or direct Google button. | **Zero disruption**; standee remains fully useful. |
-| **`past_due` / `lapsed`** | HTTP 200: Public projection with `status: 'direct_only'`. | Gracefully displays branded screen: *"Review [Name] on Google"* with direct button. | **Never 404s**; physical standee permanently useful. |
-| **`canceled`** | HTTP 200: Public projection with `status: 'direct_only'`. | Displays clean direct Google review button for that business. | Physical standee continues driving reviews. |
+| **`active` (Normal)** | HTTP 200: Full public projection with survey schema. | Standard 3-MCQ single-card flow with AI review draft generation. | QR resolves fully as intended. |
+| **`active` (Quota Reached)**| HTTP 200: Public projection with `quota_exhausted: true`. | Displays survey with instant **affirmed-facts draft** or direct Google button. | **Zero disruption**; QR remains fully useful. |
+| **`past_due` / `lapsed`** | HTTP 200: Public projection with `status: 'direct_only'`. | Gracefully displays branded screen: *"Review [Name] on Google"* with direct button. | **Never 404s**; QR permanently useful. |
+| **`canceled`** | HTTP 200: Public projection with `status: 'direct_only'`. | Displays clean direct Google review button for that business. | QR continues driving reviews. |
 | **`suspended` (Policy/Abuse)**| HTTP 200: Returns `is_active: false, status: 'suspended', name: b.name`. | Displays neutral inactive notice: *"This feedback link is currently unavailable."* | Blocks abusive merchants without breaking the UI. |
-| **Unknown QR Token** | HTTP 404: Returns `error: 'not_found'`. | Renders friendly recovery screen: *"Standee link not recognized. Please scan again."* | Clean user feedback; prevents blank screen crash. |
+| **Unknown QR Token** | HTTP 404: Returns `error: 'not_found'`. | Renders friendly recovery screen: *"QR link not recognized. Please verify the URL."* | Clean user feedback; prevents blank screen crash. |
 | **Backend / DB Outage** | Network Error / HTTP 5xx. | Client displays cached local fallback or direct retry button with offline notice. | High fault tolerance; eliminates silent failure. |
 
 > **Operational Scope Note:** While immutable QR tokens guarantee software routing durability, this architecture does not claim mathematical permanence or guarantee infrastructure uptime forever against external catastrophic domain/DNS failures.
@@ -357,7 +360,7 @@ PHYSICAL STANDEE                    PERMANENT RESOLVER                 RESOLVED 
 
 ### 7.2 Safe Inactive Notices for Suspended Businesses
 When an account is suspended for policy violations or fraudulent behavior:
-1. **Preventing Broken 404 Confusion:** The database lookup must **not** simply omit suspended businesses via `WHERE is_active = TRUE`, because doing so makes a legitimate printed standee appear corrupted or non-existent (HTTP 404).
+1. **Preventing Broken 404 Confusion:** The database lookup must **not** simply omit suspended businesses via `WHERE is_active = TRUE`, because doing so makes a legitimate QR asset appear corrupted or non-existent (HTTP 404).
 2. **Preventing Private Data Leakage:** The projection RPC returns only:
    ```json
    {
@@ -370,19 +373,21 @@ When an account is suspended for policy violations or fraudulent behavior:
      "survey_config": null
    }
    ```
-3. **Safe UI Presentation:** The customer UI displays:  
-   *"Feedback Standee Inactive — This business's digital feedback portal is currently unavailable."*  
+3. **Safe UI Presentation:** The customer UI displays:
+   *"Feedback Portal Inactive — This business's digital feedback portal is currently unavailable."*
    Private tenant information (`owner_id`, `billing_email`, internal suspension notes, or payment history) is **never included in the projection payload**.
 
 ---
 
 ### 7.3 Google Review Destination Validation Engine
 To protect patrons from malicious phishing redirects or broken links, destination URLs configured by merchants are validated on the backend:
-1. **Place ID Resolution:** If owner supplies a Place ID (`ChIJ...`), the system constructs the standard Google write URL:  
+1. **Place ID Resolution:** If owner supplies a Place ID, the system constructs the standard Google write URL:
    `https://search.google.com/local/writereview?placeid={placeId}`.
-2. **Domain Whitelist Enforcement:** If owner supplies a direct URL, it must match the strict regex:  
+   *(Note: Place ID is validated where reliably determinable; system does not strictly mandate that all valid Place IDs begin with `ChIJ`).*
+2. **Domain Whitelist & HTTPS Enforcement:** If owner supplies a direct URL, it must strictly use HTTPS and match the permitted Google regex:
    `^https://(search\.google\.com/local/writereview\?placeid=|g\.page/r/|maps\.app\.goo\.gl/|www\.google\.com/maps/).+$`.
-3. **Destination Change Throttling:** Owners can modify their destination URL a maximum of 3 times per calendar month to prevent automated redirection hijacking.
+3. **Interactive Merchant Inspection:** The merchant dashboard provides an interactive test link allowing the merchant to open and inspect the target destination before confirming.
+4. **Destination Change Throttling & Audit:** Owners can modify their destination URL a maximum of 3 times per calendar month to prevent automated redirection hijacking, with all changes logged in tenant audit trails.
 
 ---
 
@@ -464,26 +469,26 @@ RETURNS TABLE (
     whatsapp_number TEXT,
     is_active BOOLEAN,
     status TEXT
-) 
+)
 SECURITY DEFINER
 SET search_path = ''
 LANGUAGE plpgsql
 AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         b.public_qr_id,
         b.name,
         b.logo_url,
         b.category,
         -- If suspended or lapsed, suppress external review URLs to prevent abuse
-        CASE 
+        CASE
             WHEN b.status = 'suspended' THEN NULL
-            ELSE b.google_review_url 
+            ELSE b.google_review_url
         END AS google_review_url,
-        CASE 
+        CASE
             WHEN b.status = 'suspended' THEN NULL
-            ELSE b.whatsapp_number 
+            ELSE b.whatsapp_number
         END AS whatsapp_number,
         b.is_active,
         b.status
@@ -504,10 +509,12 @@ GRANT EXECUTE ON FUNCTION public.get_public_business_by_qr(TEXT) TO anon, authen
 ## 10. AI Generation Pipeline & Prompt Engineering
 
 ### 10.1 Model Selection & Official Google Guidance
-- **Official Documentation Baseline:** Based on official Google Gemini API documentation, `gemini-2.5` models are access-restricted for certain new cloud projects.
-- **Production Default:** **`gemini-3.5-flash-lite`** ($0.30/1M input, $2.50/1M output) is adopted as the primary cost-effective drafting model.
-- **Premium Alternative:** **`gemini-3.8-flash`** ($0.75/1M input, $3.75/1M output) is maintained as a configuration-switchable alternative for complex sentiment nuances.
-- **Runtime Configuration:** The model identifier is bound to the serverless environment variable `GEMINI_MODEL_NAME`, allowing instant model migration without redeploying code.
+- **Official Documentation Baseline:** Gemini Flash models provide high-speed, cost-effective structured review drafting.
+- **Production Default:** **`gemini-3.5-flash-lite`** is adopted as the primary model (Founder Decision M0-04).
+- **Backup Fallback:** **`gemini-3.1-flash-lite`** is configured as the active backup model.
+- **Thinking Configuration:** Configured with `thinkingLevel: "minimal"` as the intended GenerateContent configuration; `thinkingBudget = 0` assumption is deprecated, and incompatible legacy thinking settings must never be mixed. Note that minimal thinking does not guarantee zero internal reasoning tokens.
+- **Runtime Configuration:** The model identifier is bound to the serverless environment variable `GEMINI_MODEL`, allowing configuration changes without redeploying code.
+- **Timeout & Benchmarking Target:** 8000ms timeout is an initial technical target (not a guaranteed latency). Production deployment requires benchmarking latency, draft quality, input/output tokens, thinking tokens, API failures, and backup behavior. Server-side validation enforces output constraints (<60 words, strictly grounded).
 
 ---
 
@@ -574,7 +581,7 @@ EVENT_GOOGLE_BYPASS_CLICK     Customer taps direct Google bypass link          D
 ---
 
 ### 11.3 Client Deduplication & Session Handling
-- **Transient Memory State:** Customers scanning standees have zero persistent accounts.
+- **Transient Memory State:** Customers scanning QR codes or accessing links have zero persistent accounts.
 - **In-Memory & `sessionStorage` Deduplication:** The client application maintains a 5-second debounce window in transient memory to prevent double-tap logging.
 - **No Cross-Session Tracking:** Zero persistent identifying tracking cookies or cross-session tokens are stored in `localStorage`.
 
@@ -588,7 +595,7 @@ In a serverless environment (Supabase Edge Functions on Deno), function instance
 ---
 
 ### 12.2 Shared-Network Wi-Fi Throttling (Salon/Cafe NAT Handling)
-In local salons, cafes, and clinics, multiple customers share the establishment's commercial Wi-Fi router (NAT sharing a single public IP address). A rigid 5 req/IP/hour rule would block legitimate patrons scanning standees simultaneously.
+In local salons, cafes, and clinics, multiple customers share the establishment's commercial Wi-Fi router (NAT sharing a single public IP address). A rigid 5 req/IP/hour rule would block legitimate patrons scanning QR codes simultaneously.
 
 #### Layered Anti-Abuse Solution:
 1. **Business Monthly Quota (150/mo):** Protects macro operating expenditure regardless of traffic patterns.
@@ -605,21 +612,21 @@ In local salons, cafes, and clinics, multiple customers share the establishment'
 ```mermaid
 stateDiagram-v2
     [*] --> Available: Monthly Quota Reset (150 Limit)
-    
+
     Available --> Reserving: reserve_generation_quota(business_id, idempotency_key)
     note right of Reserving: PostgreSQL row lock via SELECT FOR UPDATE.<br/>Increments reserved_count.<br/>Generates reservation_id with 60s TTL.
-    
+
     Reserving --> Available: Quota Exceeded (used + reserved >= 150)
-    
+
     Reserving --> Generating: Quota Authorized
     note right of Generating: Edge Function calls Gemini API with 8.0s timeout.
-    
+
     Generating --> Committed: commit_generation_quota(reservation_id)
     note right of Committed: LLM delivered valid draft.<br/>used_count = used_count + 1<br/>reserved_count = reserved_count - 1
-    
+
     Generating --> Released: release_generation_quota(reservation_id)
     note right of Released: LLM error / timeout prior to delivery.<br/>reserved_count = reserved_count - 1<br/>used_count remains unchanged.
-    
+
     Generating --> Expired: Sweep Stale Reservations (TTL > 60s)
     note right of Expired: Abandoned requests automatically freed<br/>by scheduled vacuum job.
 ```
@@ -686,13 +693,13 @@ Absolute claims of "zero PII collection" are false. Optional free-text notes ent
 2. **Access Control:** Notes are accessible strictly by the authenticated business owner (`auth.uid() = businesses.owner_id`) and super-admin. Public endpoints have zero read access.
 3. **Automated 30-Day Rolling Purge:** A scheduled database function or `pg_cron` worker executes every 24 hours to scrub free-text notes older than 30 days:
    ```sql
-   UPDATE public.survey_responses 
-   SET optional_note = NULL 
-   WHERE created_at < NOW() - INTERVAL '30 days' 
+   UPDATE public.survey_responses
+   SET optional_note = NULL
+   WHERE created_at < NOW() - INTERVAL '30 days'
      AND optional_note IS NOT NULL;
    ```
 4. **Backup Retention Alignment:** Supabase automated daily backups retain data for 7 days (free tier) or 30 days (Pro tier). Once data is purged from active tables, it expires permanently from backup archives within the backup retention window.
-5. **Customer Privacy Notice:** The survey card displays an explicit notice:  
+5. **Customer Privacy Notice:** The survey card displays an explicit notice:
    *"Your selections and optional notes are processed by AI to generate your draft review. Do not enter confidential personal information."*
 
 ---
@@ -721,13 +728,13 @@ Absolute claims of "zero PII collection" are false. Optional free-text notes ent
 | Project Pausing          | free-tier pilot phase                 | executes HTTP keep-alive every |
 |                          |                                       | 48 hours via GitHub Actions.   |
 |--------------------------+---------------------------------------+--------------------------------|
-| Business Plan Lapsed     | Merchant subscription status = lapsed | Standee route (/q/:id) stays   |
-|                          | or canceled                           | active, displaying direct      |
+| Business Plan Lapsed     | Merchant subscription status = lapsed | Permanent QR route (/q/:id)    |
+|                          | or canceled                           | stays active, displaying direct |
 |                          |                                       | Google review handoff button.  |
 |--------------------------+---------------------------------------+--------------------------------|
-| Suspended Business Scan  | Merchant status = 'suspended'         | Standee route renders clean    |
-|                          |                                       | inactive notice without 404 or |
-|                          |                                       | private tenant information.    |
+| Suspended Business Scan  | Merchant status = 'suspended'         | Permanent QR route renders     |
+|                          |                                       | clean inactive notice without  |
+|                          |                                       | 404 or private tenant info.    |
 +---------------------------------------------------------------------------------------------------+
 ```
 
@@ -809,21 +816,27 @@ graph LR
 DECISION AREA                   STATUS                 WORKING SPECIFICATION & NEXT STEP
 ---------------------------------------------------------------------------------------------------
 1. Public QR Token Length       APPROVED               10-character alphanumeric nano-id (URL-safe).
-2. Primary Gemini Model         APPROVED BASELINE      gemini-3.5-flash-lite ($0.30 in / $2.50 out per 1M).
-                                                       gemini-3.8-flash ($0.75 in / $3.75 out per 1M) as
-                                                       premium option. Configurable via GEMINI_MODEL_NAME.
+2. Primary Gemini Model         FOUNDER APPROVED       gemini-3.5-flash-lite default, gemini-3.1-flash-lite
+                                                       backup via official SDK; thinkingLevel: "minimal".
 3. Rate Limiting Mechanism      APPROVED BASELINE      Database-backed atomic sliding-window bucket table
                                                        with hashed IP keys. Upstash Redis evaluated as
                                                        managed upgrade if traffic exceeds 10,000 req/day.
 4. Keep-Alive Ping Tool         PROVISIONAL            GitHub Actions scheduled workflow (48h ping)
                                                        to prevent Supabase 7-day inactivity pause.
-5. Client PDF Engine            PROVISIONAL            @react-pdf/renderer evaluated in Stage 3.
-6. Customer Note Retention      APPROVED BASELINE      30-day automated rolling purge via scheduled
-                                                       PostgreSQL cleanup function.
+5. Client PDF Engine            DEFERRED — POST-MVP    Physical standees and vector PDF export deferred to
+                                                       Post-MVP. Client-side QR PNG export adopted for MVP.
+6. Customer Note Retention      FOUNDER APPROVED       30-day automated rolling purge of
+                                                       `survey_responses.optional_note` via daily pg_cron.
+7. QR Distribution (M0-05)      FOUNDER APPROVED       Digital-only QR distribution for MVP (Preview,
+                                                       High-Res PNG, Copyable Link). Standees deferred.
+8. Destination Verification     FOUNDER APPROVED       Strict server-side validation + interactive merchant
+                                                       preview (M0-02).
+9. Merchant Logo Upload         FOUNDER APPROVED       PNG/JPEG/WebP only, 2 MB max, server-side magic bytes
+                                                       inspection, SVG excluded from MVP (M0-03).
 ===================================================================================================
 ```
 
 ---
 
-*End of System Architecture Specification.*  
+*End of System Architecture Specification.*
 *Ready for Phase 1 — Stage 3 (Database Schema & API Design) upon founder approval.*

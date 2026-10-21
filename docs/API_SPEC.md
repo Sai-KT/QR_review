@@ -33,7 +33,7 @@
 | **1.2** | Oct 19, 2026 | Principal Supabase Engineer & PostgreSQL Architect | **Stage 6 Technical Implementability & Database Repair:**<br/>1. **Administrative Operation Transaction Contract (§12, §15):** Replaced non-mutating placeholder with complete transaction semantics and SQL for `CREATE_BUSINESS`, `SET_BUSINESS_STATUS`, `ADJUST_QUOTA`, `UPDATE_SUBSCRIPTION`, and `REASSIGN_OWNER`. Enforced `service_role` execute grants, authoritative database role checks, and hardware-immutable QR enforcement.<br/>2. **Atomic Quota SQL & Idempotency (§10, §15):** Pre-checked idempotency before consuming reservations; associated reservations with exact `quota_id` to eliminate month-end midnight races; added missing-cycle auto-provisioning; prevented negative counters via `GREATEST(0, reserved_count - 1)`; resolved committed replay policy (`ERR_ALREADY_COMMITTED`) aligned with data minimization.<br/>3. **Direct PostgREST Response Field Mapping (§3, §11):** Documented raw `snake_case` JSON responses and requests for direct PostgREST operations (`API-OWN-01`, `02`, `05`, `06`, `09`) alongside centralized client-side camelCase DTO adapters.<br/>4. **Modern Supabase Authentication Architecture (§4):** Specified modern publishable API key (`sb_pub_...`), per-function `verify_jwt` gateway configuration (disabled on public endpoints, enabled on authenticated), and application-level IP rate limiting.<br/>5. **Cryptographic Survey-to-Generation Binding (§7, §8):** Bound `API-PUB-04` feedback submission to `API-PUB-03` generation via signed HMAC `submissionToken` and database row verification; prevented duplicate survey submissions on generation retries.<br/>6. **Merchant Audit Logging Schema Compatibility (§11, §16):** Formulated database amendment renaming `admin_user_id` to `actor_user_id` and adding `actor_role` to `public.admin_audit_logs` for merchant destination change attribution.<br/>7. **Image Storage Contract (§11, §12):** Adopted Strategy B (format-preserving storage with structural header/chunk validation and dimension bounds for PNG, JPEG, WebP).<br/>8. **Gemini Configuration & Grounding Correction (§9):** Configured `thinkingConfig: { thinkingBudget: 0 }` for `gemini-3.5-flash-lite`; marked latency as deployment targets; stripped unsupported claims (e.g. unprompted "Highly recommend") from examples.<br/>9. **Operational Edge Cases (§8, §14):** Formalized multi-step recoverable workflow for owner onboarding, mid-journey business suspensions, CDN question versioning, and N/A option exclusions.<br/>10. **Expanded Contract Test Suite (§20):** Expanded test matrix to 28 traceable scenarios labeled `SPECIFIED (NOT EXECUTED)`. | **Under Review** |
 
 > [!IMPORTANT]
-> **Implementation Isolation Notice:**  
+> **Implementation Isolation Notice:**
 > This document represents a **specification-only architectural deliverable**. In accordance with Phase 1 protocols, no application code, Edge Functions, database migrations, or third-party SDK calls have been executed. All TypeScript interfaces, Zod schemas, and SQL RPC blocks are strictly illustrative design specifications and marked non-executable.
 
 ---
@@ -91,7 +91,7 @@ Our platform implements a **hybrid backend architecture** combining direct Postg
 
 ### 4.1 Modern Key Architecture & Per-Function Gateway Matrix
 
-In modern Supabase, client applications use **Publishable API Keys** (`VITE_SUPABASE_PUBLISHABLE_KEY`, prefixed with `sb_pub_...` or project publishable API key). Modern publishable keys are public client identifiers rather than user-bearing JWTs. 
+In modern Supabase, client applications use **Publishable API Keys** (`VITE_SUPABASE_PUBLISHABLE_KEY`, prefixed with `sb_pub_...` or project publishable API key). Modern publishable keys are public client identifiers rather than user-bearing JWTs.
 
 To ensure security while enabling registration-free customer access:
 
@@ -223,7 +223,7 @@ The platform backend is organized into **23 discrete operations** (5 Public, 9 O
 | `API-ADM-08` | `/functions/v1/admin-operations`     | POST   | `SUPER_ADMIN_AAL2`     | Action: `UPDATE_SUBSCRIPTION`|
 | `API-ADM-09` | `/functions/v1/admin-operations`     | POST   | `SUPER_ADMIN_AAL2`     | Action: `REASSIGN_OWNER`     |
 |--------------+--------------------------------------+--------+------------------------+------------------------------|
-| `RPC-INT-01` | `public.get_public_business_by_qr`   | RPC    | `INTERNAL_ONLY`        | Standee projection RPC       |
+| `RPC-INT-01` | `public.get_public_business_by_qr`   | RPC    | `INTERNAL_ONLY`        | Public QR projection RPC     |
 | `RPC-INT-02` | `public.reserve_generation_quota`    | RPC    | `INTERNAL_ONLY`        | Two-phase reservation lock   |
 | `RPC-INT-03` | `public.commit_generation_quota`     | RPC    | `INTERNAL_ONLY`        | Exact quota_id commit        |
 | `RPC-INT-04` | `public.release_generation_quota`    | RPC    | `INTERNAL_ONLY`        | Release unbilled reservation |
@@ -243,7 +243,7 @@ The platform backend is organized into **23 discrete operations** (5 Public, 9 O
 - **Stable API ID:** `API-PUB-01`
 - **Route & Method:** `GET /functions/v1/get-public-business?qrId=:qrId`
 - **Trust Boundary:** `PUBLIC` (Anonymous customer mobile browser)
-- **Primary Purpose:** Resolve the immutable standee hardware QR token into public merchant metadata with real-time status freshness.
+- **Primary Purpose:** Resolve the immutable QR token (`/q/:public_qr_id`) into public merchant metadata with real-time status freshness.
 - **Request Headers:**
   - `apikey: <VITE_SUPABASE_PUBLISHABLE_KEY>` (Required)
 - **Gateway Config:** `verify_jwt = false`.
@@ -527,7 +527,7 @@ sequenceDiagram
     EdgeGen->>DB: reserve_generation_quota(businessId, idempotencyKey, payloadHash)
     DB-->>EdgeGen: Quota reserved (reserved_count + 1)
     EdgeGen->>Gemini: POST generateContent (affirmed facts, Timeout: 8.0s)
-    
+
     alt Gemini Success (< 8.0s)
         Gemini-->>EdgeGen: Valid JSON { "reviewDraft": "..." }
         EdgeGen->>DB: commit_generation_quota(reservationId, tokens)
@@ -557,18 +557,18 @@ sequenceDiagram
 
 - **Environment-Decoupled Identifier:**
   `const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-3.5-flash-lite';`
-- **Provisional Preferred Model: `gemini-3.5-flash-lite`**
+- **Approved Default Model: `gemini-3.5-flash-lite` (Founder Decision M0-04)**
   - **Economics:** $0.30 / 1M input tokens, $2.50 / 1M output tokens (standard paid tier).
   - **Structured JSON Schema:** Native schema enforcement via `responseMimeType: "application/json"` and `responseSchema`.
-  - **Thinking Configuration:** Configured with `thinkingConfig: { thinkingBudget: 0 }` to disable internal reasoning tokens and achieve target latency under 2.5 seconds.
+  - **Thinking Configuration:** Configured with `thinkingLevel: "minimal"` as the intended GenerateContent setting (`thinkingBudget = 0` assumption is deprecated; incompatible legacy settings must not be mixed). Note that minimal thinking does not guarantee zero internal reasoning tokens.
   - **Data Privacy Terms:** Commercial paid tier guarantees customer inputs are **never** used to train Google foundational models.
-- **Supported Alternative Model: `gemini-3.8-flash`**
-  - High-intelligence Flash model ($0.75 / 1M input, $3.75 / 1M output) for complex drafting needs. Switchable via `GEMINI_MODEL=gemini-3.8-flash` without code modifications.
-- **Latency Targets:**
+- **Approved Backup Model: `gemini-3.1-flash-lite` (Founder Decision M0-04)**
+  - High-speed, cost-efficient Flash model for automatic failover if transient service throttling or regional outages occur.
+- **Latency & Timeout Targets:**
   - P50 Target: < 1.8 seconds.
   - P95 Target: < 2.5 seconds.
-  - Hard Timeout: 8.0 seconds.  
-  *(Note: All latency figures represent engineering targets to be benchmarked upon live deployment).*
+  - Hard Timeout: 8.0 seconds (initial technical target, not guaranteed latency).
+  *(Note: All latency figures represent engineering targets; pre-production benchmarking of latency, draft quality, token usage, thinking tokens, and backup behavior is required upon deployment).*
 
 ### 9.2 Grounded Prompt Architecture
 
@@ -669,10 +669,10 @@ Optional Customer Note: "Loved the trimmer fade"
 
 ## 11. Authenticated Business Owner APIs
 
-Standard merchant CRUD operations query Supabase PostgREST directly using the merchant's Supabase Auth JWT (`Authorization: Bearer <owner_jwt>`). 
+Standard merchant CRUD operations query Supabase PostgREST directly using the merchant's Supabase Auth JWT (`Authorization: Bearer <owner_jwt>`).
 
 > [!IMPORTANT]
-> **PostgREST Wire Format Law:**  
+> **PostgREST Wire Format Law:**
 > Direct PostgREST API requests and responses use **native PostgreSQL `snake_case`**. Frontend applications must use the centralized TypeScript adapter mapping (`toCamelCaseBusiness`, `toCamelCaseFeedback`, etc.) to interface with camelCase UI components.
 
 ### 11.1 `API-OWN-01`: Merchant Profile Read
@@ -988,7 +988,7 @@ sequenceDiagram
     alt Not Active Super-Admin
         Edge-->>Admin: HTTP 403 Forbidden (ERR_ADMIN_UNAUTHORIZED)
     end
-    
+
     Edge->>DB: Execute admin_execute_operation(p_admin_id, p_action, p_target_biz, p_payload)
     DB->>DB: Check admin_users in PostgreSQL & set app.current_admin_id
     DB->>DB: Execute Business Mutations (Atomic Transaction)
@@ -1041,7 +1041,7 @@ The following internal RPC functions execute in PostgreSQL under `SECURITY DEFIN
 ```sql
 -- (NON-EXECUTABLE DESIGN SPECIFICATION)
 
--- RPC-INT-01: Public Standee QR Resolution
+-- RPC-INT-01: Public QR Resolution
 CREATE OR REPLACE FUNCTION public.get_public_business_by_qr(p_qr_id TEXT)
 RETURNS TABLE (
     public_qr_id TEXT,
@@ -1053,14 +1053,14 @@ RETURNS TABLE (
     is_active BOOLEAN,
     account_status TEXT,
     subscription_status TEXT
-) 
+)
 SECURITY DEFINER
 SET search_path = ''
 LANGUAGE plpgsql
 AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         b.public_qr_id,
         b.name,
         b.logo_url,
@@ -1099,9 +1099,9 @@ DECLARE
     v_res_id UUID;
 BEGIN
     -- 1. Check idempotency BEFORE consuming quota
-    SELECT id, status, payload_hash, quota_id 
+    SELECT id, status, payload_hash, quota_id
     INTO v_existing_id, v_existing_status, v_existing_hash, v_quota_id
-    FROM public.quota_reservations 
+    FROM public.quota_reservations
     WHERE idempotency_key = p_idempotency_key;
 
     IF v_existing_id IS NOT NULL THEN
@@ -1129,7 +1129,7 @@ BEGIN
     ON CONFLICT (business_id, billing_cycle) DO NOTHING;
 
     -- 3. Lock quota row FOR UPDATE
-    SELECT id, max_limit, used_count, reserved_count 
+    SELECT id, max_limit, used_count, reserved_count
     INTO v_quota_id, v_max, v_used, v_reserved
     FROM public.tenant_quotas
     WHERE business_id = p_business_id AND billing_cycle = v_cycle
@@ -1176,8 +1176,8 @@ BEGIN
     IF v_quota_id IS NOT NULL THEN
         -- Targets the exact quota row locked at reservation, preventing month-end races
         UPDATE public.tenant_quotas
-        SET used_count = used_count + 1, 
-            reserved_count = GREATEST(0, reserved_count - 1), 
+        SET used_count = used_count + 1,
+            reserved_count = GREATEST(0, reserved_count - 1),
             updated_at = CLOCK_TIMESTAMP()
         WHERE id = v_quota_id;
     END IF;
@@ -1203,7 +1203,7 @@ BEGIN
 
     IF v_quota_id IS NOT NULL THEN
         UPDATE public.tenant_quotas
-        SET reserved_count = GREATEST(0, reserved_count - 1), 
+        SET reserved_count = GREATEST(0, reserved_count - 1),
             updated_at = CLOCK_TIMESTAMP()
         WHERE id = v_quota_id;
     END IF;
@@ -1248,7 +1248,7 @@ BEGIN
         WHEN 'CREATE_BUSINESS' THEN
             -- Generate 10-char immutable public_qr_id
             v_qr := lower(substr(replace(gen_random_uuid()::text, '-', ''), 1, 10));
-            
+
             INSERT INTO public.businesses (
                 owner_id, category_id, public_qr_id, vanity_slug, name, account_status, is_active
             ) VALUES (
@@ -1286,17 +1286,17 @@ BEGIN
 
         WHEN 'SET_BUSINESS_STATUS' THEN
             SELECT to_jsonb(b) INTO v_before FROM public.businesses b WHERE id = p_target_business_id;
-            
+
             UPDATE public.businesses
             SET account_status = p_payload->>'accountStatus',
                 is_active = (p_payload->>'accountStatus' != 'suspended'),
                 updated_at = CLOCK_TIMESTAMP()
             WHERE id = p_target_business_id;
-            
+
             SELECT to_jsonb(b) INTO v_after FROM public.businesses b WHERE id = p_target_business_id;
 
         WHEN 'ADJUST_QUOTA' THEN
-            SELECT to_jsonb(q) INTO v_before FROM public.tenant_quotas q 
+            SELECT to_jsonb(q) INTO v_before FROM public.tenant_quotas q
             WHERE business_id = p_target_business_id AND billing_cycle = (p_payload->>'billingCycle');
 
             UPDATE public.tenant_quotas
@@ -1304,7 +1304,7 @@ BEGIN
                 updated_at = CLOCK_TIMESTAMP()
             WHERE business_id = p_target_business_id AND billing_cycle = (p_payload->>'billingCycle');
 
-            SELECT to_jsonb(q) INTO v_after FROM public.tenant_quotas q 
+            SELECT to_jsonb(q) INTO v_after FROM public.tenant_quotas q
             WHERE business_id = p_target_business_id AND billing_cycle = (p_payload->>'billingCycle');
 
         WHEN 'UPDATE_SUBSCRIPTION' THEN
@@ -1399,7 +1399,7 @@ Free-text notes voluntarily typed by customers are classified as **pseudonymous 
 +----------------------------------------------------------------------------------------------------------------------+
 | Canonical Event Name         | Event Origin    | Ingestion Route     | Primary Conversion Metric Tracked             |
 |------------------------------+-----------------+---------------------+-----------------------------------------------|
-| `EVENT_QR_PAGE_VIEW`         | Client Telemetry| `API-PUB-05`        | Standee QR Traffic / Funnel Top               |
+| `EVENT_QR_PAGE_VIEW`         | Client Telemetry| `API-PUB-05`        | Public QR Page Load / Funnel Top (Not Verified Scan)|
 | `EVENT_SURVEY_COMPLETED`     | Server Authoritative| `API-PUB-04`    | Verified 3-MCQ Questionnaire Submissions      |
 | `EVENT_GENERATION_REQUESTED` | Client Telemetry| `API-PUB-05`        | AI Review Draft Demand                        |
 | `EVENT_GENERATION_SUCCESS`   | Server Authoritative| `API-PUB-03`    | Verified Quota-Committed Draft Deliveries     |
@@ -1434,7 +1434,7 @@ Merchant dashboards must display mathematically honest conversion rates using st
 | Business Surrogate PK    | `businesses.id`                   | `businessId` / `id`       | `UUID`           | Primary Key    |
 | Owner Auth Foreign Key   | `businesses.owner_id`             | `ownerId`                 | `UUID`           | FK auth.users  |
 | Vertical Category PK/FK  | `business_categories.id`          | `categoryId`              | `TEXT`           | 'salon'|'cafe' |
-| Permanent Standee Token  | `businesses.public_qr_id`         | `publicQrId`              | `TEXT`           | 8-12 alphanumeric|
+| Permanent QR Token       | `businesses.public_qr_id`         | `publicQrId`              | `TEXT`           | 10-char URL-safe nano-id|
 | Vanity Web URL Slug      | `businesses.vanity_slug`          | `vanitySlug`              | `TEXT`           | URL slug regex |
 | Business Display Name    | `businesses.name`                 | `name`                    | `TEXT`           | 1-100 chars    |
 | Logo Public URL          | `businesses.logo_url`             | `logoUrl`                 | `TEXT`           | HTTPS URL      |
@@ -1622,8 +1622,8 @@ The following 28 test scenarios verify API contracts prior to release. In accord
 |          |                        |                       | `service_role` lacks JWT claims  | sets `app.current_admin_id`   |
 |          |                        |                       |                                  | session setting in DB RPC.    |
 |----------+------------------------+-----------------------+----------------------------------+-------------------------------|
-| `ISS-06` | Standee Caching Window | Security vs UI_UX     | 60s cache vs instant suspension  | **Zero-Second Freshness.**    |
-|          |                        |                       | visibility on disabled standees  | Dynamic `no-store` on QR      |
+| `ISS-06` | QR Caching Window      | Security vs UI_UX     | 60s cache vs instant suspension  | **Zero-Second Freshness.**    |
+|          |                        |                       | visibility on disabled QR assets | Dynamic `no-store` on QR      |
 |          |                        |                       |                                  | lookup; 24h on survey MCQs.   |
 |----------+------------------------+-----------------------+----------------------------------+-------------------------------|
 | `ISS-07` | Customer Final Review  | PRD vs UI vs Schema   | UI implied dashboard shows final | **Data Minimization.** Stored |
@@ -1657,19 +1657,18 @@ The following 28 test scenarios verify API contracts prior to release. In accord
 
 The following 5 architectural decisions require formal founder sign-off prior to Stage 7 testing:
 
-1. **Customer Note Storage Policy:**
-   - [ ] **Option B (30 Days — Recommended):** Store notes pseudonymously; automated daily purge clears notes older than 30 days to minimize data liability under DPDPA.
-   - [ ] **Option C (90 Days — PRD Baseline):** Retain notes for 90 days before automated purge.
-   - [ ] **Option A (Purely Ephemeral):** Never save customer notes to the database; process transiently in memory via HMAC token for AI drafting only.
-2. **Review Destination Verification Protocol:**
-   - [ ] Approve strict server-side hostname whitelisting (`search.google.com`, `maps.google.com`, `www.google.com/maps`, `g.page/r/`, `maps.app.goo.gl`) and format validation via `API-OWN-03`.
-3. **Logo Upload Security Boundary:**
-   - [ ] Confirm SVG uploads remain **strictly disabled** for MVP, permitting PNG, JPEG, and WebP with structural validation via `API-OWN-07`.
-4. **Provisional Gemini Model Selection:**
-   - [ ] Approve `gemini-3.5-flash-lite` as the provisional preferred model with zero thinking budget for sub-2.5s generation, decoupled via `GEMINI_MODEL`.
-5. **Standee Format Selection:**
-   - [ ] Standard International A6 (105 x 148 mm) with 3mm bleed (Provisional Recommended).
-   - [ ] Standard Photo 4 x 6 inch (102 x 152 mm) with 3mm bleed.
+## 21. Founder Decisions Register & Outstanding Gates
+
+1. **Customer Note Storage Policy (Decision M0-01):**
+   - [x] **FOUNDER APPROVED (Option B — 30 Days):** Store notes pseudonymously in `survey_responses.optional_note`; automated daily purge clears notes older than 30 days. No final customer review text stored.
+2. **Review Destination Verification Protocol (Decision M0-02):**
+   - [x] **FOUNDER APPROVED:** Strict server-side verification + interactive merchant preview link (`API-OWN-03`). Place ID validated where reliably determinable (not restricted to `ChIJ`).
+3. **Logo Upload Security Boundary (Decision M0-03):**
+   - [x] **FOUNDER APPROVED:** SVG uploads strictly disabled for MVP; PNG, JPEG, WebP only (2 MB max) with server-side magic-bytes inspection (`API-OWN-07`). Platform QR export is PNG.
+4. **Gemini Model Selection (Decision M0-04):**
+   - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; timeout 8000ms initial target; single draft strictly < 60 words.
+5. **QR Distribution Scope (Decision M0-05):**
+   - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees, A6/4x6" artwork, and print-ready PDFs are DEFERRED TO POST-MVP. Client-side QR PNG export requires no server-side PDF generator endpoint.
 
 ---
 
@@ -1690,5 +1689,5 @@ The following 5 architectural decisions require formal founder sign-off prior to
 
 ---
 
-*End of API & Integration Specification.*  
+*End of API & Integration Specification.*
 *Ready for Phase 1 — Stage 7 (Testing & QA Strategy) upon formal founder sign-off.*

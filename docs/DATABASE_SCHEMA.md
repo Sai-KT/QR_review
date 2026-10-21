@@ -29,7 +29,7 @@
 | **1.1** | Oct 17, 2026 | Principal Architect | **Stage 3 Security & Consistency Audit Applied:**<br/>1. **Entity Inventory Correction:** Corrected table count to exactly 12 application tables (including `public.admin_audit_logs`).<br/>2. **Business Field Protection:** Separated merchant-editable profile fields from privileged administrative fields (`owner_id`, `public_qr_id`, `account_status`, `is_active`); specified column-level grants, RLS `WITH CHECK`, and trigger-level immutability enforcement.<br/>3. **Hardened Super-Admin MFA:** Removed the `mfa_enforced = FALSE` bypass in `is_super_admin()`; strictly mandated verified `aal2` assurance level via TOTP.<br/>4. **Controlled Public QR API Boundary:** Restricted `get_public_business_by_qr` execution strictly to `service_role` via Edge Function gateway; handled missing subscription rows via `LEFT JOIN`, unknown QRs, suspended tenants, and lapsed subscriptions gracefully.<br/>5. **Server-Boundary Quota Semantics:** Formally defined quota deduction commit at the server response boundary; established idempotent retry handling, stale 60s TTL sweeps, and late-response COGS absorption without unfair merchant penalties.<br/>6. **Authoritative Survey Answer Validation:** Replaced raw text matching with structured foreign keys (`question_id`, `option_id`), active status checks, and historical question snapshot preservation.<br/>7. **Analytics Event Deduplication & Attribution:** Added server-side composite hash deduplication; reinforced that Google redirect clicks never equal confirmed published reviews.<br/>8. **Weighted Sliding-Window Rate Limiting:** Corrected fixed-window boundary burst flaw to a weighted sliding-window algorithm; restricted rate-limiting RPCs to `service_role`.<br/>9. **Data Integrity & Immutability Realities:** Documented subscription payment history, non-reuse of deleted QR tokens, and realistic trigger vs root operator audit limitations.<br/>10. **Privacy & Retention Classification:** Classified customer notes as pseudonymous data; preserved PRD 90-day baseline while flagging 30-day minimization for founder sign-off.<br/>11. **Official Backup Realities:** Corrected Supabase Free (zero automated daily backups; GitHub Actions `pg_dump` proposed with testing requirements) vs Pro (7 days standard; PITR paid add-on).<br/>12. **Storage Recalculation:** Recalculated 12-month analytics volume (exceeds 500 MB at 50+ merchants; requires Pro upgrade or 90-day rollup purge).<br/>13. **Status Standardization:** Replaced misleading "VERIFIED" labels with `SPECIFIED`, `REVIEWED`, and `REQUIRES VALIDATION`. | **Under Review** |
 
 > [!IMPORTANT]
-> **Specification Notice (Non-Executable):**  
+> **Specification Notice (Non-Executable):**
 > This document is an architectural database design specification, not an active migration script. All SQL blocks included herein are illustrative design examples and must **not** be executed against a production database without formal founder review and approval. No `.sql` migration files are created in this stage.
 
 ---
@@ -47,8 +47,9 @@ Our database architecture is engineered specifically for a solo student founder 
 | 2. PRAGMATIC NORMALIZATION     | 3NF relational normalization for core business and billing data; |
 |                                | structured JSONB utilized strictly for schema-flexible survey    |
 |                                | answer payloads where column decomposition adds zero value.      |
-| 3. HARDWARE IMMUTABILITY       | Permanent QR tokens (public_qr_id) are decoupled from editable   |
-|                                | display slugs and business profile details to protect standees.  |
+| 3. PERMANENT QR IMMUTABILITY   | Permanent QR tokens (public_qr_id) are decoupled from editable   |
+|                                | display slugs and business profile details to protect distributed|
+|                                | digital QR codes and links from invalidation.                    |
 | 4. PRIVILEGE-SEPARATED ACCESS  | Protected administrative fields cannot be altered by owners.     |
 |                                | Enforced via column-level grants, RLS, and BEFORE UPDATE triggers|
 | 5. ZERO-TRUST TENANT ISOLATION | Row Level Security (RLS) is enabled and enforced by default on  |
@@ -74,7 +75,7 @@ We evaluated the 14 candidate entities proposed during architectural planning an
 | :--- | :---: | :--- | :--- |
 | **1. businesses** | **Retained (1)** | `public.businesses` | Core multi-tenant entity storing business profile, vanity slug, category, and status. |
 | **2. business_owners** | **Consolidated** | Included in `public.businesses` (`owner_id`) | In an MVP single-owner model, each business is owned by one authenticated user (`auth.users.id`). A separate `business_memberships` table adds unnecessary join complexity for 3–5 pilot stores. |
-| **3. qr_codes** | **Consolidated** | Included in `public.businesses` (`public_qr_id`) | Each merchant counter standee uses exactly one permanent immutable QR token. Storing `public_qr_id` as a unique, immutable column on `businesses` avoids a redundant 1:1 join table. |
+| **3. qr_codes** | **Consolidated** | Included in `public.businesses` (`public_qr_id`) | Each merchant uses exactly one permanent immutable QR token. Storing `public_qr_id` as a unique, immutable column on `businesses` avoids a redundant 1:1 join table. |
 | **4. business_categories** | **Retained (2)** | `public.business_categories` | Normalizes supported business verticals (`salon`, `cafe`) and anchors pre-configured questionnaires. |
 | **5. survey_questions** | **Retained (3)** | `public.survey_questions` | Stores the 3 category-specific experience MCQs with display ordering and active flags. |
 | **6. survey_options** | **Retained (4)** | `public.survey_options` | Stores the 3–4 selectable answers and 1 neutral option per question with sentiment tags. |
@@ -159,7 +160,7 @@ erDiagram
         text category_id FK
         jsonb selected_options "Validated Option UUID Array"
         jsonb affirmed_facts_snapshot "Historical Option Texts"
-        text optional_note "Pseudonymous (Purged in 30d/90d)"
+        text optional_note "Pseudonymous (Purged in 30d via daily pg_cron)"
         uuid session_uuid
         timestamptz purged_at
         timestamptz created_at
@@ -264,7 +265,7 @@ erDiagram
 ---
 
 ### 5.2 Table: `public.businesses` (Hardened Field Protection)
-- **Business Purpose:** Core tenant profile. Maps owner identity to physical standee QR tokens, vanity slugs, Google review destinations, and account lifecycle status.
+- **Business Purpose:** Core tenant profile. Maps owner identity to digital QR tokens, vanity slugs, Google review destinations, and account lifecycle status.
 - **Primary Key:** `id` (UUID)
 - **Retention Policy:** Permanent tenant record. Hard deletions cascade strictly to child tables upon verified GDPR/DPDP request.
 
@@ -273,11 +274,11 @@ erDiagram
 | `id` | `UUID` | `NOT NULL` | `gen_random_uuid()` | Immutable | Internal surrogate PK. Never exposed in public URLs. |
 | `owner_id` | `UUID` | `NOT NULL` | None | **Admin Only** | Foreign Key $\to$ `auth.users(id)` ON DELETE RESTRICT. |
 | `category_id` | `TEXT` | `NOT NULL` | None | **Admin Only** | Foreign Key $\to$ `public.business_categories(id)`. |
-| `public_qr_id` | `TEXT` | `NOT NULL` | None | **Immutable** | 10-char URL-safe nano-id. Printed on hardware standee. Unique. |
+| `public_qr_id` | `TEXT` | `NOT NULL` | None | **Immutable** | 10-char URL-safe nano-id. Encoded in permanent QR link `/q/:public_qr_id`. Unique. |
 | `vanity_slug` | `TEXT` | `NOT NULL` | None | **Owner Editable** | Unique cosmetic URL slug (`/r/:slug`). Regex: `^[a-z0-9]+(-[a-z0-9]+)*$`. |
 | `name` | `TEXT` | `NOT NULL` | None | **Owner Editable** | Display business name (1–100 chars). |
-| `logo_url` | `TEXT` | `NULL` | None | **Owner Editable** | Public HTTPS URL for business logo rendered on standee & card. |
-| `google_place_id`| `TEXT` | `NULL` | None | **Owner Editable** | Google Maps Place ID (alphanumeric string, e.g. `ChIJ...`). |
+| `logo_url` | `TEXT` | `NULL` | None | **Owner Editable** | Public HTTPS URL for business logo (PNG/JPEG/WebP only, 2 MB max per M0-03). |
+| `google_place_id`| `TEXT` | `NULL` | None | **Owner Editable** | Google Maps Place ID (alphanumeric string; not required to start with `ChIJ`). |
 | `google_review_url`| `TEXT`| `NULL` | None | **Owner Editable** | Validated direct Google review URL matching allowed Google domains. |
 | `whatsapp_number`| `TEXT` | `NULL` | None | **Owner Editable** | Owner manager contact phone (Indian 10-digit mobile: `^[6-9]\d{9}$`). |
 | `account_status` | `TEXT` | `NOT NULL` | `'pilot'` | **Admin Only** | CHECK (`account_status IN ('active', 'pilot', 'suspended')`). |
@@ -290,11 +291,11 @@ erDiagram
      ```sql
      -- (NON-EXECUTABLE DESIGN SPECIFICATION)
      REVOKE UPDATE ON public.businesses FROM authenticated;
-     GRANT UPDATE (name, logo_url, vanity_slug, google_place_id, google_review_url, whatsapp_number) 
+     GRANT UPDATE (name, logo_url, vanity_slug, google_place_id, google_review_url, whatsapp_number)
      ON public.businesses TO authenticated;
      ```
   2. **Immutability Enforcement Trigger:** A `BEFORE UPDATE` trigger explicitly raises an exception if `owner_id`, `public_qr_id`, `category_id`, `account_status`, or `is_active` is altered by any user who is not a verified super-admin.
-  3. **Permanent Token Non-Reuse:** Even if a business is soft-deleted or archived, its `public_qr_id` is permanently retained in the unique index to prevent physical standee collision.
+  3. **Permanent Token Non-Reuse:** Even if a business is soft-deleted or archived, its `public_qr_id` is permanently retained in the unique index to prevent distributed QR token collision.
 - **Indexes:**
   - `businesses_public_qr_id_uq` (UNIQUE BTREE on `public_qr_id`).
   - `businesses_vanity_slug_uq` (UNIQUE BTREE on `vanity_slug`).
@@ -351,7 +352,7 @@ erDiagram
 ### 5.5 Table: `public.survey_responses` (Validated Answer Architecture)
 - **Business Purpose:** Records customer survey affirmations for aggregated operational insights. Holds optional free-text notes subject to automated privacy scrubbing.
 - **Primary Key:** `id` (UUID)
-- **Retention Policy:** Aggregated affirmed facts retained indefinitely. Free-text notes subjected to automated rolling purge (`purged_at` set and `optional_note` cleared after 30 days / 90 days per adopted policy).
+- **Retention Policy:** Aggregated affirmed facts retained indefinitely. Free-text notes subjected to automated rolling purge (`purged_at` set and `optional_note` cleared after 30 days per Founder Decision M0-01).
 
 | Column | Data Type | Nullable | Default | Constraints & Relationships |
 | :--- | :--- | :---: | :--- | :--- |
@@ -636,7 +637,7 @@ BEGIN
     -- Verify caller exists in public.admin_users
     -- AND caller JWT has verified Authenticator Assurance Level 2 (aal2 via TOTP)
     RETURN EXISTS (
-        SELECT 1 
+        SELECT 1
         FROM public.admin_users au
         WHERE au.user_id = auth.uid()
           AND (auth.jwt() ->> 'aal') = 'aal2'
@@ -656,7 +657,7 @@ GRANT EXECUTE ON FUNCTION public.is_super_admin() TO authenticated, service_role
 ### 7.1 Single Architecture Gateway: Public Edge Function
 Public anonymous clients must **never execute privileged database RPCs directly**. We establish a single controlled boundary:
 ```
-Public Mobile Client 
+Public Mobile Client
        │ (HTTPS GET /q/:qrId)
        ▼
 Supabase Edge Function: `get-public-business`
@@ -682,26 +683,26 @@ RETURNS TABLE (
     is_active BOOLEAN,
     account_status TEXT,
     subscription_status TEXT
-) 
+)
 SECURITY DEFINER
 SET search_path = ''
 LANGUAGE plpgsql
 AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         b.public_qr_id,
         b.name,
         b.logo_url,
         b.category_id,
         -- Suppress outbound URLs if suspended
-        CASE 
+        CASE
             WHEN b.account_status = 'suspended' THEN NULL
-            ELSE b.google_review_url 
+            ELSE b.google_review_url
         END AS google_review_url,
-        CASE 
+        CASE
             WHEN b.account_status = 'suspended' THEN NULL
-            ELSE b.whatsapp_number 
+            ELSE b.whatsapp_number
         END AS whatsapp_number,
         b.is_active,
         b.account_status,
@@ -805,7 +806,7 @@ During the 3–5 merchant pilot, subscriptions are managed manually:
 - `subscriptions` tracks current cycle dates (`current_period_starts_at`, `current_period_ends_at`) and `subscription_status`.
 - When a merchant pays (UPI/cash), the founder records payment amount, date, and reference string.
 - The update writes an immutable entry to `public.admin_audit_logs`.
-- If subscription lapses, status transitions to `'past_due'`; physical standee gracefully routes patrons to direct Google reviews without breaking.
+- If subscription lapses, status transitions to `'past_due'`; permanent QR route gracefully routes patrons to direct Google reviews without breaking.
 
 ---
 
@@ -837,7 +838,7 @@ stateDiagram-v2
 #### Quota Invariants:
 1. **Idempotent Retries:** Submitting the same `idempotency_key` returns the existing reservation status without double-incrementing counters.
 2. **Late Response Protection:** If Gemini responds after the 60-second TTL expires, the Edge Function inspects the reservation; since it is already marked `'expired'`, the function does **not** increment `used_count` (platform absorbs the token fee; user receives draft without quota penalty).
-3. **Reconciliation Law:** At all times:  
+3. **Reconciliation Law:** At all times:
    `tenant_quotas.used_count = (SELECT COUNT(*) FROM quota_reservations WHERE business_id = ... AND status = 'committed' AND billing_cycle = ...)`.
 
 ---
@@ -875,7 +876,7 @@ BEGIN
     -- Upsert current window counter
     INSERT INTO public.rate_limit_buckets (key_hash, window_start, request_count, expires_at)
     VALUES (p_key_hash, v_current_window, 1, v_current_window + INTERVAL '24 hours')
-    ON CONFLICT (key_hash, window_start) 
+    ON CONFLICT (key_hash, window_start)
     DO UPDATE SET request_count = public.rate_limit_buckets.request_count + 1
     RETURNING request_count INTO v_current_count;
 
@@ -1030,8 +1031,8 @@ The public customer experience relies on a single Edge Function gateway (`get-pu
 +---------------------------------------------------------------------------------------------------+
 | DATA DOMAIN              | ACTIVE RETENTION PERIOD | AUTOMATED PURGE MECHANISM & CADENCE          |
 |--------------------------+-------------------------+----------------------------------------------|
-| Optional Customer Notes  | 30 Days (Recommended)   | Daily PostgreSQL scheduled maintenance job   |
-|                          | [90 Days PRD Baseline]  | executes: SET optional_note = NULL.          |
+| Optional Customer Notes  | 30 Days (Approved M0-01)| Daily PostgreSQL scheduled maintenance job   |
+|                          |                         | executes: SET optional_note = NULL.          |
 |--------------------------+-------------------------+----------------------------------------------|
 | Ephemeral Rate Limits    | 24 Hours                | Hourly vacuum deleting records where         |
 |                          |                         | expires_at < NOW().                          |
@@ -1086,7 +1087,7 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
 | `FR-CUST-001` | Permanent Immutable QR Routing | `public.businesses(public_qr_id)`, `get_public_business_by_qr()` | `SPECIFIED` |
 | `FR-CUST-002` | Direct Google Bypass Link | Handled via `businesses.google_review_url` projection | `SPECIFIED` |
 | `FR-CUST-003` | Category-Specific 3-MCQ Survey | `survey_questions`, `survey_options`, `business_categories` | `SPECIFIED` |
-| `FR-CUST-004` | Optional Customer Note & Privacy | `survey_responses.optional_note`, automated 30d/90d purge | `SPECIFIED` |
+| `FR-CUST-004` | Optional Customer Note & Privacy | `survey_responses.optional_note`, automated 30d purge (M0-01) | `SPECIFIED` |
 | `FR-CUST-005` | Grounded AI Draft Generation | `quota_reservations`, `tenant_quotas` two-phase reservation | `SPECIFIED` |
 | `FR-CUST-007` | Mobile Clipboard & Handoff | Tracked via `analytics_events` (`EVENT_COPY_SUCCESS`) | `SPECIFIED` |
 | `FR-CUST-008` | Universal WhatsApp Link | `businesses.whatsapp_number` projected safely | `SPECIFIED` |
@@ -1136,16 +1137,22 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
 
 ## 23. Outstanding Founder Decisions (Phase 1 Stage 3 Sign-Off)
 
-1. **Customer Note Retention Window:**
-   - [ ] Approve **30-day retention purge** (recommended for data minimization).
-   - [ ] Retain original **90-day retention purge** (PRD v1.1 baseline).
-   - [ ] Switch to **Option A (Purely Ephemeral Notes)**: Never save free-text notes to the database.
-2. **Initial Pilot Category Scope:**
-   - [ ] Confirm pilot launches strictly with **Salons** and **Cafes**.
-3. **Database Backup Mechanism for Pilot:**
-   - [ ] Approve GitHub Actions scheduled `pg_dump` with offsite storage during the 5-merchant pilot.
-4. **Analytics Storage Rollup Strategy:**
-   - [ ] Approve rolling up raw analytics events into daily summaries after 90 days to conserve storage on Free tier.
+1. **Customer Note Retention Window (Decision M0-01):**
+   - [x] **FOUNDER APPROVED:** 30-day rolling purge for `survey_responses.optional_note` via daily `pg_cron`.
+2. **Google Destination Verification (Decision M0-02):**
+   - [x] **FOUNDER APPROVED:** Strict server-side verification + interactive merchant preview link. Place ID validated where reliably determinable (not restricted to `ChIJ`).
+3. **Merchant Logo Upload Restrictions (Decision M0-03):**
+   - [x] **FOUNDER APPROVED:** PNG, JPEG, WebP only; 2 MB limit; trusted server-side magic-bytes inspection. SVG excluded from MVP.
+4. **Gemini AI Model Configuration (Decision M0-04):**
+   - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; configurable via `GEMINI_MODEL`.
+5. **QR Distribution Scope (Decision M0-05):**
+   - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees and vector PDFs deferred to Post-MVP.
+6. **Database Backup Mechanism for Pilot:**
+   - [ ] PENDING: Approve GitHub Actions scheduled `pg_dump` with offsite storage during the 5-merchant pilot.
+7. **Analytics Storage Rollup Strategy:**
+   - [ ] PENDING: Approve rolling up raw analytics events into daily summaries after 90 days to conserve storage on Free tier.
+8. **Schema Amendments 1–5:**
+   - [ ] PENDING: Approve formal DDL migration for `quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_role`, and `survey_options.is_active`.
 
 ---
 
@@ -1161,5 +1168,5 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
 
 ---
 
-*End of Database Architecture & Schema Specification.*  
+*End of Database Architecture & Schema Specification.*
 *Ready for Phase 1 — Stage 4 upon formal founder sign-off.*
