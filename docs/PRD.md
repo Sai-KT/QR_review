@@ -535,16 +535,21 @@ graph TD
 - **Dependencies:** `FR-ADMIN-001`.
 - **Status:** `APPROVED` (Ref: Phase 0 Corrections §1)
 
-#### FR-ADMIN-003: Physical Standee Fulfillment Pipeline Tracker (DEFERRED — POST-MVP)
-- **Description:** Operational Kanban/tracker to manage the manufacturing, vinyl printing, assembly, and courier dispatch of physical acrylic standees for new merchants.
+#### FR-ADMIN-003: Merchant Management, Status Governance & Emergency Suspension
+- **Description:** Administrative tenant detail view and emergency control panel (`SCR-ADM-05`, `API-ADM-04`) to inspect business profiles, manage account status, execute emergency business suspensions, process reactivations, and maintain immutable audit logs.
 - **Role:** Super-Admin
-- **Priority:** Deferred (Post-MVP)
-- **Expected Behavior:** Track orders through states: `New Order` $\to$ `Artwork Ready` $\to$ `Print Complete` $\to$ `Dispatched` $\to$ `Delivered`.
+- **Priority:** Must Have
+- **Expected Behavior:** Super-admin can inspect full tenant metadata, execute emergency tenant suspension, and process account reactivations under strict security controls.
 - **Acceptance Criteria:**
-  1. Each record contains merchant name, shipping address, contact phone, tracking number, and dispatch date.
-  2. Quick link to download the merchant's print-ready vector standee artwork.
+  1. **Strict Authorization & Session Gate:** Executing an emergency suspension requires an authenticated and active administrator record (`public.admin_users.is_active = true`), appropriate administrative permissions, and a server-authoritative TOTP MFA session verified at `aal2` level. Unverified sessions (`aal1`) or client-side role claims are strictly rejected with HTTP 403.
+  2. **Explicit Confirmation & Recorded Reason:** The administrator must confirm the action via an explicit modal dialogue (`SCR-ADM-05`) and provide a mandatory recorded suspension reason text string.
+  3. **Immediate Neutral Inactive Notice:** Setting `account_status = 'suspended'` immediately causes all public `/q/:public_qr_id` endpoints to project a neutral inactive notice (`SCR-CUST-13`), completely suppressing feedback collection without leaking private business information, suspension reasons, or returning a 404 dead-end.
+  4. **Safe Status Revalidation:** In-flight customer sessions revalidate business status before executing survey submissions (`API-PUB-04`), generating AI drafts (`API-PUB-03`), or opening Google review handoff links, preventing bypassed interactions during suspension.
+  5. **Account Reactivation:** Reactivation requires identical authenticated, active administrator authorization with verified `aal2` TOTP MFA and emits corresponding audit logs.
+  6. **Immutable Audit Attribution:** Every status change writes an immutable audit record to `public.admin_audit_logs` capturing the authenticated `actor_user_id`, `actor_role`, timestamp, `old_status`, `new_status`, and the recorded suspension reason.
 - **Dependencies:** `FR-ADMIN-002`.
-- **Status:** `DEFERRED` (Post-MVP; digital QR distribution approved for MVP per Founder Decision M0-05)
+- **Status:** `APPROVED` (Active MVP)
+- **Historical Scope Note:** The physical standee fulfillment pipeline tracker sub-feature (Kanban tracking of acrylic standee manufacturing, assembly, and courier dispatch) is **DEFERRED TO POST-MVP** (`FR-ADMIN-003-POST-MVP` / Post-MVP Backlog) per Founder Decision M0-05.
 
 #### FR-ADMIN-004: Platform API Usage & Cost Monitor
 - **Description:** Real-time tracking of Google Gemini API token usage, invocation counts, error rates, and estimated cost across all tenants.
@@ -784,7 +789,7 @@ graph TD
 |                                                                                                   |
 |  [TIER C: EARLY POST-LAUNCH ENHANCEMENTS]                                                         |
 |  • Physical acrylic counter standees & print-ready vector PDF studio generator (`SCR-OWN-07`)     |
-|  • Physical Standee Fulfillment Pipeline Tracker (`FR-ADMIN-003`)                                 |
+|  • Physical Standee Fulfillment Pipeline Tracker (Deferred sub-feature of historical `FR-ADMIN-003`)|
 |  • Detailed individual customer feedback logs & search filters                                    |
 |  • Automated Razorpay Subscriptions integration (recurring card/UPI mandates)                     |
 |  • Dual review draft output (Quick Take English + Hinglish Latin script)                          |
@@ -986,7 +991,7 @@ DECISION AREA                   STATUS                 WORKING ASSUMPTION & NEXT
 | **FR-OWNER-007** | Owner | Plan & Fair-Use Quota Monitoring | Must | `APPROVED` |
 | **FR-ADMIN-001** | Super-Admin | Protected Super-Admin Authentication & MFA | Must | `APPROVED` |
 | **FR-ADMIN-002** | Super-Admin | Multi-Tenant Merchant Directory & QR Management | Must | `APPROVED` |
-| **FR-ADMIN-003** | Super-Admin | Physical Standee Fulfillment Pipeline Tracker | Deferred | `DEFERRED` |
+| **FR-ADMIN-003** | Super-Admin | Merchant Management & Emergency Suspension (Standee Fulfillment Deferred) | Must | `APPROVED` |
 | **FR-ADMIN-004** | Super-Admin | Platform API Usage & Cost Monitor | Must | `APPROVED` |
 | **FR-AI-001** | AI Engine | Supported Gemini Flash Model Integration | Must | `PROVISIONAL` |
 | **FR-AI-002** | AI Engine | Strict Anti-Hallucination & Input-Separation Prompt | Must | `APPROVED` |

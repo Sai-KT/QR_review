@@ -249,7 +249,7 @@ We formally adopt **Option A: React SPA route `/q/:qrId` deployed on Cloudflare 
 4. **Caching Policy:**
    - Static assets (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`.
    - HTML Entry (`/index.html`): `Cache-Control: public, max-age=0, must-revalidate`.
-   - Backend Config API (`/functions/v1/get-public-business`): Client caches configuration in memory for the duration of the visit. Edge Function returns `Cache-Control: public, max-age=60, s-maxage=120, stale-while-revalidate=300` to buffer against database read spikes while ensuring status changes (e.g., suspension) propagate within 2–5 minutes.
+   - Backend Config API (`/functions/v1/get-public-business`, `API-PUB-01`): Sensitive business status and public QR resolution responses are strictly server-authoritative (`Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate`). This ensures administrative suspensions (`account_status = 'suspended'`) and destination modifications immediately take effect without intentional stale HTTP caching. Already-open client sessions revalidate status prior to protected actions (survey submission, AI review drafting) and prior to Google review handoff. Static assets (`/assets/*`) retain standard immutable caching. (Note: While `no-store` responses prevent intentional stale HTTP caching by edge proxies and browsers, they cannot guarantee instantaneous delivery across networks or already-open offline clients due to network transit latency and client-side execution boundaries; mathematically guaranteed zero-second propagation across all distributed devices and networks is disclaimed).
 
 ---
 
@@ -380,14 +380,23 @@ When an account is suspended for policy violations or fraudulent behavior:
 ---
 
 ### 7.3 Google Review Destination Validation Engine
-To protect patrons from malicious phishing redirects or broken links, destination URLs configured by merchants are validated on the backend:
-1. **Place ID Resolution:** If owner supplies a Place ID, the system constructs the standard Google write URL:
-   `https://search.google.com/local/writereview?placeid={placeId}`.
-   *(Note: Place ID is validated where reliably determinable; system does not strictly mandate that all valid Place IDs begin with `ChIJ`).*
-2. **Domain Whitelist & HTTPS Enforcement:** If owner supplies a direct URL, it must strictly use HTTPS and match the permitted Google regex:
-   `^https://(search\.google\.com/local/writereview\?placeid=|g\.page/r/|maps\.app\.goo\.gl/|www\.google\.com/maps/).+$`.
-3. **Interactive Merchant Inspection:** The merchant dashboard provides an interactive test link allowing the merchant to open and inspect the target destination before confirming.
-4. **Destination Change Throttling & Audit:** Owners can modify their destination URL a maximum of 3 times per calendar month to prevent automated redirection hijacking, with all changes logged in tenant audit trails.
+To protect patrons from malicious phishing redirects or broken links, destination URLs configured by merchants are validated on the backend via a multi-layered verification pipeline:
+1. **URL Parsing & Protocol Validation:** Edge Function parses candidate destination strings using a standards-compliant URL parser (`new URL()`). Protocol must strictly be `https:`.
+2. **Exact Hostname & Path Whitelisting:** The server validates the parsed hostname against an explicit allowlist of permitted Google hostnames and verified sub-paths (never relying on regular expressions alone, which can be vulnerable to domain confusion or path injection):
+   - `search.google.com` (pathname must begin with `/local/writereview` and include parameter `placeid`)
+   - `maps.google.com` / `www.google.com` (pathname must begin with `/maps`)
+   - `g.page` (pathname must begin with `/r/`)
+   - `maps.app.goo.gl` (Google Maps shortlink redirect domain)
+3. **SSRF-Resistant Shortlink Resolution:** Where shortlinks (`maps.app.goo.gl` or `g.page/r/`) are supplied, the Edge Function resolves redirects using an SSRF-hardened HTTP pipeline:
+   - *Approved Hostnames Only:* Initial request and intermediate redirects must match approved Google shortlink or review hostnames.
+   - *Redirect Hop Limits:* Strictly capped at maximum 3 hops (`maxRedirects = 3`) to prevent redirect loops or amplification.
+   - *Strict Timeouts:* Enforces a 3,000ms deadline via `AbortController`.
+   - *HTTPS Enforcement:* Every hop must strictly use HTTPS; any downgrade to plaintext HTTP immediately aborts the connection.
+   - *DNS / IP Destination Protections:* Resolved target IP addresses are validated prior to dispatch, strictly blocking private IPv4/IPv6 ranges (RFC 1918 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local / cloud metadata endpoints (`169.254.169.254`, `169.254.0.0/16`), and internal multicast ranges.
+   - *Final Destination Validation:* The terminal URL must land on an authorized Google Maps review pathname on `search.google.com/local/writereview`, `maps.google.com`, or `www.google.com/maps`.
+4. **Place ID Resolution & Verification:** If the merchant provides a Google Place ID, format validity is verified where reliably determinable (without mandating that all legitimate Place IDs begin with `ChIJ`).
+5. **Interactive Merchant Inspection:** The merchant dashboard provides an interactive test link allowing the merchant to open and inspect the target destination before confirming.
+6. **Destination Change Throttling & Audit:** Owners can modify their destination URL a maximum of 3 times per calendar month to prevent automated redirection hijacking, with all changes logged in tenant audit trails.
 
 ---
 

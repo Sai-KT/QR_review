@@ -253,7 +253,15 @@ If authenticated merchants are granted direct database `UPDATE` permissions on `
      - `g.page` (Path must start with `/r/`)
      - `maps.app.goo.gl`
    - Disallow arbitrary unapproved subdomains.
-   - If Place ID supplied, validate format: `^ChIJ[a-zA-Z0-9_-]{20,}$`.
+   - If Place ID supplied, validate format where determinable without requiring universal `ChIJ` prefix (Founder Decision M0-02).
+   - For shortlinks (`maps.app.goo.gl`, `g.page/r/`), resolve HTTP redirects using an SSRF-resistant resolution pipeline:
+     - *Approved Hostnames Only:* Initial shortlink and intermediate redirect hops must strictly match approved Google shortlink or review hostnames.
+     - *Redirect Hop Limits:* Strictly capped at maximum 3 hops (`maxRedirects = 3`) to prevent redirection loops or amplification attacks.
+     - *Strict Timeouts:* Enforces a 3,000ms deadline via `AbortController`.
+     - *HTTPS Enforcement:* Every hop must strictly use HTTPS; any downgrade to plaintext HTTP immediately aborts the connection.
+     - *DNS / IP Destination Protections:* Resolved target IP addresses are validated prior to dispatch, strictly blocking private IPv4/IPv6 ranges (RFC 1918 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local / cloud metadata endpoints (`169.254.169.254`, `169.254.0.0/16`), and internal multicast ranges.
+     - *Final Destination Validation:* Terminal resolved URL must land on an authorized Google Maps review pathname on `search.google.com/local/writereview`, `maps.google.com`, or `www.google.com/maps`.
+   - Require interactive merchant test link inspection in dashboard prior to confirmation.
 4. **Defense-in-Depth Database Constraint:**
    ```sql
    -- (NON-EXECUTABLE SPECIFICATION EXAMPLE)
@@ -477,8 +485,7 @@ When merchants upload brand logos for digital QR preview and customer cards:
 To prevent suspended merchants or changed destination URLs from remaining active in edge caches:
 - **Static Assets (`/assets/*`):** `Cache-Control: public, max-age=31536000, immutable`.
 - **HTML Entrypoint (`/index.html`):** `Cache-Control: public, max-age=0, must-revalidate`.
-- **Active Business API (`/functions/v1/get-public-business`):** `Cache-Control: public, max-age=30, s-maxage=60, stale-while-revalidate=120`.
-- **Suspended / Inactive Accounts:** Edge Function dynamically sets `Cache-Control: no-cache, no-store, must-revalidate`, ensuring edge proxies and mobile browsers immediately reflect administrative suspension without delay.
+- **Business Status & Resolver API (`/functions/v1/get-public-business`, `API-PUB-01`):** Strictly server-authoritative (`Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate`) for all business status queries (active, direct-only, or suspended). This ensures that administrative suspensions, quota locks, and Google destination updates take effect immediately without intentional stale HTTP caching by edge proxies or browsers. Already-open client sessions revalidate status prior to protected actions (survey submission, AI review drafting) and prior to Google review handoff. (Note: While `no-store` responses prevent intentional stale HTTP caching by edge proxies and browsers, they cannot guarantee instantaneous delivery across networks or already-open offline clients due to network transit latency and client-side execution boundaries; mathematically guaranteed zero-second propagation across all distributed devices and networks is disclaimed).
 
 ---
 

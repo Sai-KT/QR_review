@@ -234,7 +234,7 @@ stateDiagram-v2
 
     state LookupGateway {
         [*] --> CheckStatus
-        CheckStatus --> ActiveConfig: 200 OK (Cache 60s)
+        CheckStatus --> ActiveConfig: 200 OK (Fresh Server State)
         CheckStatus --> SuspendedView: 403 Suspended / Inactive
         CheckStatus --> ExpiredDirectOnly: 200 Direct-Only (Subscription lapsed)
         CheckStatus --> NotFoundView: 404 Invalid QR Token
@@ -271,6 +271,7 @@ stateDiagram-v2
 > **Journey Reliability & Offline Realism:**
 > - **Navigation Agency:** All survey questions feature explicit `← Back` and `Next →` controls. Automatic 200ms progression on option selection is an optional experiment and must never prevent customers from reviewing or altering selections.
 > - **First-Time Connectivity:** A first-time customer scanning a digital QR code or opening the link requires cellular or Wi-Fi connectivity to resolve `/q/:qrId`. The offline recovery state (`SCR-CUST-15`) specifically addresses in-flight cellular dropouts after initial page load.
+> - **Fresh Server Status & In-Flight Revalidation:** Sensitive public business status and routing projections (`API-PUB-01`) return fresh, server-authoritative responses (`Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate`) rather than an unsafe 60-second cache, ensuring emergency suspensions (`SCR-CUST-13`) and status changes take effect immediately without intentional stale HTTP caching. For already-open customer sessions, the client revalidates tenant status before executing protected actions (survey submission `API-PUB-04`, AI review generation `API-PUB-03`) and before initiating Google review handoffs (`GoogleHandoffButton`), preventing transitions to suspended or altered destinations. Unrelated static application assets (`/assets/*`) retain standard immutable caching. (Note: While `no-store` responses prevent intentional stale HTTP caching by edge proxies and browsers, they cannot guarantee instantaneous delivery across networks or already-open offline clients due to network transit latency and client-side execution boundaries; mathematically guaranteed zero-second propagation across all distributed clients and cellular networks is disclaimed).
 
 ---
 

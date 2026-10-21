@@ -575,7 +575,7 @@ sequenceDiagram
 ```
 [SYSTEM INSTRUCTION - DEVELOPER ROLE]
 You are an authentic, honest customer review drafting assistant for a local business.
-Your sole job is to craft a brief, natural review draft (under 50 words) based STRICTLY and ONLY on the customer's affirmed questionnaire answers and optional note enclosed in <USER_INPUT>.
+Your sole job is to craft a brief, natural review draft (strictly fewer than 60 words) based STRICTLY and ONLY on the customer's affirmed questionnaire answers and optional note enclosed in <USER_INPUT>.
 
 STRICT GROUNDING RULES:
 1. NEVER invent staff names, prices, specific dishes, companion details, or services that were not explicitly affirmed.
@@ -609,7 +609,7 @@ Optional Customer Note: "Loved the trimmer fade"
 |                | Q3: "Great styling advice"              | - Received great styling advice     | - Do not invent     |
 |                | Note: "Loved the trimmer fade"          | - Loved the trimmer fade            |   staff name "Priya"|
 |                |                                         |                                     | - Do not add        |
-|                | *Draft Result (<50 words):*             |                                     |   "Highly recommend"|
+|                | *Draft Result (<60 words):*             |                                     |   "Highly recommend"|
 |                | "Had a masterful and precise service    |                                     |                     |
 |                | today. The station was clean and        |                                     |                     |
 |                | hygienic, and I received great styling  |                                     |                     |
@@ -621,7 +621,7 @@ Optional Customer Note: "Loved the trimmer fade"
 |                | Q3: "Calm & relaxing ambience"          | - Ambience was calm & relaxing      | - Do not invent     |
 |                | Note: "AC was set a bit too cold"       | - Customer felt AC was too cold     |   staff attitude    |
 |                |                                         |                                     |                     |
-|                | *Draft Result (<50 words):*             |                                     |                     |
+|                | *Draft Result (<60 words):*             |                                     |                     |
 |                | "My visit was satisfactory and the      |                                     |                     |
 |                | station was clean. The ambience was calm|                                     |                     |
 |                | and relaxing, although the AC was set a |                                     |                     |
@@ -633,7 +633,7 @@ Optional Customer Note: "Loved the trimmer fade"
 |                | Q3: "Pricing was higher than expected"  | - Pricing was higher than expected  | - Do not invent     |
 |                | Note: "Waited 45 mins past appointment" | - Waited 45 mins past appointment   |   excuses for delay |
 |                |                                         |                                     |                     |
-|                | *Draft Result (<50 words):*             |                                     |                     |
+|                | *Draft Result (<60 words):*             |                                     |                     |
 |                | "The staff was warm and attentive, but  |                                     |                     |
 |                | my service took too long as I waited 45 |                                     |                     |
 |                | minutes past my appointment time. Also  |                                     |                     |

@@ -133,7 +133,7 @@ Accordingly, we evaluate the currently supported modern Gemini Flash models:
 | Model Identifier | Official Role & Purpose | Input Price (per 1M tokens) | Output Price (per 1M tokens, inc. thinking) | Context Window | Structured JSON Output | Evaluator Assessment |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
 | **`gemini-3.5-flash-lite`** | Cost-efficient model optimized for high-volume agentic tasks, translation, and structured data processing. | **$0.30** (~₹25.50) | **$2.50** (~₹212.50) | 1,048,576 | Native Schema Support | **Approved Default Model (M0-04)**: Exceptionally low input/output cost, fast turnaround, excellent structured JSON compliance. |
-| **`gemini-3.1-flash-lite`** | Highly optimized lightweight Flash model providing dependable high-speed structured drafting. | **$0.25** (~₹21.25) | **$2.00** (~₹170.00) | 1,048,576 | Native Schema Support | **Approved Backup Model (M0-04)**: Resilient fallback if 3.5 experiences transient service throttling or regional outages. |
+| **`gemini-3.1-flash-lite`** | Highly optimized lightweight Flash model providing dependable high-speed structured drafting. | **$0.25** (~₹21.25) | **$1.50** (~₹127.50) | 1,048,576 | Native Schema Support | **Approved Backup Model (M0-04)**: Resilient fallback if 3.5 experiences transient service throttling or regional outages. Output pricing reflects official $1.50/1M rate. |
 | **`gemini-3.8-flash`** | Intelligent Flash model engineered for complex reasoning, autonomous agents, and enterprise workflows. | **$0.75** (~₹63.75) | **$3.75** (~₹318.75) | 1,048,576 | Native Schema Support | **Alternative Model**: Higher reasoning depth; available if complex multilingual expansion is explored Post-MVP. |
 
 *(Citations verified from official Google Gemini documentation `gemini-api-guides/pricing.md` and `gemini-api-guides/models.md`)*.
@@ -161,6 +161,8 @@ To avoid generic assumptions, we model exact token economics under realistic ope
 | :--- | :--- | :---: | :---: | :---: | :---: |
 | **`gemini-3.5-flash-lite`** | Standard (No Thinking: 350 in / 75 out) | $0.000105 (₹0.0089) | $0.000188 (₹0.0160) | **$0.000293 (₹0.0249)** | **$0.0454 (~₹3.86 / mo)** |
 | **`gemini-3.5-flash-lite`** | Reasoning (100 Thinking: 350 in / 175 out) | $0.000105 (₹0.0089) | $0.000438 (₹0.0372) | **$0.000543 (₹0.0461)** | **$0.0841 (~₹7.15 / mo)** |
+| **`gemini-3.1-flash-lite`** | Standard (No Thinking: 350 in / 75 out) | $0.000088 (₹0.0074) | $0.000113 (₹0.0096) | **$0.000201 (₹0.0170)** | **$0.0312 (~₹2.64 / mo)** |
+| **`gemini-3.1-flash-lite`** | Reasoning (100 Thinking: 350 in / 175 out) | $0.000088 (₹0.0074) | $0.000263 (₹0.0223) | **$0.000351 (₹0.0298)** | **$0.0544 (~₹4.61 / mo)** |
 | **`gemini-3.8-flash`** | Standard (No Thinking: 350 in / 75 out) | $0.000263 (₹0.0223) | $0.000281 (₹0.0239) | **$0.000544 (₹0.0462)** | **$0.0843 (~₹7.16 / mo)** |
 | **`gemini-3.8-flash`** | Reasoning (100 Thinking: 350 in / 175 out) | $0.000263 (₹0.0223) | $0.000656 (₹0.0558) | **$0.000919 (₹0.0781)** | **$0.1424 (~₹12.11 / mo)** |
 

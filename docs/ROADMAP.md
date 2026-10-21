@@ -489,7 +489,7 @@ The absolute critical path governing delivery timeline is:
 - **Prerequisites & Dependencies:** Milestone M8 deployed and verified.
 - **Estimated Effort:** Elapsed Calendar Time: 14–21 days | Active Engineering: 10–16 hrs
 - **Test Suites to Validate:** `TC-UAT-01..08`, `TC-ANA-01..08`.
-- **Security & Quality Gates:** Zero cross-tenant data leaks; zero broken QR links; zero unhandled crashes; monthly cloud spend remains under ₹150.
+- **Security & Quality Gates:** Zero cross-tenant data leaks; zero broken QR links; zero unhandled crashes; monthly cloud spend verified within modeled operating range (~₹120–₹500/mo) and ratified spending limits.
 - **Definition of Done:** 14-day pilot successfully completed; verified Google review outbound redirects validated by merchants; founder sign-off on Phase 3 commercial rollout.
 - **Risks & Fallbacks:** Merchant unaccustomed to digital image/link distribution $	o$ Fallback: Provide WhatsApp-ready graphic and link sharing walkthrough.
 - **Antigravity Execution Guidance:** Maintain daily operational log; do not apply production code changes during the pilot without formal change management approval.
@@ -1168,6 +1168,7 @@ The absolute critical path governing delivery timeline is:
 - **API Endpoints Involved:** `API-ADM-04`.
 - **Database Tables Involved:** `public.businesses`, `public.admin_audit_logs`.
 - **Screens Involved:** `SCR-ADM-05`.
+- **FRs Involved:** `FR-ADMIN-003`.
 - **Associated Test Cases:** `TC-ADM-08`, `TC-ADM-09`, `TC-ADM-11`.
 - **Acceptance Criteria:** Activating suspension immediately blocks public customer flow with neutral inactive notice; audit entry recorded with actor role.
 
@@ -1480,7 +1481,7 @@ The absolute critical path governing delivery timeline is:
 - **Database Tables Involved:** All tables.
 - **Screens Involved:** All screens.
 - **Associated Test Cases:** `TC-UAT-07`, `TC-UAT-08`.
-- **Acceptance Criteria:** Final Pilot Evaluation Report delivered; conversion funnel statistics documented; total pilot cloud opex verified $< ₹150; founder signs off on commercial Phase 3 plan.
+- **Acceptance Criteria:** Final Pilot Evaluation Report delivered; conversion funnel statistics documented; total pilot cloud opex verified within modeled operating range (~₹120–₹500/mo) and ratified spending limits; founder signs off on commercial Phase 3 plan.
 
 ---
 ## 11. Effort & Timeline Estimates
@@ -1540,46 +1541,72 @@ Cost calculations are based on published vendor pricing (October 2026) for Supab
 |----------------------------+----------------------+----------------------+----------------------+----------------------+-----------------------|
 | **Supabase Database/Auth** | ₹0 (Local Docker CLI)| ₹0 (Free Tier)       | ₹0 (Free Tier)       | ₹0 (Free Tier)       | ₹2,100 / mo (Pro Tier)|
 | **Cloudflare Pages**       | ₹0 (Localhost:5173)  | ₹0 (Free Tier)       | ₹0 (Free Tier)       | ₹0 (Free Tier)       | ₹0 (Free Tier)        |
-| **Google Gemini API**      | ₹0 (Local Deno Mock) | ~₹12 / mo            | ~₹20 / mo            | ~₹95 / mo            | ~₹190 / mo            |
-|                            |                      | (150 gens/biz @ ₹0.025)| (150 gens/biz @ ₹0.025)| (150 gens/biz @ ₹0.025)| (150 gens/biz @ ₹0.025)|
+| **Google Gemini API**      | ₹0 (Local Deno Mock) | ~₹17 / mo            | ~₹28 / mo            | ~₹140 / mo           | ~₹281 / mo            |
+|                            |                      | (450 gens inc retry) | (750 gens inc retry) | (3750 gens inc retry)| (7500 gens inc retry) |
 | **Custom Domain**          | ₹0                   | ₹100 / mo (₹1,200/yr)| ₹100 / mo (₹1,200/yr)| ₹100 / mo (₹1,200/yr)| ₹100 / mo (₹1,200/yr) |
 | **GPG Backup Storage**     | ₹0 (Local)           | ₹0 (GitHub Private)  | ₹0 (GitHub Private)  | ₹0 (GitHub Private)  | ₹0 (GitHub Private)   |
 | **Physical Standees**      | ₹0                   | ₹0 (Deferred Post-MVP)| ₹0 (Deferred Post-MVP)| Post-MVP Option      | Post-MVP Option       |
 | (Digital QR Only in MVP)   |                      | (Digital QR MVP)     | (Digital QR MVP)     | (Commercial TBD)     | (Commercial TBD)      |
 |----------------------------+----------------------+----------------------+----------------------+----------------------+-----------------------|
-| **ESTIMATED MONTHLY OPEX** | **₹0 / month**       | **~₹112 / month**    | **~₹120 / month**    | **~₹195 / month**    | **~₹2,390 / month**   |
+| **ESTIMATED MONTHLY OPEX** | **₹0 / month**       | **~₹117 / month**    | **~₹128 / month**    | **~₹240 / month**    | **~₹2,481 / month**   |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
 ### 12.2 Google Gemini Flash API Token Economics Deep Dive
 
-- **Model Specification:** `gemini-3.5-flash-lite` with `thinking_budget = 0`.
-- **Pricing Rates:** $0.075 per 1M Input Tokens (~₹6.25 per 1M tokens) | $0.30 per 1M Output Tokens (~₹25.00 per 1M tokens).
+- **Model Specification:** `gemini-3.5-flash-lite` (default) / `gemini-3.1-flash-lite` (backup) with `thinkingLevel: "minimal"`.
+- **Pricing Rates:** $0.30 per 1M Input Tokens (~₹25.50 per 1M tokens) | $2.50 per 1M Output Tokens (~₹212.50 per 1M tokens) for default `3.5-flash-lite`; $0.25 in / $1.50 out for backup `3.1-flash-lite`.
 - **Per-Generation Token Breakdown:**
   - Prompt Template + System Instructions: ~450 tokens.
   - Survey Affirmations + Escaped Customer Note: ~150 tokens.
-  - Total Input Tokens: ~600 tokens $\times$ ₹0.00000625 = **₹0.00375**.
-  - Output Draft (Structured JSON, $\le 50$ words): ~75 tokens $\times$ ₹0.000025 = **₹0.001875**.
-  - Retries / Network Overhead (20% buffer): ~**₹0.001125**.
-  - **Blended Cost per AI Review Generation:** ~**₹0.00675 to ₹0.025** (~$0.0001 to $0.0003 USD).
+  - Total Input Tokens: ~600 tokens $\times$ ₹0.0000255 = **₹0.0153**.
+  - Output Draft (Structured JSON, strictly fewer than 60 words): ~75 tokens $\times$ ₹0.0002125 = **₹0.0159**.
+  - Base Cost per Generation: **~₹0.0312** (~$0.000367 USD).
+  - Retries / Network Overhead (20% buffer): ~**₹0.0062**.
+  - **Blended Cost per AI Review Generation (with 20% allowance):** **~₹0.0374** (~$0.00044 USD).
 
 ```
 +----------------------------------------------------------------------------------------------------------------------+
 |                                            GEMINI API USAGE SCENARIOS                                                |
 +----------------------------------------------------------------------------------------------------------------------+
-| Monthly Generation Volume  | Input Tokens (~600/call) | Output Tokens (~75/call) | Monthly API Cost (USD)| Monthly Cost (INR ₹) |
-|----------------------------+--------------------------+--------------------------+-----------------------+----------------------|
-| **150 Calls** (1 Pilot Biz)| 90,000 tokens            | 11,250 tokens            | $0.010 USD            | **~₹0.85 INR**       |
-| **750 Calls** (5 Pilot Biz)| 450,000 tokens           | 56,250 tokens            | $0.051 USD            | **~₹4.25 INR**       |
-| **3,750 Calls** (25 Stores)| 2,250,000 tokens         | 281,250 tokens           | $0.253 USD            | **~₹21.25 INR**      |
-| **7,500 Calls** (50 Stores)| 4,500,000 tokens         | 562,500 tokens           | $0.506 USD            | **~₹42.50 INR**      |
-| **15,000 Calls** (Buffer)  | 9,000,000 tokens         | 1,125,000 tokens         | $1.013 USD            | **~₹85.00 INR**      |
+| Monthly Generation Volume  | Input Tokens (~600/call) | Output Tokens (~75/call) | Monthly Base Cost (USD/INR)| With 20% Retry Buffer|
+|----------------------------+--------------------------+--------------------------+----------------------------+----------------------|
+| **150 Calls** (1 Pilot Biz)| 90,000 tokens            | 11,250 tokens            | $0.055 USD (~₹4.68 INR)    | $0.066 USD (~₹5.62)  |
+| **750 Calls** (5 Pilot Biz)| 450,000 tokens           | 56,250 tokens            | $0.276 USD (~₹23.40 INR)   | $0.331 USD (~₹28.08) |
+| **3,750 Calls** (25 Stores)| 2,250,000 tokens         | 281,250 tokens           | $1.378 USD (~₹117.00 INR)  | $1.654 USD (~₹140.40)|
+| **7,500 Calls** (50 Stores)| 4,500,000 tokens         | 562,500 tokens           | $2.756 USD (~₹234.00 INR)  | $3.308 USD (~₹280.80)|
+| **15,000 Calls** (Buffer)  | 9,000,000 tokens         | 1,125,000 tokens         | $5.513 USD (~₹468.00 INR)  | $6.615 USD (~₹561.60)|
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
-- **Bottom Line:** Even at maximum fair-use volume across 5 pilot stores (750 total generations per month), the total monthly AI expense is **under ₹5.00 INR**. The ₹12.00–₹20.00 monthly estimate provides substantial headroom for testing and development calls.
+- **Analytical Cost Summary (Provisional Model Estimates, Not Guarantees):**
+  - Under the stated baseline model assumptions, review generation costs **approximately ₹0.0312 per generation** before retries.
+  - Across 5 pilot stores at 150 generations per business (750 total generations/month), baseline generation costs **approximately ₹23.40 per month before retries**, and **approximately ₹28.08 per month with a 20% network/retry allowance**.
+  - *Important Caveat:* These figures are modeled estimates based on standard text tokens, not guaranteed costs. Higher customer note verbosity, thinking tokens, failed billable API attempts, or traffic spikes will increase actual billing.
 
-### 12.3 Physical Standee Production Unit Economics
+### 12.3 Pilot Budget Framework & Spending Governance
+
+To reconcile engineering cost projections with operational governance and avoid conflating modeled forecasts with formal founder approvals, the pilot budget is structured across four distinct pillars:
+
+1. **Provisional Modeled Operating-Cost Range (~₹120–₹500/month):**
+   - Engineering models project baseline pilot expenses for 3–5 merchants at **~₹120–₹500/month**.
+   - Core baseline components include: Supabase free tier (₹0), Cloudflare Pages (₹0), Google Gemini Flash tokens (~₹17–₹35/mo across 450–750 generations including retries), and amortized custom domain registration (~₹100/mo).
+   - This range serves as an analytical engineering projection rather than a binding commercial guarantee.
+
+2. **Founder-Approved Spending Limits (PENDING Separate Approval):**
+   - A binding spending ceiling or hard budget cap has **NOT YET BEEN FORMALLY APPROVED** by the founder.
+   - Release readiness requires verified compliance with a separately founder-approved spending cap, rather than an unverified assumption of staying inside the provisional modeled forecast range.
+
+3. **Actual Cost-Monitoring Requirements:**
+   - Real-time AI token consumption, invocation latency, and projected expenses are tracked in the Super-Admin Console (`FR-ADMIN-004`).
+   - Cloud cost alert notifications are proposed at thresholds such as ₹500 and ₹1,000 in Google Cloud and Supabase disk alerts (`M8-T06`), subject to formal founder approval and operational verification of supported provider billing-alert capabilities.
+   - Daily operational telemetry monitoring token consumption and API failures during the live pilot (`M9-T03`).
+
+4. **Release Readiness Criteria:**
+   - Prior to pilot launch (Milestone M8/M9), operational expenditures must demonstrate compliance with the separately founder-approved spending cap.
+   - Any anomalous spike in token use or unexpected billing triggers immediate operational review and Edge Function throttling.
+
+### 12.4 Post-MVP Physical Standee Production Unit Economics (Deferred)
 - **Cardstock Print:** 300 GSM Art Card with double-sided matte thermal lamination = ₹40.00 per A6 unit.
 - **Acrylic T-Stand:** Clear cast acrylic A6 vertical tabletop display stand (2 mm thickness) = ₹95.00 per unit.
 - **Packaging & Transport:** Protective bubble wrap + local transit = ₹15.00 per unit.
@@ -1892,11 +1919,11 @@ Every requirement across our foundational documents is mapped to its implementin
 | `FR-OWNER-007`  | Plan & Fair-Use Monthly Quota Monitoring    | M5        | `M5-T09`            | `TC-OWN-15, 16`    |
 | `FR-ADMIN-001`  | Super-Admin Login & Mandatory TOTP MFA      | M6        | `M6-T01`, `M6-T02`  | `TC-ADM-01..03`    |
 | `FR-ADMIN-002`  | Multi-Tenant Directory & Recoverable Invite | M6        | `M6-T03`, `M6-T04`  | `TC-ADM-05..07`    |
-| `FR-ADMIN-003`  | Tenant Status Management & Suspension (Standee Fulfillment Deferred) | M6 | `M6-T05` | `TC-ADM-08..11` |
+| `FR-ADMIN-003`  | Merchant Management & Emergency Suspension (Standee Fulfillment Deferred) | M6 | `M6-T05` | `TC-ADM-08..11` |
 | `FR-ADMIN-004`  | Platform Health & AI Token Cost Monitor     | M6        | `M6-T07`            | `TC-ADM-04, 12`    |
 | `FR-AI-001`     | Decoupled Gemini Flash Model Integration    | M4        | `M4-T01`            | `TC-AI-01, 07`     |
 | `FR-AI-002`     | Anti-Hallucination Grounded Prompt Engine   | M4        | `M4-T01`            | `TC-AI-01..03`     |
-| `FR-AI-003`     | Output Length Constraints (< 50 words)      | M4        | `M4-T01`, `M4-T06`  | `TC-AI-08`          |
+| `FR-AI-003`     | Output Length Constraints (< 60 words)      | M4        | `M4-T01`, `M4-T06`  | `TC-AI-08`          |
 | `FR-AI-004`     | Resilient Generation Failure Fallback       | M4        | `M4-T04`, `M4-T08`  | `TC-AI-10`          |
 | `FR-AI-005`     | Layered Abuse Prevention & IP Rate Limits   | M4        | `M4-T02`            | `TC-PRF-06`         |
 | `FR-ANALYTICS-01`| Canonical 8-Event Taxonomy & Deduplication  | M3        | `M3-T04`            | `TC-ANA-01..06`     |
@@ -1991,7 +2018,7 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 | [ ] Pre-implementation schema amendments and M0 alignment gate approved.                               | NOT APPROVED |
 | [x] 5 Founder Product Decisions (M0-01 through M0-05) approved.                                        | FOUNDER APPROVED (M0-01..05 Only)|
 | [ ] 10-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | PENDING      |
-| [ ] Operational budget models (< ₹150/mo cloud opex) and digital QR strategy approved.                 | PENDING      |
+| [ ] Operational budget models (modeled ~₹120–₹500/mo pilot opex) and spending limits approved.         | PENDING      |
 | [ ] Stage-by-stage security release gates and Definition of Done approved.                             | PENDING      |
 | [ ] Permission granted to proceed to Stage 9 (Phase 2: Project Initialization & Foundation).           | NOT GRANTED  |
 +----------------------------------------------------------------------------------------------------------------------+

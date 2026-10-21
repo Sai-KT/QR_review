@@ -556,8 +556,8 @@ To ensure review drafts remain factually grounded, reproducible test fixtures co
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
 | `TC-AI-01`  | `FIX-AI-POS`         | Q1: "Masterful & Precise"              | Confirmed: Masterful service, clean station, fade| Deterministic /| `NOT EXECUTED`  |
 |             | (Positive Salon)     | Q2: "Clean & hygienic station"         | Forbidden: Staff name "Priya", unstated haircut, | Wordlist Regex |                 |
-|             |                      | Q3: "Great styling advice"             | unprompted "Highly recommend". Length: < 50 words|                |                 |
-|             |                      | Note: "Loved the trimmer fade"         |                                                  |                |                 |
+|             |                      | Q3: "Great styling advice"             | unprompted "Highly recommend". Length: < 60 words|                |                 |
+|             |                      | Note: "Loved the trimmer fade"         | (strictly fewer than 60 words).                  |                |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
 | `TC-AI-02`  | `FIX-AI-NEU`         | Q1: "Standard / Satisfactory"          | Confirmed: Standard service, clean station, cold | Deterministic /| `NOT EXECUTED`  |
 |             | (Neutral Salon)      | Q2: "Clean & hygienic station"         | Forbidden: "Amazing", "Flawless", staff praise.  | Sentiment Map  |                 |
@@ -581,8 +581,8 @@ To ensure review drafts remain factually grounded, reproducible test fixtures co
 | `TC-AI-07`  | Output Schema Check  | Edge Function invokes Gemini           | Response must match `{ reviewDraft: string }`    | Schema /       | `NOT EXECUTED`  |
 |             |                      |                                        | Assert: Zod validates JSON schema before commit. | Automated      |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
-| `TC-AI-08`  | Word Count Bounds    | Model generates lengthy response       | Target: < 50 words; Hard Maximum: 60 words       | Deterministic /| `NOT EXECUTED`  |
-|             |                      |                                        | Assert: Words counted; trimmed at sentence bound.| Automated      |                 |
+| `TC-AI-08`  | Word Count Bounds    | Model generates lengthy response       | Target: Strictly fewer than 60 words (< 60 words)| Deterministic /| `NOT EXECUTED`  |
+|             |                      |                                        | Assert: Server validates <60w; trims/rejects >=60| Automated      |                 |
 |-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
 | `TC-AI-09`  | Missing Options (N/A)| Customer selected N/A on Question 3    | Option has `is_neutral_na = true`                | Grounding /    | `NOT EXECUTED`  |
 |             |                      |                                        | Assert: Excluded from prompt; not mentioned in AI| Automated      |                 |
@@ -1173,11 +1173,11 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 | `FR-OWNER-007`  | Plan & Fair-Use Monthly Quota Monitoring    | `TC-OWN-15`, `TC-OWN-16`, `TC-API-20`| TEST MAPPED  |
 | `FR-ADMIN-001`  | Super-Admin Login & Mandatory TOTP MFA      | `TC-ADM-01`, `TC-ADM-02`, `TC-ADM-03`| TEST MAPPED  |
 | `FR-ADMIN-002`  | Multi-Tenant Directory & Recoverable Invite | `TC-ADM-05`, `TC-ADM-06`, `TC-ADM-07`| TEST MAPPED  |
-| `FR-ADMIN-003`  | Standee Lifecycle Pipeline & Suspension     | `TC-ADM-08`, `TC-ADM-09`, `TC-ADM-11`| TEST MAPPED  |
+| `FR-ADMIN-003`  | Merchant Management & Emergency Suspension (Standee Fulfillment Deferred) | `TC-ADM-08`, `TC-ADM-09`, `TC-ADM-11`| TEST MAPPED  |
 | `FR-ADMIN-004`  | Platform Health & AI Token Cost Monitor     | `TC-ADM-04`, `TC-ADM-12`, `TC-QTA-12`| TEST MAPPED  |
 | `FR-AI-001`     | Decoupled Gemini Flash Model Integration    | `TC-AI-01`, `TC-AI-07`, `TC-ADM-04`  | TEST MAPPED  |
 | `FR-AI-002`     | Anti-Hallucination Grounded Prompt Engine   | `TC-AI-01`, `TC-AI-02`, `TC-AI-03`   | TEST MAPPED  |
-| `FR-AI-003`     | Word Count: Target <50w, Hard Max 60w       | `TC-AI-08`                         | TEST MAPPED      |
+| `FR-AI-003`     | Output Length: Strictly Fewer Than 60 Words (<60w) | `TC-AI-08`                     | TEST MAPPED      |
 | `FR-AI-004`     | Resilient Generation Failure Fallback       | `TC-CUST-17`, `TC-AI-10`           | TEST MAPPED      |
 | `FR-AI-005`     | Layered Abuse Prevention & IP Rate Limits   | `TC-CUST-19`, `TC-PRF-06`, `TC-QTA-04`| TEST MAPPED  |
 | `FR-ANALYTICS-01`| Canonical 8-Event Taxonomy & Deduplication  | `TC-ANA-01` to `TC-ANA-06`         | TEST MAPPED      |
