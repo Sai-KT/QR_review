@@ -107,6 +107,7 @@ erDiagram
     businesses ||--o| subscriptions : "bills (1:1)"
     businesses ||--o{ tenant_quotas : "allocates (1:N)"
     businesses ||--o{ quota_reservations : "reserves (1:N)"
+    tenant_quotas ||--o{ quota_reservations : "binds (1:N)"
     businesses ||--o{ admin_audit_logs : "targets (1:N)"
 
     businesses {
@@ -150,6 +151,7 @@ erDiagram
         text emoji_anchor
         text sentiment_label "positive|neutral|negative"
         boolean is_neutral_na
+        boolean is_active "Active Choice Flag"
         int display_order
         timestamptz created_at
     }
@@ -207,7 +209,9 @@ erDiagram
     quota_reservations {
         uuid id PK
         uuid business_id FK
+        uuid quota_id FK "tenant_quotas.id"
         text idempotency_key UK
+        text payload_hash "Request Fingerprint"
         text status "pending|committed|released|expired"
         int tokens_billed "Gemini Token Usage"
         timestamptz ttl_expires_at "created_at + 60s"
@@ -225,13 +229,15 @@ erDiagram
     admin_users {
         uuid user_id PK "auth.users.id"
         text role "super_admin"
+        boolean is_active "Platform Privileges Flag"
         boolean mfa_enforced "Mandatory aal2"
         timestamptz created_at
     }
 
     admin_audit_logs {
         uuid id PK
-        uuid admin_user_id FK
+        uuid actor_user_id FK "auth.users.id"
+        text actor_role "super_admin|owner|system"
         uuid target_business_id FK
         text action "provision|suspend|resume|adjust_quota"
         jsonb payload_before "Redacted sensitive fields"
@@ -327,7 +333,7 @@ erDiagram
 ---
 
 ### 5.4 Table: `public.survey_options`
-- **Business Purpose:** Defines the 3–4 selectable experience choices plus 1 neutral option per question.
+- **Business Purpose:** Defines the 3–4 selectable experience choices plus 1 neutral option per question. Supports operational deprecation/retirement of choices without breaking historical references.
 - **Primary Key:** `id` (UUID)
 - **Retention Policy:** Permanent reference configuration.
 
@@ -339,12 +345,21 @@ erDiagram
 | `emoji_anchor` | `TEXT` | `NOT NULL` | `''` | Visual emoji anchor (e.g. `'💇'`). |
 | `sentiment_label`| `TEXT` | `NOT NULL` | `'positive'` | CHECK (`sentiment_label IN ('positive', 'neutral', 'negative')`). |
 | `is_neutral_na` | `BOOLEAN` | `NOT NULL` | `FALSE` | If TRUE, explicitly excluded from AI prompt payload (`FR-CUST-003`). |
+| `is_active` | `BOOLEAN` | `NOT NULL` | `TRUE` | Whether choice is currently active for new customer surveys (Founder Decision M0-06). |
 | `display_order` | `SMALLINT`| `NOT NULL` | `1` | Ordering index within question options. |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL` | `CLOCK_TIMESTAMP()` | Creation timestamp. |
 
+- **Option Deactivation & Historical Integrity Semantics (Founder Decision M0-06):**
+  - **Soft Retirement:** When an option is retired, its status is updated to `is_active = FALSE`. Options are never hard-deleted from PostgreSQL once referenced by historical customer responses.
+  - **New Survey Filtering:** Public survey fetch endpoints (`API-PUB-01`, `API-PUB-02`) query options with `WHERE is_active = TRUE`, ensuring patrons only see and select currently valid choices.
+  - **Server-Side Submission Validation:** Feedback submission (`API-PUB-04`) verifies on the server that every submitted `option_id` exists, belongs to the referenced `question_id`, and has `is_active = TRUE`. Submitting an inactive option is rejected with HTTP 422 (`ERR_INVALID_SURVEY_OPTION`).
+  - **Historical Snapshot Preservation:** Existing submissions in `survey_responses` retain their historical foreign keys and text snapshots in `affirmed_facts_snapshot`. Historical analytics and review drafts remain fully interpretable without retroactive distortion.
+  - **Three-MCQ Invariant Preservation:** Deactivating choices must never leave an active question with zero selectable options or violate the strict 3-MCQ single-select customer journey.
+  - **Survey Versioning Dependency (Unresolved Gate M0-07):** While option-level deactivation allows retiring individual choices under an existing question, retiring or replacing an entire question relates to the unique constraint on `(category_id, display_order)`. Milestone gate M0-07 (Active Survey Question Versioning) remains explicitly **PENDING / NOT APPROVED**.
 - **Indexes:**
   - `survey_options_question_idx` (BTREE on `question_id`, `display_order`).
-- **Access Roles:** `anon` (SELECT via Edge Function), `authenticated` (SELECT), `service_role` (ALL).
+  - `survey_options_active_idx` (BTREE on `question_id`, `is_active`) WHERE `is_active = TRUE`.
+- **Access Roles:** `anon` (SELECT via Edge Function where `is_active = TRUE`), `authenticated` (SELECT), `service_role` (ALL).
 - **Requirement IDs Served:** `FR-CUST-003`, `FR-AI-002`.
 
 ---
@@ -455,23 +470,48 @@ erDiagram
 ---
 
 ### 5.9 Table: `public.quota_reservations` (Two-Phase Ledger)
-- **Business Purpose:** Manages in-flight two-phase quota reservations. Prevents race conditions and duplicate double-click spend via idempotency keys.
+- **Business Purpose:** Manages in-flight two-phase quota reservations. Prevents race conditions, cross-cycle misallocations, and duplicate double-click spend via idempotency keys and server-authoritative payload fingerprints.
 - **Primary Key:** `id` (UUID)
-- **Retention Policy:** Ephemeral transaction log. Records purged after 7 days.
+- **Retention Policy:** Ephemeral transaction log. Records purged after 7 days via automated maintenance.
 
 | Column | Data Type | Nullable | Default | Constraints & Relationships |
 | :--- | :--- | :---: | :--- | :--- |
 | `id` | `UUID` | `NOT NULL` | `gen_random_uuid()` | Primary Key (returned to Edge Function as reservation handle). |
 | `business_id` | `UUID` | `NOT NULL` | None | Foreign Key $\to$ `public.businesses(id)` ON DELETE CASCADE. |
+| `quota_id` | `UUID` | `NOT NULL` | None | Foreign Key $\to$ `public.tenant_quotas(id)` ON DELETE RESTRICT (Founder Decision M0-06). |
 | `idempotency_key`| `TEXT` | `NOT NULL` | None | Unique string supplied by client (`${session_uuid}_${attempt_seq}`). |
+| `payload_hash` | `TEXT` | `NOT NULL` | None | Server-computed cryptographic fingerprint of canonical validated request (Founder Decision M0-06). |
 | `status` | `TEXT` | `NOT NULL` | `'pending'` | CHECK (`status IN ('pending', 'committed', 'released', 'expired')`). |
 | `tokens_billed` | `INT` | `NOT NULL` | `0` | Actual Gemini token usage reported in response for cost tracking. |
 | `ttl_expires_at`| `TIMESTAMPTZ`| `NOT NULL` | None | Hard expiry timestamp (`created_at + INTERVAL '60 seconds'`). |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL` | `CLOCK_TIMESTAMP()` | Creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL` | `CLOCK_TIMESTAMP()` | State transition timestamp. |
 
+- **Amendment 1: Quota Reservation Period Binding (`quota_id` Semantics — Founder Decision M0-06):**
+  - **Billing Period Association:** Every generation reservation binds directly to the specific `tenant_quotas(id)` record representing the active monthly cycle (`YYYY-MM`) at reservation time. Reservations cannot be reassigned to another business or quota cycle.
+  - **Tenant Consistency Enforcement:** `quota_reservations.business_id` must match `tenant_quotas.business_id`. Database-level consistency can be enforced via a candidate unique key on `tenant_quotas(id, business_id)` supporting a composite foreign key `FOREIGN KEY (quota_id, business_id) REFERENCES public.tenant_quotas(id, business_id) ON DELETE RESTRICT`, coupled with procedural validation in `reserve_generation_quota` under row lock (`FOR UPDATE`).
+  - **Month-End Midnight Rollover:** A reservation initiated at 23:59:58 on month-end locks the current month's `tenant_quotas` row. When the AI model returns at 00:00:03 in the new calendar month, `commit_generation_quota` targets the exact `quota_id` stored in the reservation, updating the originating period and preventing accidental consumption from the new month's fresh quota.
+  - **Atomic Quota Counter Transitions:**
+    - *Reserve (`reserve_generation_quota`):* Locks `tenant_quotas` row `FOR UPDATE`; verifies `used_count + reserved_count < max_limit`; increments `reserved_count = reserved_count + 1`; sets 60-second TTL.
+    - *Commit (`commit_generation_quota`):* Decrements `reserved_count = GREATEST(0, reserved_count - 1)`; increments `used_count = used_count + 1`; records `tokens_billed`; updates status to `'committed'`.
+    - *Release (`release_generation_quota`):* Decrements `reserved_count = GREATEST(0, reserved_count - 1)`; leaves `used_count` unchanged; updates status to `'released'`.
+  - **Edge Cases:** Covers month-end rollover, concurrent spikes up to the 150 limit, 60s client dropouts, retries after timeout, late model responses, and generation failures. (Detailed concurrency behavior, idempotency state transitions, and rollover implementation remain subject to Milestone gate M0-12).
+
+- **Amendment 2: Reservation Payload Binding (`payload_hash` Semantics — Founder Decision M0-06):**
+  - **Server-Authoritative Fingerprint:** The Edge Function computes `payload_hash` over a canonical representation of the validated request (`business_id` + `response_id` + sorted option UUIDs + escaped note + prompt settings). Untrusted client-supplied hashes are strictly rejected; public clients have zero direct table access.
+  - **Data Privacy Safeguards:** Because customer feedback choices and notes may contain low-entropy personal data, the fingerprint is computed using a server-keyed HMAC-SHA256 digest (or salted SHA-256). Plaintext customer notes are **never** stored in the `payload_hash` column.
+  - **Idempotency Replay Semantics:**
+    1. *Same key, identical payload, pending:* Generation in-flight; client awaits completion without duplicate quota reservation.
+    2. *Same key, identical payload, committed:* Replay of completed generation; returns `ERR_ALREADY_COMMITTED` (or returns cached draft within the active session) without double billing.
+    3. *Same key, differing payload:* Answers altered under an existing key; rejected immediately with HTTP 409 (`ERR_IDEMPOTENCY_CONFLICT`). Existing reservation remains untouched.
+    4. *Expired reservation retried:* Stale reservation (>60s) cannot be committed; client must retry with an incremented sequence.
+    5. *Lost response after model success:* Quota was committed atomically; retry with identical key & hash detects committed state, preventing duplicate billing.
+    6. *Concurrent requests sharing key:* Handled via unique constraint `quota_reservations_idempotency_uq` or row lock, allowing exactly one execution.
+    7. *Cross-business replay:* Prevented by tenant isolation and business ID verification.
+  - *Note:* Merely incrementing an attempt counter is not an independent guarantee against duplicate billing; cryptographic payload hashing binds the reservation to the exact validated feedback submission. (Exact retry state machine and quota deduction semantics remain subject to Milestone gate M0-12).
 - **Indexes:**
   - `quota_reservations_idempotency_uq` (UNIQUE BTREE on `idempotency_key`).
+  - `quota_reservations_quota_idx` (BTREE on `quota_id`).
   - `quota_reservations_ttl_pending_idx` (PARTIAL BTREE on `ttl_expires_at`) WHERE `status = 'pending'`.
 - **Access Roles:** `anon` (Zero direct access), `authenticated` (Zero direct access), `service_role` (ALL via Edge Functions).
 - **Requirement IDs Served:** `FR-AI-005`, `FR-BILLING-002`.
@@ -499,7 +539,7 @@ erDiagram
 ---
 
 ### 5.11 Table: `public.admin_users` (Enforced MFA Registry)
-- **Business Purpose:** Authoritative registry of system administrators. Enforces verified Supabase Auth MFA (`aal2`) assurance levels.
+- **Business Purpose:** Authoritative registry of system administrators. Enforces verified Supabase Auth MFA (`aal2`) assurance levels and active privilege governance.
 - **Primary Key:** `user_id` (UUID $\to$ `auth.users(id)`)
 - **Retention Policy:** Permanent administrative record.
 
@@ -507,9 +547,22 @@ erDiagram
 | :--- | :--- | :---: | :--- | :--- |
 | `user_id` | `UUID` | `NOT NULL` | None | Primary Key $\to$ `auth.users(id)` ON DELETE CASCADE. |
 | `role` | `TEXT` | `NOT NULL` | `'super_admin'`| CHECK (`role = 'super_admin'`). |
+| `is_active` | `BOOLEAN` | `NOT NULL` | `TRUE` | Whether administrator currently holds active platform privileges (Founder Decision M0-06). |
 | `mfa_enforced` | `BOOLEAN` | `NOT NULL` | `TRUE` | Always `TRUE`. Enforces verified `aal2` TOTP MFA for all admin RPCs. |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL` | `CLOCK_TIMESTAMP()` | Timestamp when founder account was granted super-admin rights. |
 
+- **Amendment 3: Administrator Revocation (`is_active` Semantics — Founder Decision M0-06):**
+  - **Platform Privilege Meaning:** The boolean flag `is_active` explicitly indicates whether the administrator currently has active platform privileges. Default is `TRUE`.
+  - **Non-Sufficiency & Six-Layer Authorization Checks:** `is_active = TRUE` is a mandatory prerequisite, but never independently sufficient. Every privileged administrative operation must verify:
+    1. Authenticated user identity (`auth.uid()`).
+    2. Matching authoritative administrator record in `public.admin_users`.
+    3. Administrator status `admin_users.is_active = TRUE`.
+    4. Required administrative role (`role = 'super_admin'`) and explicit action permissions.
+    5. Server-authoritative Supabase Auth MFA assurance level `aal2` (`auth.jwt() ->> 'aal' = 'aal2'`).
+    6. Valid target business authorization where applicable.
+  - **Immediate Deactivation & No Client Forwarding:** A deactivated administrator (`is_active = FALSE`) has all privileges immediately blocked at the serverless Edge Function and database RPC boundary, even if their JWT session has not yet expired. No browser-callable function can trust client-forwarded `admin_user_id`, `actor_user_id`, or `aal2` flags as proof of authorization.
+  - **Provisioning & Audit Trail:** Admin provisioning and revocation require a trusted backend administrative process and are immutably logged to `public.admin_audit_logs`.
+  - *Deferred Dependency:* Exact administrative RPC execution, role validation, first-admin provisioning, and session enforcement remain subject to Milestone gates M0-09 and M0-10.
 - **Indexes:** Primary key on `user_id`.
 - **Access Roles:** `anon` (Zero access), `authenticated` (Zero direct access), `service_role` (ALL).
 - **Requirement IDs Served:** `FR-ADMIN-001`, `SEC-001`.
@@ -517,30 +570,37 @@ erDiagram
 ---
 
 ### 5.12 Table: `public.admin_audit_logs` (Privileged Action Trail)
-- **Business Purpose:** Append-only audit trail of all privileged administrative actions with sensitive payload redaction.
+- **Business Purpose:** Append-only audit trail of all privileged administrative and merchant-initiated configuration actions with sensitive payload redaction.
 - **Primary Key:** `id` (UUID)
 - **Retention Policy:** Append-only audit trail retained for 36 months.
 
 | Column | Data Type | Nullable | Default | Constraints & Relationships |
 | :--- | :--- | :---: | :--- | :--- |
 | `id` | `UUID` | `NOT NULL` | `gen_random_uuid()` | Primary Key. |
-| `admin_user_id` | `UUID` | `NOT NULL` | None | Foreign Key $\to`auth.users(id)` ON DELETE RESTRICT. |
+| `actor_user_id` | `UUID` | `NOT NULL` | None | Foreign Key $\to`auth.users(id)` ON DELETE RESTRICT (Reconciles/replaces legacy `admin_user_id`; Founder Decision M0-06). |
+| `actor_role` | `TEXT` | `NOT NULL` | None | CHECK (`actor_role IN ('super_admin', 'owner', 'system')`). Authoritative role of acting user (Founder Decision M0-06). |
 | `target_business_id`| `UUID` | `NULL` | None | Foreign Key $\to`public.businesses(id)` ON DELETE SET NULL. |
-| `action` | `TEXT` | `NOT NULL` | None | e.g. `'PROVISION_TENANT'`, `'SUSPEND_TENANT'`, `'ADJUST_QUOTA'`, `'RECORD_PAYMENT'`. |
+| `action` | `TEXT` | `NOT NULL` | None | e.g. `'PROVISION_TENANT'`, `'SUSPEND_TENANT'`, `'UPDATE_DESTINATION'`, `'ADJUST_QUOTA'`, `'RECORD_PAYMENT'`. |
 | `payload_before`| `JSONB` | `NULL` | None | Redacted snapshot of modified record prior to change. |
 | `payload_after` | `JSONB` | `NULL` | None | Redacted snapshot of record after change. |
-| `ip_hash` | `TEXT` | `NOT NULL` | None | Ephemeral hashed IP of the admin user. |
+| `ip_hash` | `TEXT` | `NOT NULL` | None | Ephemeral hashed IP of the acting user. |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL` | `CLOCK_TIMESTAMP()` | Execution timestamp. |
 
-- **Audit Integrity Realities:**
-  - A database trigger blocks `UPDATE` and `DELETE` on this table for ordinary application roles.
+- **Amendment 4: Reliable Audit Actor Attribution (`actor_user_id` & `actor_role` Semantics — Founder Decision M0-06):**
+  - **Schema Reconciliation & Transition Strategy:** In earlier draft specifications, the column was labeled `admin_user_id`. However, merchant owners also initiate audited operations (e.g. updating Google review destination URL via `update-destination` gateway). To eliminate naming contradiction and ambiguity, the canonical column is `actor_user_id` paired with `actor_role`. For migration planning, initial DDL defines `actor_user_id` and `actor_role` directly, avoiding divergent actor identity fields.
+  - **Server-Authoritative Derivation:** `actor_user_id` is linked strictly to the verified authenticated identity (`auth.users.id` via `auth.uid()`) at the trusted server boundary; `actor_role` is determined server-side (`'super_admin'` for admins, `'owner'` for merchants, `'system'` for automated workers). Neither field is ever accepted from client-supplied request bodies.
+  - **Audit Integrity & Threat Mitigations:**
+    - Append-only trigger blocks `UPDATE` and `DELETE` on this table for ordinary application roles.
+    - Protected against forged actor ID, forged actor role, missing authenticated context, direct merchant access to audit tables, and mutation execution without corresponding audit log generation.
+    - Sensitive field redaction strictly strips passwords, tokens, API keys, and customer notes before serialization into `payload_before` / `payload_after`.
   - **Security Realism:** A root PostgreSQL superuser can disable triggers or truncate tables directly. Ordinary triggers do **not** make records tamper-proof against root database operators. For regulatory non-repudiation, external log streaming (e.g. Supabase Log Drains to AWS S3/Cloudflare R2) is required at enterprise scale.
-- **Payload Redaction:** Passwords, API keys, and customer notes are strictly scrubbed prior to writing `payload_before` and `payload_after`.
+  - *Deferred Dependency:* The exact trusted caller identity mechanism, administrative transaction implementation, and audit-record creation path remain subject to Milestone gates M0-09, M0-10, and M0-13.
 - **Indexes:**
   - `admin_audit_logs_action_time_idx` (BTREE on `action`, `created_at` DESC).
   - `admin_audit_logs_target_biz_idx` (BTREE on `target_business_id`).
+  - `admin_audit_logs_actor_idx` (BTREE on `actor_user_id`, `created_at` DESC).
 - **Access Roles:** `anon` (Zero access), `authenticated` (Zero access), `service_role` (INSERT / SELECT only).
-- **Requirement IDs Served:** `FR-ADMIN-001`, `FR-ADMIN-002`, `SEC-001`.
+- **Requirement IDs Served:** `FR-ADMIN-001`, `FR-ADMIN-002`, `FR-OWNER-003`, `SEC-001`.
 
 ---
 
@@ -928,6 +988,7 @@ GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO service_rol
 |---------------------+-----------------------------------+---------+-------------------------------|
 | survey_options      | survey_options_pkey               | PRIMARY | (id)                          |
 | survey_options      | survey_options_question_idx       | BTREE   | (question_id, display_order)  |
+| survey_options      | survey_options_active_idx         | PARTIAL | (question_id, is_active)      |
 |---------------------+-----------------------------------+---------+-------------------------------|
 | survey_responses    | survey_responses_pkey             | PRIMARY | (id)                          |
 | survey_responses    | survey_responses_biz_date_idx     | BTREE   | (business_id, created_at DESC)|
@@ -947,6 +1008,7 @@ GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO service_rol
 |---------------------+-----------------------------------+---------+-------------------------------|
 | quota_reservations  | quota_reservations_pkey           | PRIMARY | (id)                          |
 | quota_reservations  | quota_reservations_idempotency_uq | UNIQUE  | (idempotency_key)             |
+| quota_reservations  | quota_reservations_quota_idx      | BTREE   | (quota_id)                    |
 | quota_reservations  | quota_reservations_ttl_idx        | PARTIAL | (ttl_expires_at) WHERE pending|
 |---------------------+-----------------------------------+---------+-------------------------------|
 | rate_limit_buckets  | rate_limit_buckets_pkey           | PRIMARY | (key_hash, window_start)      |
@@ -957,6 +1019,7 @@ GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO service_rol
 | admin_audit_logs    | admin_audit_logs_pkey             | PRIMARY | (id)                          |
 | admin_audit_logs    | admin_audit_logs_action_time_idx  | BTREE   | (action, created_at DESC)     |
 | admin_audit_logs    | admin_audit_logs_target_biz_idx   | BTREE   | (target_business_id)          |
+| admin_audit_logs    | admin_audit_logs_actor_idx        | BTREE   | (actor_user_id, created_at)   |
 +---------------------------------------------------------------------------------------------------+
 ```
 
@@ -1151,8 +1214,8 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
    - [ ] PENDING: Approve GitHub Actions scheduled `pg_dump` with offsite storage during the 5-merchant pilot.
 7. **Analytics Storage Rollup Strategy:**
    - [ ] PENDING: Approve rolling up raw analytics events into daily summaries after 90 days to conserve storage on Free tier.
-8. **Schema Amendments 1–5:**
-   - [ ] PENDING: Approve formal DDL migration for `quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_role`, and `survey_options.is_active`.
+8. **Database Schema Amendments 1–5 (Decision M0-06):**
+   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
 
 ---
 

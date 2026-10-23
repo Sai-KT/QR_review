@@ -627,35 +627,37 @@ All test scenarios represent planned verification targets and are labeled `NOT E
 
 ---
 
-## 23. Required Database Amendments (For Implementation Planning)
+## 23. Required Database Amendments (Founder Decision M0-06 — Schema Design Only)
 
-The following five technical adjustments were identified during the security audit. They are recorded here as **mandatory engineering amendments** to be applied when database migration scripts are created in Phase 1 — Stage 7 / Stage 8:
+The following five schema-design amendments were approved under Founder Decision M0-06 with explicit security safeguards. They are recorded here as **authoritative schema amendments** to be implemented when versioned database migrations are authored in Milestone M2 (DDL migrations and code implementation remain deferred):
 
-### Amendment 1: Questionnaire Partial Unique Index
-- **Problem:** `public.survey_questions` has a unique constraint on `(category_id, display_order)`. This prevents inserting a new active question to replace an old inactive one.
-- **Amendment:** Replace the strict unique constraint with a **partial unique index**:
-  ```sql
-  ALTER TABLE public.survey_questions DROP CONSTRAINT survey_questions_cat_order_uq;
-  CREATE UNIQUE INDEX survey_questions_active_order_uq
-  ON public.survey_questions (category_id, display_order)
-  WHERE is_active = TRUE;
-  ```
+### Amendment 1: Quota Reservation Period Binding (`quota_reservations.quota_id`)
+- **Threat Mitigations:** Cross-cycle quota leakage, midnight race conditions, and cross-tenant quota misappropriation (`TH-09`, `QC-01`).
+- **Security Design:** Add column `quota_id UUID NOT NULL REFERENCES public.tenant_quotas(id) ON DELETE RESTRICT`. Binds in-flight reservations directly to the specific active monthly quota ledger record. Tenant consistency is enforced by verifying `quota_reservations.business_id = tenant_quotas.business_id` under row lock (`FOR UPDATE`), with database-level composite integrity supported by a candidate unique key on `tenant_quotas(id, business_id)` and composite foreign key `(quota_id, business_id) REFERENCES public.tenant_quotas(id, business_id)`. Month-end crossover commits update the originating cycle's quota row, preventing accidental drain of the new cycle.
 
-### Amendment 2: Missing `is_active` on `survey_options`
-- **Problem:** Survey option validation requires verifying that an option is currently active, but `public.survey_options` lacked an explicit active flag.
-- **Amendment:** Add `is_active BOOLEAN NOT NULL DEFAULT TRUE` to `public.survey_options`.
+### Amendment 2: Reservation Payload Binding (`quota_reservations.payload_hash`)
+- **Threat Mitigations:** Idempotency key reuse across differing survey responses, draft leakage, and submission tampering (`TH-10`, `AIC-03`).
+- **Security Design:** Add column `payload_hash TEXT NOT NULL` to `public.quota_reservations`. Stores a server-computed cryptographic request fingerprint over the validated feedback submission (`business_id` + `response_id` + sorted option IDs + note + prompt settings). Untrusted client-supplied hashes are rejected. To protect low-entropy customer notes, fingerprints are computed via server-keyed HMAC-SHA256 (or salted SHA-256); plaintext customer notes are never stored in `payload_hash`. Replaying identical requests returns `ERR_ALREADY_COMMITTED` without double billing; differing payloads return HTTP 409 `ERR_IDEMPOTENCY_CONFLICT`.
 
-### Amendment 3: Administrative Execution Context & Trigger Bypasses
-- **Problem:** Database trigger `enforce_business_field_protection()` checks `is_super_admin()`, which inspects `auth.uid()`. When an Edge Function performs an admin update via `service_role`, PostgreSQL's session context lacks the caller's JWT claims.
-- **Amendment:** Implement an explicit administrative RPC (`admin_update_business_profile`) that validates the caller's admin JWT in the Edge Function application code before executing updates. `public_qr_id` remains permanently immutable under all update pathways.
+### Amendment 3: Administrator Revocation Registry (`admin_users.is_active`)
+- **Threat Mitigations:** Administrative privilege persistence after deactivation, stale JWT reuse, and unauthenticated administrative access (`TH-01`, `AC-01`).
+- **Security Design:** Add column `is_active BOOLEAN NOT NULL DEFAULT TRUE` to `public.admin_users`. Indicates whether the administrator currently possesses active operational privileges. While a mandatory gate, `is_active = TRUE` is never independently sufficient: every privileged operation must verify (1) authenticated identity, (2) admin registry record, (3) `is_active = TRUE`, (4) `role = 'super_admin'`, (5) verified `aal2` TOTP MFA session, and (6) target tenant authorization. Deactivated admins (`is_active = FALSE`) have all privileged RPC calls immediately rejected at the server/database boundary regardless of unexpired JWTs.
 
-### Amendment 4: Quota Reconciliation Cycle & Persistence
-- **Problem:** Quota reservations are purged after 7 days, which breaks historical monthly reconciliation against `quota_reservations.tokens_billed`.
-- **Amendment:** Add `billing_cycle TEXT NOT NULL` to `public.quota_reservations` and store monthly aggregated token totals directly in `public.tenant_quotas(total_tokens_billed INT NOT NULL DEFAULT 0)`. Historical reconciliation validates against the persistent `tenant_quotas` monthly records.
+### Amendment 4: Reliable Audit Actor Attribution (`admin_audit_logs.actor_user_id` & `actor_role`)
+- **Threat Mitigations:** Forged audit actors, unlogged merchant configuration mutations, and schema naming contradiction (`TH-03`, `AC-04`).
+- **Security Design:** Replaces legacy `admin_user_id` with `actor_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT` and `actor_role TEXT NOT NULL CHECK (actor_role IN ('super_admin', 'owner', 'system'))`. Supports reliable audit attribution for merchant-initiated actions (e.g. Google review destination changes via `update-destination`) alongside super-admin mutations. Derived strictly at the trusted server boundary (`auth.uid()`), never accepted from client request bodies. Append-only triggers prevent `UPDATE` and `DELETE`; payloads strictly scrub secrets and customer notes.
 
-### Amendment 5: Analytics Storage Rollup Schema
-- **Problem:** 12-month retention of raw analytics events exceeds Supabase Free 500 MB capacity at 50+ merchants (~630 MB).
-- **Amendment:** Introduce `public.analytics_daily_rollups` prior to onboarding merchant 35, aggregating raw events older than 90 days into daily totals and dropping raw event partitions.
+### Amendment 5: Survey Option Deactivation Semantics (`survey_options.is_active`)
+- **Threat Mitigations:** Broken historical survey references, invalid option submission, and survey questionnaire disruption (`TH-08`, `PC-01`).
+- **Security Design:** Add column `is_active BOOLEAN NOT NULL DEFAULT TRUE` to `public.survey_options`. Allows operational retirement of choices (`is_active = FALSE`) without hard-deleting records or breaking historical feedback foreign keys in `survey_responses`. Public survey queries exclude inactive options; server submission validates active status (`ERR_INVALID_SURVEY_OPTION`). Strictly preserves the 3-MCQ invariant.
+
+> **Operational Dependency & Architectural Boundary Notes:**
+> - **Canonical 12 Application Tables Preserved:** The platform architecture retains exactly 12 canonical tables; no 13th table (such as daily rollup tables) is approved for MVP.
+> - **Question Versioning (M0-07):** Replacing entire questions while managing the `(category_id, display_order)` unique constraint remains an unresolved gate under M0-07.
+> - **Admin RPC & Trigger Compatibility (M0-09):** Privilege boundaries between `service_role` Edge Function execution and hardware-locked QR triggers remain subject to M0-09 verification.
+> - **Auth & Edge Key Boundaries (M0-10):** Client publishable key vs. server `service_role` separation remains subject to M0-10 verification.
+> - **Quota State Machine Implementation (M0-12):** Concurrency row locks and rollover retry state transitions remain subject to M0-12 verification.
+> - **Audit Attribution Implementation (M0-13):** Exact trusted caller identity mechanism remains subject to M0-13 verification.
 
 ---
 
@@ -703,6 +705,8 @@ The following five technical adjustments were identified during the security aud
    - [ ] PENDING: Approve scheduled GitHub Actions logical export (`pg_dump` with GPG encryption) to private offsite storage for the 3–5 merchant pilot on Supabase Free tier.
 7. **Administrative Update Pathway:**
    - [ ] PENDING: Approve implementing administrative profile updates via dedicated Edge Function with verified `aal2` MFA assurance before executing service-role updates.
+8. **Database Schema Amendments 1–5 (Decision M0-06):**
+   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
 
 ---
 

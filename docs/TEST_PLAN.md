@@ -1217,19 +1217,22 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 |          |                          | Policy (0d / 30d / 90d)| awaiting formal founder sign-off before Stage 8.      |
 |----------+--------------------------+------------------------+-------------------------------------------------------|
 | `REG-02` | **Database Amendment**   | Quota Period Binding   | `quota_reservations.quota_id` amendment verified in   |
-|          |                          | (`quota_id` reference) | `TC-QTA-09` to prevent month-end midnight race bugs.  |
+|          | (Decision M0-06)         | (`quota_id` reference) | `TC-QTA-09` to prevent month-end midnight race bugs.  |
 |----------+--------------------------+------------------------+-------------------------------------------------------|
 | `REG-03` | **Database Amendment**   | Idempotency Payload    | `quota_reservations.payload_hash` verified in         |
-|          |                          | Verification           | `TC-QTA-06` to prevent draft leakage across payloads. |
+|          | (Decision M0-06)         | Verification           | `TC-QTA-06` to prevent draft leakage across payloads. |
 |----------+--------------------------+------------------------+-------------------------------------------------------|
-| `REG-04` | **Database Amendment**   | Merchant Audit Logging | `admin_audit_logs.actor_role` amendment verified in   |
-|          |                          | Attribution            | `TC-OWN-08` to permit merchant destination logging.   |
+| `REG-04` | **Database Amendment**   | Audit Actor Logging    | `admin_audit_logs.actor_user_id` & `actor_role`       |
+|          | (Decision M0-06)         | Attribution            | verified in `TC-OWN-08`, `TC-ADM-06`, `TC-DB-08`.     |
 |----------+--------------------------+------------------------+-------------------------------------------------------|
-| `REG-05` | **Database Amendment**   | Super-Admin Active Flag| `admin_users.is_active` verified in `TC-ADM-03` for   |
-|          |                          |                        | instant administrative account deactivation.          |
+| `REG-05` | **Database Amendment**   | Super-Admin Active Flag| `admin_users.is_active` verified in `TC-ADM-03` and   |
+|          | (Decision M0-06)         |                        | `TC-DB-10` for instant administrative deactivation.   |
 |----------+--------------------------+------------------------+-------------------------------------------------------|
-| `REG-06` | **Database Amendment**   | Admin Trigger Context  | `enforce_business_field_protection()` trigger verified|
-|          |                          | Compatibility          | in `TC-ADM-08` to check `app.current_admin_id`.       |
+| `REG-06` | **Database Amendment**   | Survey Option Inactive | `survey_options.is_active` verified in `TC-CUST-06`   |
+|          | (Decision M0-06)         | Soft-Retirement Policy | and `TC-CUST-10` ensuring retired choices rejected.  |
+|----------+--------------------------+------------------------+-------------------------------------------------------|
+| `REG-06B`| **Operational Prereq**   | Admin Trigger Context  | `enforce_business_field_protection()` trigger verified|
+|          | (Milestone M0-09)        | Compatibility          | in `TC-ADM-08` to check `app.current_admin_id`.       |
 |----------+--------------------------+------------------------+-------------------------------------------------------|
 | `REG-07` | **Implementation Prereq**| Modern Publishable Key | Test suite verifies modern non-JWT publishable keys   |
 |          |                          | Gateway Configuration  | (`verify_jwt=false` public, `verify_jwt=true` auth).  |
@@ -1256,6 +1259,8 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
    - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; timeout 8000ms initial target; single draft strictly < 60 words.
 5. **QR Distribution Scope (Decision M0-05):**
    - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees, A6/4x6" artwork, and print-ready PDFs are DEFERRED TO POST-MVP. Client-side QR PNG export adopted.
+6. **Database Schema Amendments 1–5 (Decision M0-06):**
+   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
 
 ---
 

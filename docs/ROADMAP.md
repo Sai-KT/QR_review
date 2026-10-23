@@ -122,12 +122,12 @@ Before initiating implementation, all eight project specifications were audited 
 
 ### 4.1 Implementation-Critical Document Amendments (Pre-Code Checks)
 
-As documented in [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/API_SPEC.md) v1.2 and [`docs/TEST_PLAN.md`](file:///Users/mrugmaythere/work/QRs/docs/TEST_PLAN.md) v1.1, the following specific schema adjustments must be incorporated into the initial migration scripts:
+As documented in [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/API_SPEC.md) v1.2 and [`docs/TEST_PLAN.md`](file:///Users/mrugmaythere/work/QRs/docs/TEST_PLAN.md) v1.1, the following specific schema adjustments have been approved under Founder Decision M0-06 (schema design only) to be incorporated into the initial migration scripts in Milestone M2:
 1. `quota_reservations.quota_id`: Foreign key reference to `tenant_quotas(id)` to prevent month-end midnight race conditions.
-2. `quota_reservations.payload_hash`: SHA-256 hash of survey answers to prevent draft mismatch on retry.
+2. `quota_reservations.payload_hash`: Server-computed cryptographic fingerprint of validated survey answers to prevent draft mismatch on retry.
 3. `admin_users.is_active`: Boolean flag enabling instant administrative account revocation.
-4. `admin_audit_logs.actor_role`: Audit column permitting attribution for merchant-initiated destination changes.
-5. `survey_options.is_active`: Operational flag permitting option deprecation without breaking historical feedback snapshots.
+4. `admin_audit_logs.actor_user_id` & `actor_role`: Replaces legacy `admin_user_id` to permit reliable audit attribution for both merchant-initiated destination changes and super-admin operations.
+5. `survey_options.is_active`: Operational flag permitting option deprecation without breaking historical feedback snapshots or violating the 3-MCQ invariant.
 6. `public.business_categories`: Canonical table naming consistently enforced across all migrations (superseding legacy `categories` references).
 
 ---
@@ -161,6 +161,10 @@ The founder has explicitly approved the five core product decisions M0-01 throug
 | **5. QR Distribution**     | **Digital QR Distribution**| Physical Acrylic Standees  | Delivers in-dashboard preview,|
 |    (Decision M0-05)        | (Preview, PNG, Link Copy)  | (A6 / 4×6 inch, bleed,     | high-res PNG (1024x1024), and |
 |                            | (FOUNDER APPROVED)         | PDFs deferred to Post-MVP) | first-party URL (/q/:qrId).   |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **6. Database Schema**     | **Approved (Design Only)** | Defer amendments to code   | Locks 5 schema adjustments    |
+|    Amendments 1–5          | 5 Schema Design Amendments | phase without documented   | (quota_id, payload_hash,      |
+|    (Decision M0-06)        | (FOUNDER APPROVED)         | safeguards (M0-06 approved)| is_active, actor_user_id/role)|
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -567,7 +571,7 @@ The absolute critical path governing delivery timeline is:
 #### Task M0-T06: Pre-Implementation Schema Blueprint & Migration Alignment Review
 - **Task ID:** `M0-T06`
 - **Title:** Verification of 5 Schema Amendments in Migration Blueprints
-- **Description:** Cross-verify that migration blueprints explicitly include: `quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_role`, and `survey_options.is_active`.
+- **Description:** Cross-verify that migration blueprints explicitly include: `quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` & `actor_role`, and `survey_options.is_active`.
 - **Target Files / Directories:** [`docs/DATABASE_SCHEMA.md`](file:///Users/mrugmaythere/work/QRs/docs/DATABASE_SCHEMA.md) §4, [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/API_SPEC.md) §1.1.
 - **Prerequisites:** M0-T01 through M0-T05 complete.
 - **Complexity & Effort:** Medium | 1.5 hrs
@@ -575,6 +579,7 @@ The absolute critical path governing delivery timeline is:
 - **Database Tables Involved:** `public.quota_reservations`, `public.admin_users`, `public.admin_audit_logs`, `public.survey_options`.
 - **Screens Involved:** All screens.
 - **Associated Test Cases:** `TC-DB-01`, `TC-QTA-01`, `TC-SEC-05`.
+- **Status:** **FOUNDER APPROVED — DESIGN ONLY (Decision M0-06)**. Schema amendments aligned across documentation specifications; SQL migration scripts and execution remain deferred to Milestone M2.
 - **Acceptance Criteria:** Zero discrepancies between migration SQL draft files and API contract requirements.
 
 ---
@@ -2015,8 +2020,11 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 |--------------------------------------------------------------------------------------------------------+-------------|
 | [ ] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | PENDING      |
 | [ ] 73 granular tasks and acceptance criteria reviewed and approved.                                   | PENDING      |
-| [ ] Pre-implementation schema amendments and M0 alignment gate approved.                               | NOT APPROVED |
 | [x] 5 Founder Product Decisions (M0-01 through M0-05) approved.                                        | FOUNDER APPROVED (M0-01..05 Only)|
+| [x] Database Schema Amendments 1–5 (Decision M0-06) approved.                                          | FOUNDER APPROVED (Design Only)|
+| [ ] Remaining technical gates (M0-07 through M0-17) approved.                                          | PENDING      |
+| [ ] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | PENDING      |
+| [ ] 73 granular tasks and acceptance criteria reviewed and approved.                                   | PENDING      |
 | [ ] 10-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | PENDING      |
 | [ ] Operational budget models (modeled ~₹120–₹500/mo pilot opex) and spending limits approved.         | PENDING      |
 | [ ] Stage-by-stage security release gates and Definition of Done approved.                             | PENDING      |

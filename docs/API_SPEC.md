@@ -544,10 +544,11 @@ sequenceDiagram
 
 ### 8.2 Operational Invariants & Edge Cases
 
-1. **Submission-Generation Cryptographic Binding:** `API-PUB-03` cannot be invoked without a valid `submissionToken` minted by `API-PUB-04`. This guarantees that customer feedback is safely persisted before model execution and prevents cross-session tampering.
+1. **Authoritative Submission-Generation Cryptographic Binding:** `API-PUB-03` cannot be invoked without a valid `submissionToken` minted by `API-PUB-04`. The Edge Function cryptographically validates the token HMAC and proves `responseId` exists in `public.survey_responses`. A client-supplied `responseId` alone is never accepted as proof of validated submission. The verified answers feed directly into the server-authoritative request fingerprint (`payload_hash`), binding the quota reservation to the validated submission. Clients cannot supply their own payload hashes.
 2. **Retry Without Feedback Duplication:** If generation times out (`SCR-CUST-10`) and the customer taps "Retry Generation", the client resubmits to `API-PUB-03` with the **same `responseId` and `submissionToken`** but an incremented attempt key (`idempotencyKey: "${sessionUuid}_2"`). `API-PUB-04` is **not** called again, preventing duplicate survey rows.
 3. **Mid-Journey Suspension Handling:** If a merchant account is suspended while a customer is filling out the survey, the next call (`submit-feedback` or `generate-review`) revalidates account status in PostgreSQL and rejects the call with HTTP 403 `ERR_BUSINESS_SUSPENDED`. The client intercepts this and renders `SCR-CUST-13`.
-4. **Exclusion of Not-Applicable (N/A) Choices:** Survey options configured with `is_neutral_na = TRUE` are excluded from the AI prompt envelope, preventing the model from hallucinating services the customer did not experience.
+4. **Option Active Validation & Historical Integrity:** In `API-PUB-04`, the server validates that every submitted `optionId` exists, belongs to the business's vertical category, and has `is_active = TRUE` in `public.survey_options`. Submitting a retired/deactivated option returns HTTP 422 (`ERR_INVALID_SURVEY_OPTION`). Historical submissions remain unchanged in `survey_responses`.
+5. **Exclusion of Not-Applicable (N/A) Choices:** Survey options configured with `is_neutral_na = TRUE` are excluded from the AI prompt envelope, preventing the model from hallucinating services the customer did not experience.
 
 ---
 
@@ -1211,6 +1212,11 @@ END;
 $$;
 
 -- RPC-INT-06: Administrative Mutation Execution Context
+-- (NON-EXECUTABLE DESIGN SPECIFICATION — Subject to M0-09 and M0-10 Verification)
+-- Note: While this illustrative procedure demonstrates authoritative verification of admin_users.is_active
+-- and atomic audit logging with actor_user_id and actor_role, client-forwarded administrative identities are
+-- strictly untrusted. Establishing caller authenticity across the Edge Function -> Database boundary,
+-- enforcing aal2 TOTP MFA in the caller JWT, and trigger compatibility remain pending resolution under gates M0-09 & M0-10.
 CREATE OR REPLACE FUNCTION public.admin_execute_operation(
     p_admin_user_id UUID,
     p_action TEXT,
@@ -1459,17 +1465,19 @@ Merchant dashboards must display mathematically honest conversion rates using st
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
-### 16.2 Required Database Amendments
-To implement this audited specification without breaking schema integrity, the following amendments to [`docs/DATABASE_SCHEMA.md`](file:///Users/mrugmaythere/work/QRs/docs/DATABASE_SCHEMA.md) are formally recorded:
-1. **`quota_reservations.quota_id`:** Add column `quota_id UUID NOT NULL REFERENCES public.tenant_quotas(id) ON DELETE CASCADE` to lock reservations to their exact billing ledger record.
-2. **`quota_reservations.payload_hash`:** Add column `payload_hash TEXT NOT NULL DEFAULT ''` to `public.quota_reservations` to prevent returning a previous draft when survey answers are changed under the same idempotency key.
+### 16.2 Required Database Amendments (Founder Decision M0-06 — Schema Design Only)
+To implement this audited specification without breaking schema integrity, the following five schema amendments to [`docs/DATABASE_SCHEMA.md`](file:///Users/mrugmaythere/work/QRs/docs/DATABASE_SCHEMA.md) are formally recorded under Founder Decision M0-06 (schema design only; DDL migrations and implementation deferred to Milestone M2):
+1. **`quota_reservations.quota_id`:** Column `quota_id UUID NOT NULL REFERENCES public.tenant_quotas(id) ON DELETE RESTRICT` locking reservations to their exact billing ledger record and preventing month-end rollover leakage.
+2. **`quota_reservations.payload_hash`:** Column `payload_hash TEXT NOT NULL` storing a server-computed cryptographic request fingerprint to prevent draft leakage across payloads and detect answer alterations under the same idempotency key.
 3. **`admin_audit_logs.actor_user_id` & `actor_role`:**
-   ```sql
-   ALTER TABLE public.admin_audit_logs RENAME COLUMN admin_user_id TO actor_user_id;
-   ALTER TABLE public.admin_audit_logs ADD COLUMN actor_role TEXT NOT NULL DEFAULT 'super_admin' CHECK (actor_role IN ('super_admin', 'merchant_owner'));
-   ```
-4. **`admin_users.is_active`:** Add column `is_active BOOLEAN NOT NULL DEFAULT TRUE` to `public.admin_users` to enable instantaneous administrative deactivation.
-5. **Administrative Trigger Compatibility:** Update trigger `enforce_business_field_protection()` to check `current_setting('app.current_admin_id', true)` for `service_role` Edge Function compatibility.
+   Replaces legacy `admin_user_id` with `actor_user_id UUID NOT NULL REFERENCES auth.users(id)` and `actor_role TEXT NOT NULL CHECK (actor_role IN ('super_admin', 'owner', 'system'))` to permit reliable audit attribution for both administrative and merchant-initiated actions without schema contradiction.
+4. **`admin_users.is_active`:** Column `is_active BOOLEAN NOT NULL DEFAULT TRUE` on `public.admin_users` to enable instantaneous administrative privilege revocation.
+5. **`survey_options.is_active`:** Column `is_active BOOLEAN NOT NULL DEFAULT TRUE` on `public.survey_options` to enable choice retirement without breaking historical feedback snapshots or violating the 3-MCQ invariant.
+
+> **Operational Dependency Notes:**
+> - **Administrative Trigger Compatibility:** Trigger compatibility (`enforce_business_field_protection()` vs. `service_role` Edge Function execution) is tracked separately as an outstanding pre-implementation gate under Milestone gate M0-09 (Admin RPC and Trigger Compatibility).
+> - **Question Versioning:** Lifecycle governance for replacing entire active questions is tracked under Milestone gate M0-07 (Active Survey Question Replacement).
+> - **Quota State Machine & Rollover:** Concurrency locks, missing-cycle provisioning, and idempotency state transitions remain subject to Milestone gate M0-12 (Quota Period & Idempotency Semantics).
 
 ---
 
