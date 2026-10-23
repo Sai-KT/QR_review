@@ -355,7 +355,7 @@ erDiagram
   - **Server-Side Submission Validation:** Feedback submission (`API-PUB-04`) verifies on the server that every submitted `option_id` exists, belongs to the referenced `question_id`, and has `is_active = TRUE`. Submitting an inactive option is rejected with HTTP 422 (`ERR_INVALID_SURVEY_OPTION`).
   - **Historical Snapshot Preservation:** Existing submissions in `survey_responses` retain their historical foreign keys and text snapshots in `affirmed_facts_snapshot`. Historical analytics and review drafts remain fully interpretable without retroactive distortion.
   - **Three-MCQ Invariant Preservation:** Deactivating choices must never leave an active question with zero selectable options or violate the strict 3-MCQ single-select customer journey.
-  - **Survey Versioning Dependency (Unresolved Gate M0-07):** While option-level deactivation allows retiring individual choices under an existing question, retiring or replacing an entire question relates to the unique constraint on `(category_id, display_order)`. Milestone gate M0-07 (Active Survey Question Versioning) remains explicitly **PENDING / NOT APPROVED**.
+  - **Question Versioning & Replacement Semantics (Founder Decision M0-07 Approved):** Replacing or retiring entire questions is governed by approved Founder Decision M0-07 (technical design approved; DDL migrations pending Milestone M2). While option-level deactivation allows retiring individual choices under an existing question, replacing an entire question preserves historical response integrity by marking the deactivated question `is_active = FALSE`. To enforce active display-order uniqueness, the active question constraint will be defined in DDL migrations as a partial unique index: `CREATE UNIQUE INDEX survey_questions_active_cat_order_uq ON public.survey_questions (category_id, display_order) WHERE is_active = TRUE;`. **Exact Three-Question Invariant Distinction:** The partial unique index enforces display-order uniqueness and an upper bound (at most one active question per slot 1, 2, or 3; maximum 3 active questions), but does not independently guarantee the existence of all three active questions (lower bound). To prevent publishing or exposing an incomplete questionnaire, the complete invariant (exactly 3 active questions across positions 1, 2, and 3) must be enforced procedurally by transactional category activation and publication guards (`SELECT COUNT(*) = 3 FROM public.survey_questions WHERE category_id = $1 AND is_active = TRUE`). Question replacements execute atomically under coordinated category-level locking, ensuring historical answers remain permanently bound to their original question snapshots and preventing category activation disruptions.
 - **Indexes:**
   - `survey_options_question_idx` (BTREE on `question_id`, `display_order`).
   - `survey_options_active_idx` (BTREE on `question_id`, `is_active`) WHERE `is_active = TRUE`.
@@ -515,6 +515,19 @@ erDiagram
   - `quota_reservations_ttl_pending_idx` (PARTIAL BTREE on `ttl_expires_at`) WHERE `status = 'pending'`.
 - **Access Roles:** `anon` (Zero direct access), `authenticated` (Zero direct access), `service_role` (ALL via Edge Functions).
 - **Requirement IDs Served:** `FR-AI-005`, `FR-BILLING-002`.
+- **M0-12 Database Architecture & Temporary Draft Recovery (FOUNDER APPROVED — TECHNICAL DESIGN ONLY):**
+  - **Approved Schema Enhancements (Design C + Option B + Recovery Authorization A):**
+    - `survey_responses.is_generated BOOLEAN NOT NULL DEFAULT FALSE`: Tracks whether an authentic review draft was successfully delivered for this survey response.
+    - `survey_responses.generation_attempts INT NOT NULL DEFAULT 0`: Server-side provider dispatch accounting (hard ceiling of maximum 3 dispatch attempts per response to prevent bot abuse or runaway API spend).
+    - `quota_reservations.response_id UUID NOT NULL REFERENCES public.survey_responses(id) ON DELETE CASCADE`: Binds the quota reservation directly to the authoritative database response.
+    - *Response-Level Pending Reservation Uniqueness:* Unique partial index `CREATE UNIQUE INDEX quota_reservations_pending_response_uq ON public.quota_reservations (response_id) WHERE status = 'pending';` ensuring exactly one concurrent in-flight reservation per feedback response.
+    - *Approved Temporary Draft Recovery Buffer (Option B):* `quota_reservations.raw_draft TEXT NULL` caches the generated text proposal for up to **60 minutes** to allow patron tab recovery without duplicate Gemini API billing or quota penalty. Preserves the 12 canonical application tables without adding a separate drafts table.
+    - *Approved Recovery Authorization (Recovery Authorization A):*
+      1. *Authorization vs. Retention Separation:* A database row retention window (max 60 minutes) does not authorize customer retrieval throughout that duration. The system strictly separates draft retention from customer authorization.
+      2. *Original Submission Token Binding:* Patron draft retrieval strictly requires the original `submissionToken` minted by `API-PUB-04`, which is valid for approximately **10 minutes**. Once the 10-minute token expires, the draft cannot be retrieved, even if unscrubbed draft bytes remain in the database prior to vacuum cleanup. Possession of `responseId` alone is insufficient.
+      3. *Immutable Expiry Reference:* Periodic vacuum workers cannot guarantee physical row deletion precisely at the 60-minute mark; therefore, query-time authorization strictly checks draft age against the immutable reservation `created_at` timestamp. Mutable timestamps (`updated_at`) are never used as expiry anchors.
+      4. *Billing & Failure Semantics:* Stored draft retrieval returns the existing draft without calling Gemini or incrementing quota. Provider timeouts and generation failures release the quota reservation (`release_generation_quota`), and retries use the same `responseId` with an incremented attempt counter (capped at 3) without duplicate survey submissions.
+  - **Status:** `APPROVED (TECHNICAL DESIGN ONLY)` (Ref: Founder Decision M0-12 Design C + Option B + Auth A; DDL migrations pending Milestone M2)
 
 ---
 
@@ -601,6 +614,15 @@ erDiagram
   - `admin_audit_logs_actor_idx` (BTREE on `actor_user_id`, `created_at` DESC).
 - **Access Roles:** `anon` (Zero access), `authenticated` (Zero access), `service_role` (INSERT / SELECT only).
 - **Requirement IDs Served:** `FR-ADMIN-001`, `FR-ADMIN-002`, `FR-OWNER-003`, `SEC-001`.
+- **M0-13 Audit Architecture & Actor Integrity (FOUNDER APPROVED — TECHNICAL DESIGN ONLY):**
+  - **Approved Schema Enhancements (Option A+ Conditional Actor Integrity & Alternative A Immutable Target UUID):**
+    - *Conditional Actor Integrity (Option A+ Approved):* Allow `actor_user_id UUID NULL` with a conditional constraint:
+      `CONSTRAINT chk_audit_actor_integrity CHECK ((actor_role = 'system' AND actor_user_id IS NULL) OR (actor_role IN ('super_admin', 'owner') AND actor_user_id IS NOT NULL))`
+      Ensures automated background workers (`pg_cron`, maintenance jobs) log with `actor_role = 'system'` and `actor_user_id = NULL` without creating synthetic auth users or attributing worker actions to the founder. Human roles (`super_admin`, `owner`) strictly require a verified, non-null human `auth.users(id)` UUID.
+    - *Client IP Attribution:* `ip_hash TEXT NULL` — populated with one-way salted hash for interactive web requests; `NULL` for background system workers without HTTP client context (preventing fabricated IP records).
+    - *Approved Target Business Reference (Alternative A Approved — Immutable UUID Reference):*
+      Retain `target_business_id UUID NULL` without a foreign key cascade (`ON DELETE SET NULL` removed from future DDL design), preserving historical target business UUIDs permanently in audit records even if a business tenant is subsequently archived or deleted. Avoids cascading foreign-key updates that silently rewrite audit rows, resolving the conflict with append-only audit triggers. Referential validity is verified procedurally by trusted administrative operations at audit insertion time, ensuring complete historical traceability and non-repudiation under applicable retention policies.
+  - **Status:** `APPROVED (TECHNICAL DESIGN ONLY)` (Ref: Founder Decision M0-13 Option A+ & Alternative A; DDL migrations pending Milestone M2)
 
 ---
 
@@ -821,16 +843,16 @@ Free-text customer notes voluntarily typed by patrons may contain names, telepho
 +---------------------------------------------------------------------------------------------------+
 |                                 CUSTOMER NOTE RETENTION STATUS                                    |
 +---------------------------------------------------------------------------------------------------+
-| Baseline Specification (PRD v1.1, SEC-003):  90-Day Automated Rolling Purge                       |
-| Architectural Recommendation (v1.1, §14.1):  30-Day Automated Rolling Purge (Minimization)        |
+| Baseline Specification (PRD v1.1, SEC-003):  90-Day Automated Rolling Purge (Superseded Baseline) |
+| Approved Policy (Founder Decision M0-01):    30-Day Automated Rolling Purge (FOUNDER APPROVED)     |
 |                                                                                                   |
 | RESOLUTION STATUS:                                                                                |
-| 1. Schema retains the 90-day baseline as default until formal founder sign-off.                   |
-| 2. Recommends adopting 30 days for MVP to minimize data liability.                               |
+| 1. 30 days is the authoritative, active approved customer-note retention policy (Decision M0-01).  |
+| 2. The legacy 90-day retention proposal is superseded and no longer applicable to customer notes.  |
 | 3. Automated daily worker executes:                                                               |
 |    UPDATE public.survey_responses                                                                 |
 |    SET optional_note = NULL, purged_at = CLOCK_TIMESTAMP()                                        |
-|    WHERE created_at < NOW() - INTERVAL '90 days' -- (Configurable to 30 days)                     |
+|    WHERE created_at < NOW() - INTERVAL '30 days'                                                  |
 |      AND optional_note IS NOT NULL;                                                               |
 +---------------------------------------------------------------------------------------------------+
 ```
@@ -1210,8 +1232,8 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
    - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; configurable via `GEMINI_MODEL`.
 5. **QR Distribution Scope (Decision M0-05):**
    - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees and vector PDFs deferred to Post-MVP.
-6. **Database Backup Mechanism for Pilot:**
-   - [ ] PENDING: Approve GitHub Actions scheduled `pg_dump` with offsite storage during the 5-merchant pilot.
+6. **Database & Storage Backup Architecture (Decision M0-15):**
+   - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Design B independent encrypted logical PostgreSQL dumps + separate Storage logo backups with founder-controlled recoverable keys (24h RPO / 2h RTO engineering targets; DDL/workflow implementation pending Milestone M7).
 7. **Analytics Storage Rollup Strategy:**
    - [ ] PENDING: Approve rolling up raw analytics events into daily summaries after 90 days to conserve storage on Free tier.
 8. **Database Schema Amendments 1–5 (Decision M0-06):**

@@ -64,24 +64,38 @@ Agents operate in one of three distinct modes. The **DEFAULT MODE IS ALWAYS PLAN
 ---
 
 ## 4. Mandatory Pre-Implementation Gate (Milestone M0)
-**NO IMPLEMENTATION CODE, MIGRATIONS, OR REPOSITORY SCAFFOLDING MAY BE CREATED** until Milestone M0 has been formally signed off by the founder with recorded evidence. The founder has explicitly approved six core product decisions (M0-01 through M0-06, with M0-06 approved for schema design only); however, **FULL MILESTONE M0 APPROVAL IS NOT GRANTED** and all remaining technical, trigger, backup, testing, and operational gates remain **PENDING**:
-1. **Decision M0-01 (Customer Note Retention):** **FOUNDER APPROVED** — Customer optional free-text notes (`survey_responses.optional_note`, max 150 chars) retained for 30 days, after which contents are purged via automated daily `pg_cron` worker. Operational verification, failure monitoring, and tests required; no customer final review stored; does not itself establish legal compliance.
-2. **Decision M0-02 (Google Destination Verification):** **FOUNDER APPROVED** — Strict server-side verification of Google review URLs + interactive merchant confirmation link (`API-OWN-03`). Place ID validated where reliably determined without requiring `ChIJ` prefix universally. Strict anti-gating preserved (equal access, no review bribes, no auto-publishing; suspended tenants return neutral inactive state).
-3. **Decision M0-03 (Merchant Logo Upload Restrictions):** **FOUNDER APPROVED** — PNG, JPEG, WebP only; 2 MB limit; trusted server-side magic-bytes verification (Storage RLS alone does not validate magic bytes); strictly no SVG for MVP. Platform-generated QR code exports are PNG.
-4. **Decision M0-04 (Gemini AI Model Configuration):** **FOUNDER APPROVED** — Default: `gemini-3.5-flash-lite`, Backup: `gemini-3.1-flash-lite`, configurable server-side via `GEMINI_MODEL` environment variable with credential isolation. `thinkingLevel: "minimal"` as intended GenerateContent configuration (legacy `thinkingBudget = 0` assumption deprecated; never mix incompatible settings; minimal thinking does not guarantee zero internal reasoning tokens). 8000ms initial technical timeout target; benchmark latency, token use, and retry costs in tests.
-5. **Decision M0-05 (Digital QR Distribution for MVP):** **FOUNDER APPROVED** — Digital-only QR distribution for MVP (in-dashboard preview, downloadable high-res PNG [1024×1024 initial target], and copyable first-party `/q/:public_qr_id` HTTPS link). Physical acrylic standees, counter stands, A6/4×6" artwork, bleed/crop marks, and print-ready PDFs are **DEFERRED TO POST-MVP**. Permanent immutable 10-character URL-safe TEXT identifier `businesses.public_qr_id` preserved.
-6. **Decision M0-06 (Database Schema Amendments 1–5):** **FOUNDER APPROVED (SCHEMA DESIGN ONLY)** — Approved five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
-7. **Active Survey Question Replacement (PENDING):** Question versioning and lifecycle governance.
-8. **Survey Option Activation Semantics (PENDING):** Soft deletion/deactivation semantics (`is_active = false`).
-9. **Admin RPC and Trigger Compatibility (PENDING):** `admin_execute_operation` privilege boundaries vs hardware-locked QR triggers.
-10. **Supabase Auth & Edge Key Configuration (PENDING):** Separation of client anon key vs server service_role key.
-11. **Survey-to-Generation Binding (PENDING):** Validated `API-PUB-04` submission token requirement for `API-PUB-03`.
-12. **Quota Period & Idempotency Semantics (PENDING):** Monthly cycle rollover and retry without duplicate survey records.
-13. **Audit Log Actor Attribution (PENDING):** Migration of `admin_audit_logs` to include `actor_user_id` and `actor_role`.
-14. **Finalized Testing & Release Gates (PENDING):** Concrete criteria for unit, RLS, and E2E test suites.
-15. **Backup & Disaster Recovery Plan (PENDING):** Point-in-time recovery and snapshot schedule.
-16. **Google Review Platform Policy Assessment (PENDING):** Verification of anti-gating compliance.
-17. **Formal Founder Sign-Off (PENDING):** Recorded authorization to exit Planning Mode and begin Milestone M1.
+**NO IMPLEMENTATION CODE, MIGRATIONS, OR REPOSITORY SCAFFOLDING MAY BE CREATED** until Milestone M0 has been formally signed off by the founder with recorded evidence. The authoritative status of all 17 pre-implementation gates is:
+
+| Gate | Title | Authoritative Governance Status | Baseline Scope & Safeguards |
+| :--- | :--- | :--- | :--- |
+| **M0-01** | Customer Note Retention | **FOUNDER APPROVED** | 30-day retention of `survey_responses.optional_note` (max 150 chars); daily purge via `pg_cron` worker (`purged_at`); no customer final review stored. |
+| **M0-02** | Google Destination Verification | **FOUNDER APPROVED** | Strict server-side verification of Google review URLs + interactive merchant confirmation link (`API-OWN-03`); strict anti-gating preserved. |
+| **M0-03** | Merchant Logo Upload Restrictions | **FOUNDER APPROVED** | PNG, JPEG, WebP only; 2 MB limit; server-side magic-bytes verification; SVG strictly prohibited for MVP; QR code exports are PNG. |
+| **M0-04** | Gemini AI Model Configuration | **FOUNDER APPROVED** | Server-side `GEMINI_MODEL` (`gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`); `thinkingLevel: "minimal"`; initial 8000ms timeout target. |
+| **M0-05** | Digital QR Distribution for MVP | **FOUNDER APPROVED** | Digital-only QR distribution for MVP (preview, 1024×1024 PNG download, copyable `/q/:public_qr_id` link); physical standees deferred to Post-MVP. |
+| **M0-06** | Database Schema Amendments 1–5 | **FOUNDER APPROVED (SCHEMA DESIGN ONLY)** | Approved five schema design amendments (`quota_reservations.quota_id`, `payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id/actor_role`, `survey_options.is_active`). |
+| **M0-07** | Active Survey Question Replacement | **FOUNDER APPROVED** | Immutable question versioning; deactivated questions soft-retired (`is_active = FALSE`); historical responses permanently pinned to original question text. |
+| **M0-08** | Survey Option Activation Semantics | **FOUNDER APPROVED** | Soft deactivation via `survey_options.is_active = FALSE`; foreign key integrity preserved; historical analytics unaffected. |
+| **M0-09** | Administrative RPC Security | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Hardened admin gateway; `admin_users.is_active = TRUE` + verified `aal2` TOTP MFA; server allowlist; `SECURITY DEFINER` with `SET search_path = ''`. |
+| **M0-10** | Supabase Auth & Edge Key Configuration | **APPROVED — TECHNICAL DESIGN ONLY** | Strict separation of client `anon` key vs server-only `service_role` key per supplied decision record; zero leak of elevated secrets to client bundles. |
+| **M0-11** | Cryptographic Submission Binding | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved hybrid HMAC-SHA256 submission token issued upon survey persistence; 10-minute TTL; constant-time verification; generation retrieves facts from DB only; does not prove physical visit. |
+| **M0-12** | Quota Period, Concurrency & Draft Recovery | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved Design C two-phase reservation (`reserve/commit/release`) + Option B (protected temporary draft storage) with Recovery Authorization A (original valid 10-min submission token); max 1h retention ceiling; query-time check vs `created_at`. |
+| **M0-13** | Audit Log Actor Attribution & Provenance | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved Option A+ (Conditional Actor Integrity: non-null human UUID for admin/owner, `actor_role = 'system'` with NULL user_id for workers) + Alternative A (immutable target business UUID; no cascading `ON DELETE SET NULL` updates). |
+| **M0-14** | Finalized Testing & Release Gates | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved lightweight QA stack (Vitest, RTL, Playwright, Supabase CLI, real DB RLS tests, mock Gemini server, P0/P1 blockers; tests conceptual/unexecuted). |
+| **M0-15** | Backup & Disaster Recovery Architecture | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved Design B (scheduled encrypted logical database dumps + separate Storage logo backup; founder-controlled recoverable keys; 24h RPO / 2h RTO engineering targets). |
+| **M0-16** | Google Review Platform Policy Assessment | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved Design B (enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal Google link; zero Google certification claims; abstention when facts insufficient). |
+| **M0-17** | Master Governance Audit & Sign-Off | **NOT SIGNED OFF** | Controlled specification alignment and pre-implementation governance closure. Documentation-only synchronization authorized; M0 sign-off remains blocked. |
+
+### Pre-Implementation Governance Progression Workflow:
+The transition from pre-implementation governance to application implementation is governed by five strictly separated stages:
+- **Stage A — Founder Technical Decisions:** Explicit approval of all outstanding M0 technical and product-policy decisions completed (M0-01..08 approved; M0-09, M0-10, M0-11..16 approved at technical design level).
+- **Stage B — Documentation Alignment Authorization:** Explicit permission to modify the ten authorized specification files only. Does NOT authorize software implementation, database migrations, SQL execution, or Git commits/pushes.
+- **Stage C — Documentation Verification:** Read-only audit confirming that the approved decision register and specifications match with zero material contradictions.
+- **Stage D — M0-17 Formal Sign-Off:** Founder decision formally closing pre-implementation design governance only. Does NOT automatically authorize beginning M1 development.
+- **Stage E — M1 Implementation Authorization:** Separate founder decision defining exactly which development tasks, tools, and Git operations are permitted.
+
+*Automatic milestone progression is strictly prohibited. Creating or editing documentation never constitutes authorization to write code or execute SQL.*
+
 
 ---
 
@@ -180,6 +194,7 @@ AI review generation is governed by [docs/API_SPEC.md](docs/API_SPEC.md) §9 and
   - The Edge Function catches the exception, releases reserved quota via `release_generation_quota`, and returns HTTP 504 / 502.
   - The client transitions to `SCR-CUST-10` offering retry, direct Google navigation, or manual drafting.
   - **NEVER FABRICATE A FAKE REVIEW.** Fallback deterministic text is permitted ONLY if its facts are explicitly affirmed by selected MCQs.
+- **Insufficient-Facts Abstention & Customer Choice (Founder Decision M0-16):** If customer feedback lacks sufficient facts (e.g., all neutral N/A selections and no note), the system abstains from generating a draft, displays a neutral explanation, and offers an explicit customer choice between manual drafting and the direct Google link. Under no circumstances does the system force an automatic redirect.
 
 ---
 

@@ -158,7 +158,7 @@ To maximize development velocity without incurring subscription fees, we establi
 ```
 
 - **Free vs. Paid Realities:** All selected tools are free and open source. Zero SaaS testing subscriptions (such as BrowserStack or Cypress Cloud) are required for the 3–5 business pilot.
-- **Server-Side Edge Function Mocking:** In browser DOM tests, MSW intercepts client fetch calls. For server-side Deno Edge Functions, tests configure `GEMINI_API_ENDPOINT = "http://localhost:54323/v1beta"` to point to a local mock HTTP server, completely isolating Edge Function testing from external Google network requests and billing.
+- **Server-Side Edge Function Mocking:** In browser DOM tests, MSW intercepts client fetch calls. For server-side Deno Edge Functions, tests configure `GEMINI_API_ENDPOINT = "http://localhost:54329/v1beta"` (configurable port, avoiding collision with Supabase Studio on `:54323`) to point to a local mock HTTP server, completely isolating Edge Function testing from external Google network requests and billing.
 
 ---
 
@@ -170,7 +170,8 @@ To maximize development velocity without incurring subscription fees, we establi
 +---------------------------------------------------------------------------------------------------+
 | 1. LOCAL DEVELOPMENT  | • Fully isolated local Docker environment managed via `supabase start`.   |
 |    (`localhost`)      | • PostgreSQL on `localhost:54322`, Edge Functions on `:54321`.            |
-|                       | • Serverless Gemini calls routed to local mock HTTP server on `:54323`.   |
+|                       | • Serverless Gemini calls routed to local mock HTTP server on `:54329`    |
+|                       |   (configurable default, avoiding Supabase Studio on `:54323`).          |
 |                       | • Disposable synthetic seed data populated via `supabase db reset`.       |
 |-----------------------+---------------------------------------------------------------------------|
 | 2. TEST / STAGING     | • Dedicated staging Supabase cloud project (`<staging-ref>.supabase.co`). |
@@ -1250,7 +1251,7 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 ## 32. Founder Decisions Register & Outstanding Gates
 
 1. **Customer Note Retention Policy (Decision M0-01):**
-   - [x] **FOUNDER APPROVED (Option B — 30 Days):** Store notes pseudonymously in `survey_responses.optional_note`; automated daily purge clears notes older than 30 days. No final customer review text stored.
+   - [x] **FOUNDER APPROVED (Option B — 30 Days):** Store notes pseudonymously in `survey_responses.optional_note`; automated daily purge clears notes older than 30 days via daily `pg_cron`. No final customer review text stored.
 2. **Review Destination Verification Protocol (Decision M0-02):**
    - [x] **FOUNDER APPROVED:** Strict server-side verification + interactive merchant preview link (`API-OWN-03`). Place ID validated where reliably determinable (not restricted to `ChIJ`).
 3. **Logo Upload Security Boundary (Decision M0-03):**
@@ -1260,7 +1261,29 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 5. **QR Distribution Scope (Decision M0-05):**
    - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees, A6/4x6" artwork, and print-ready PDFs are DEFERRED TO POST-MVP. Client-side QR PNG export adopted.
 6. **Database Schema Amendments 1–5 (Decision M0-06):**
-   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
+   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id/role`, `survey_options.is_active`).
+7. **Active Question Replacement (Decision M0-07):**
+   - [x] **FOUNDER APPROVED:** Question versioning and lifecycle governance.
+8. **Survey Option Activation Semantics (Decision M0-08):**
+   - [x] **FOUNDER APPROVED:** Soft deactivation semantics (`is_active = FALSE`).
+9. **Administrative RPC Security (Gate M0-09):**
+   - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Hardened admin gateway; `aal2` TOTP MFA check; server allowlist; `SECURITY DEFINER` with `SET search_path = ''`.
+10. **Supabase Auth & Key Configuration (Gate M0-10):**
+    - [x] **APPROVED — TECHNICAL DESIGN ONLY:** Strict separation of client anon key vs server service_role key.
+11. **Cryptographic Submission Binding (Gate M0-11):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** HMAC-SHA256 submission token binding survey response to generation (~10-minute TTL, constant-time comparison, database-derived facts; does not prove physical visit).
+12. **Quota Concurrency & Draft Recovery (Gate M0-12):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Design C two-phase quota reservation (`reserve/commit/release`) + Option B (protected temporary draft recovery buffer up to 60 minutes) with Recovery Authorization A (original valid 10-minute submission token required for retrieval; query-time check vs immutable reservation `created_at`). Counter bounds (`used_count + reserved_count <= max_limit`) are valid same-row expressions enforceable via PostgreSQL table CHECK constraints on `tenant_quotas`. However, cross-row aggregate reconciliation (e.g. verifying `used_count` against `quota_reservations`), atomic state transitions, and race-condition prevention under concurrent customer requests strictly require procedural row-level pessimistic locking (`SELECT ... FOR UPDATE`), transaction isolation, and automated concurrency testing rather than relying on CHECK constraints alone.
+13. **Audit Actor Attribution & Provenance (Gate M0-13):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Option A+ Conditional Actor Integrity (human UUID for admins/owners, `actor_role = 'system'` with NULL user_id for system workers) + Alternative A (immutable target business UUID; no cascading `ON DELETE SET NULL` updates).
+14. **Finalized Testing & Release Quality Gates (Gate M0-14):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Approved lightweight testing architecture (Vitest, React Testing Library, Playwright, PostgreSQL-native RLS tests, Supabase CLI, local mock Gemini server at configurable port 54329, GitHub Actions CI, P0/P1 defect release blockers). All 196 test cases are conceptual specifications and remain `NOT EXECUTED`.
+15. **Backup & Disaster Recovery Architecture (Gate M0-15):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Approved Design B scheduled encrypted logical exports + Storage logo backups + periodic restoration verification drills (`TC-BKP-01..05`; 24h RPO / 2h RTO engineering targets).
+16. **Google Review Platform Policy Assessment (Gate M0-16):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Approved Design B enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal direct Google link; zero fabricated facts or praise; abstention when facts insufficient; zero Google certification claims.
+17. **Master Governance Audit & Sign-Off (Gate M0-17):**
+    - [ ] **NOT SIGNED OFF:** Documentation synchronized; formal M0 sign-off remains blocked and M1 development unauthorized.
 
 ---
 

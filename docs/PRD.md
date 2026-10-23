@@ -26,7 +26,7 @@
 | :---: | :---: | :--- | :--- | :---: |
 | **0.1** | Oct 17, 2026 | Principal PM | Initial synthesis of Phase 0 research (`MVP_DECISIONS.md`, `PRODUCT_OPPORTUNITIES.md`). | Superseded |
 | **1.0** | Oct 17, 2026 | Principal PM | Comprehensive baseline PRD: 25 structured sections, complete requirements traceability (FR/NFR). | Superseded |
-| **1.1** | Oct 17, 2026 | Principal PM & Architect | **Independent Audit Corrections Applied:**<br/>1. Decoupled immutable public QR identifiers (`/q/[qr_id]`) from editable business slugs, guaranteeing printed standees never break.<br/>2. Defined lapsed subscription and quota exhaustion behavior (graceful degradation to direct Google review handoff; zero 404 dead ends).<br/>3. Replaced "zero PII" claims with realistic privacy rules for optional customer notes (pseudonymous storage, 90-day retention purge, strict access controls).<br/>4. Eliminated misleading automatic fallback templates; defined safe alternatives (retry, manual edit, direct bypass, factual-only affirmed draft).<br/>5. Overhauled mobile clipboard handoff for iOS Safari/Android Chrome popup blockers; separated copy attempt from copy success tracking.<br/>6. Clarified Google URL types and added destination validation.<br/>7. Strengthened multi-tenant RLS, safe public view projections, and admin MFA recommendations.<br/>8. Relaxed rigid "scroll-free" UI constraints for WCAG 2.1 AA a11y compliance (text zoom up to 200%, 320px viewports).<br/>9. Replaced destructive input stripping with server-side Zod validation, safe HTML encoding, and structured prompt separation.<br/>10. Expanded analytics event taxonomy (8 distinct events) with client-side deduplication.<br/>11. Layered abuse controls for shared cafe/salon customer Wi-Fi networks (ephemeral hashed IP keys; no raw IP logging).<br/>12. Corrected revenue math and financial milestones (distinguishing MRR, setup revenue, direct costs, fixed costs, founder time, and taxes).<br/>13. Focused MVP owner dashboard on aggregated feedback insights, deferring complex individual logs.<br/>14. Replaced unsupported absolute claims with measurable engineering targets and verified evidence. | **Under Review** |
+| **1.1** | Oct 17, 2026 | Principal PM & Architect | **Independent Audit Corrections Applied:**<br/>1. Decoupled immutable public QR identifiers (`/q/[qr_id]`) from editable business slugs, guaranteeing printed standees never break.<br/>2. Defined lapsed subscription and quota exhaustion behavior (graceful degradation to direct Google review handoff; zero 404 dead ends).<br/>3. Replaced "zero PII" claims with realistic privacy rules for optional customer notes (pseudonymous storage, 30-day retention purge via automated pg_cron per Founder Decision M0-01, strict access controls).<br/>4. Eliminated misleading automatic fallback templates; defined safe alternatives (retry, manual edit, direct bypass, factual-only affirmed draft).<br/>5. Overhauled mobile clipboard handoff for iOS Safari/Android Chrome popup blockers; separated copy attempt from copy success tracking.<br/>6. Clarified Google URL types and added destination validation.<br/>7. Strengthened multi-tenant RLS, safe public view projections, and admin MFA recommendations.<br/>8. Relaxed rigid "scroll-free" UI constraints for WCAG 2.1 AA a11y compliance (text zoom up to 200%, 320px viewports).<br/>9. Replaced destructive input stripping with server-side Zod validation, safe HTML encoding, and structured prompt separation.<br/>10. Expanded analytics event taxonomy (8 distinct events) with client-side deduplication.<br/>11. Layered abuse controls for shared cafe/salon customer Wi-Fi networks (ephemeral hashed IP keys; no raw IP logging).<br/>12. Corrected revenue math and financial milestones (distinguishing MRR, setup revenue, direct costs, fixed costs, founder time, and taxes).<br/>13. Focused MVP owner dashboard on aggregated feedback insights, deferring complex individual logs.<br/>14. Replaced unsupported absolute claims with measurable engineering targets and verified evidence. | **Under Review** |
 
 ### 1.3 Precedence & Research Hierarchy
 In the event of ambiguities or conflicting statements across planning documents, the following strict hierarchy of authority applies:
@@ -410,6 +410,14 @@ graph TD
   3. The link is **100% visible and accessible to all patrons**, regardless of their survey answers.
 - **Dependencies:** Configured WhatsApp number in business profile.
 - **Status:** `APPROVED` (Ref: `MVP_DECISIONS.md §3.7`)
+
+#### FR-CUST-009: Customer Authenticity Confirmation & AI Assistance Disclosure (FOUNDER APPROVED — TECHNICAL DESIGN ONLY)
+- **Description (Founder Decision M0-16 Design B Approved):** To reinforce genuine customer review integrity and anti-gating compliance under Google Review Policies, the customer flow mandates:
+  1. **Personal Experience Confirmation:** An unselected, neutral confirmation checkbox before AI draft generation: *"This feedback reflects my genuine, personal experience at this business."* (Not treated as independent proof of physical presence; not required for accessing direct Google link).
+  2. **Transparent AI Assistance Notice:** A clear visual disclosure above the draft: *"This draft is an AI-generated suggestion based strictly on your selections. You are encouraged to edit, rewrite, or decline it before posting."*
+  3. **Insufficient-Facts Abstention:** If a customer selects only neutral or "N/A" options without affirmative qualities or specific notes, the AI generator abstains from fabricating positive experiences and offers the patron an explicit choice between manual drafting in their own words or accessing the independent direct Google review link (without forcing an automatic redirect).
+- **Role:** Customer (Anonymous)
+- **Status:** `APPROVED (TECHNICAL DESIGN ONLY)` (Ref: Founder Decision M0-16 Design B; DDL/frontend implementation pending Milestone M3/M4)
 
 ---
 
@@ -963,6 +971,20 @@ DECISION AREA                   STATUS                 WORKING ASSUMPTION & NEXT
                                                         preview (M0-02).
 12. Merchant Logo Upload        FOUNDER APPROVED       PNG/JPEG/WebP only, 2 MB max, server-side magic bytes
                                                         inspection, SVG excluded from MVP (M0-03).
+13. Schema Amendments 1–5       FOUNDER APPROVED       Approved 5 schema design amendments: quota_id,
+                                (SCHEMA DESIGN ONLY)   payload_hash, admin is_active, actor_user_id/role (M0-06).
+14. Question Replacement        FOUNDER APPROVED       Question versioning & soft retirement (M0-07).
+15. Option Deactivation         FOUNDER APPROVED       survey_options.is_active soft deactivation (M0-08).
+16. Admin RPC Security          APPROVED (TECH DESIGN) Hardened admin gateway; aal2 MFA check (M0-09).
+17. Auth & Key Configuration    APPROVED (TECH DESIGN) Separation of anon key vs service_role (M0-10).
+18. Submission Token Binding    APPROVED (TECH DESIGN) HMAC-SHA256 survey submission token (M0-11).
+19. Quota & Draft Recovery      APPROVED (TECH DESIGN) Design C two-phase reservation; Option B draft
+                                                       recovery with Auth A (10-min token) approved (M0-12).
+20. Audit Actor Attribution     APPROVED (TECH DESIGN) Option A+ actor integrity; Alt A immutable UUID (M0-13).
+21. Testing & Release Gates     APPROVED (TECH DESIGN) Lightweight QA stack; P0/P1 release blockers (M0-14).
+22. Backup & Disaster Recovery  APPROVED (TECH DESIGN) Design B independent encrypted backup dumps (M0-15).
+23. Google Policy Compliance    APPROVED (TECH DESIGN) Design B customer consent checkbox & disclosure (M0-16).
+24. Pre-Implementation Sign-Off NOT SIGNED OFF         Documentation synchronized; M0 sign-off blocked (M0-17).
 ===================================================================================================
 ```
 
@@ -1052,7 +1074,7 @@ Before proceeding to Phase 1 — Stage 2 (Technical & Architecture Specification
 - [ ] **Policy Adherence Confirmed:** Universal WhatsApp owner channel and direct Google bypass link confirmed.
 - [ ] **Provisional Pricing Confirmed:** ₹399/month accepted as working commercial hypothesis; setup package revised to exclude deferred physical standee manufacturing.
 - [ ] **Revenue Mathematics Realignment Confirmed:** Milestone scenario modeling distinguishing MRR, setup revenue, direct costs, fixed costs, and taxes accepted.
-- [ ] **Full M0 Sign-Off Status:** Note that the above checks reflect approval of the five product decisions (M0-01..M0-05) only. Full Milestone M0 milestone approval is NOT APPROVED and remains pending remaining technical and operational gates.
+- [ ] **Full M0 Sign-Off Status:** Note that technical and product-policy designs for gates M0-01 through M0-16 have been approved by the founder (technical design only). Full Milestone M0 formal sign-off (M0-17) is NOT SIGNED OFF and M1 development remains UNAUTHORIZED.
 
 ---
 

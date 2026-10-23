@@ -292,6 +292,18 @@ DECISION AREA                   STATUS                 DECISION & RATIONALE
                                                        inspection, SVG excluded from MVP (M0-03).
 11. QR Distribution (M0-05)     FOUNDER APPROVED       Digital-only QR distribution for MVP (Preview,
                                                        High-Res PNG, Copyable Link). Standees deferred.
+12. Schema Amendments (M0-06)   FOUNDER APPROVED       Approved 5 schema design amendments: quota_id,
+                                (SCHEMA DESIGN ONLY)   payload_hash, admin is_active, actor_user_id/role.
+13. Survey Lifecycle (M0-07/08) FOUNDER APPROVED       Question versioning & option soft deactivation.
+14. Testing Stack (M0-14)       APPROVED (TECH DESIGN) Approved lightweight Vitest, RTL, Playwright,
+                                                       PostgreSQL-native RLS tests, local mock Gemini server.
+15. Backup Architecture (M0-15) APPROVED (TECH DESIGN) Approved Design B scheduled encrypted logical exports
+                                                       + Storage logo backups (24h RPO / 2h RTO targets).
+16. Submission Binding (M0-11)  APPROVED (TECH DESIGN) Approved HMAC-SHA256 submission token binding (~10m).
+17. Quota Locks (M0-12)         APPROVED (TECH DESIGN) Approved Design C two-phase reservation & Option B
+                                                       draft buffer with Auth A (10m submission token).
+18. Admin Security (M0-09/10)   APPROVED (TECH DESIGN) Separation of anon key vs service_role (M0-10) and
+                                                       hardened admin gateway + aal2 MFA allowlist (M0-09).
 ===================================================================================================
 ```
 

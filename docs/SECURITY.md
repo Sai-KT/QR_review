@@ -53,7 +53,7 @@ Because the service operates in public retail environments (customer smartphone 
 | 4. TWO-PHASE ATOMIC ACCOUNTING | Database row locks prevent concurrent counter quota bypasses;    |
 |                                | commitments occur strictly at the verified server boundary.      |
 | 5. PRIVACY BY DATA MINIMIZATION| Zero patron accounts; free-text notes classified as pseudonymous |
-|                                | personal data subjected to automated rolling purges (30d/90d).   |
+|                                | personal data subjected to automated 30-day rolling purges (M0-01)|
 | 6. DEFENSIVE BROWSER HANDOFF   | Fallbacks mitigate aggressive mobile Safari/Chrome popup blocks; |
 |                                | strict Content Security Policy (CSP) eliminates SPA XSS vectors. |
 +---------------------------------------------------------------------------------------------------+
@@ -567,6 +567,9 @@ Google’s official review policies and FTC 16 CFR Part 465 strictly forbid **re
 | **No Auto-Posting**      | The application never posts reviews automatically via private APIs.    |
 | **Independent Rating**   | Customer independently selects star ratings on Google Maps. The survey  |
 |                          | card does NOT include an in-app star selector (FR-CUST-003).           |
+| **No Auto-Redirect &**    | If feedback lacks sufficient facts, the system abstains from drafting,  |
+| **Customer Choice**      | displays a neutral explanation, and offers explicit customer choice     |
+|                          | (manual write or Google); never forces an automatic redirect.          |
 | **Universal Contact**    | A direct WhatsApp manager contact link is neutrally available to all   |
 |                          | patrons across all screens (FR-CUST-008).                              |
 +---------------------------------------------------------------------------------------------------+
@@ -653,7 +656,7 @@ The following five schema-design amendments were approved under Founder Decision
 
 > **Operational Dependency & Architectural Boundary Notes:**
 > - **Canonical 12 Application Tables Preserved:** The platform architecture retains exactly 12 canonical tables; no 13th table (such as daily rollup tables) is approved for MVP.
-> - **Question Versioning (M0-07):** Replacing entire questions while managing the `(category_id, display_order)` unique constraint remains an unresolved gate under M0-07.
+> - **Question Versioning (Decision M0-07 Approved):** Formally approved by founder at technical design level. Replaces in-place question mutation with immutable versioning and soft retirement (`is_active = FALSE`), preserving historical survey snapshots. Enforces active display-order uniqueness via partial unique index (`WHERE is_active = TRUE`) and coordinated category-level locking during replacement (DDL migration implementation pending Milestone M2). Note that while the partial unique index guarantees active position uniqueness ($\le 3$), category activation and publication guard procedures must transactionally enforce the complete invariant (`COUNT(*) = 3`) before live patron survey exposure.
 > - **Admin RPC & Trigger Compatibility (M0-09):** Privilege boundaries between `service_role` Edge Function execution and hardware-locked QR triggers remain subject to M0-09 verification.
 > - **Auth & Edge Key Boundaries (M0-10):** Client publishable key vs. server `service_role` separation remains subject to M0-10 verification.
 > - **Quota State Machine Implementation (M0-12):** Concurrency row locks and rollover retry state transitions remain subject to M0-12 verification.
@@ -701,12 +704,30 @@ The following five schema-design amendments were approved under Founder Decision
    - [x] **FOUNDER APPROVED:** Default `gemini-3.5-flash-lite`, backup `gemini-3.1-flash-lite`; `thinkingLevel: "minimal"`; timeout 8000ms initial target; server-side grounding validation (<60 words).
 5. **QR Distribution Scope (Decision M0-05):**
    - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable link). Physical standees and vector PDFs deferred to Post-MVP.
-6. **Database Backup Strategy for Pilot:**
-   - [ ] PENDING: Approve scheduled GitHub Actions logical export (`pg_dump` with GPG encryption) to private offsite storage for the 3–5 merchant pilot on Supabase Free tier.
-7. **Administrative Update Pathway:**
-   - [ ] PENDING: Approve implementing administrative profile updates via dedicated Edge Function with verified `aal2` MFA assurance before executing service-role updates.
-8. **Database Schema Amendments 1–5 (Decision M0-06):**
-   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
+6. **Database Schema Amendments 1–5 (Decision M0-06):**
+   - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id/actor_role`, `survey_options.is_active`).
+7. **Active Question Replacement (Decision M0-07):**
+   - [x] **FOUNDER APPROVED:** Immutable question versioning; deactivated questions soft-retired.
+8. **Survey Option Activation Semantics (Decision M0-08):**
+   - [x] **FOUNDER APPROVED:** Soft deactivation via `survey_options.is_active = FALSE`.
+9. **Administrative RPC Security (Gate M0-09):**
+   - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Hardened admin gateway; `admin_users.is_active = TRUE` + verified `aal2` TOTP MFA check; server allowlist; `SECURITY DEFINER` with `SET search_path = ''`.
+10. **Supabase Auth & Key Configuration (Gate M0-10):**
+    - [x] **APPROVED — TECHNICAL DESIGN ONLY:** Strict client `anon` key vs server `service_role` isolation.
+11. **Cryptographic Submission Binding (Gate M0-11):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** HMAC-SHA256 submission token binding survey response to generation (~10-minute TTL, constant-time verification, generation derived strictly from DB facts). *(Note: Cryptographic tokens mitigate replay/tampering; they do not prove physical customer presence).*
+12. **Quota Period, Concurrency & Draft Recovery (Gate M0-12):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Design C two-phase quota reservation (`reserve/commit/release`) + Option B (protected temporary draft recovery buffer up to 60 minutes) with Recovery Authorization A (original valid 10-minute submission token required for retrieval; query-time check vs immutable reservation `created_at`).
+13. **Audit Actor Attribution & Provenance (Gate M0-13):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Option A+ (Conditional Actor Integrity: non-null human UUID for admins/owners, `actor_role = 'system'` with NULL user_id for workers) + Alternative A (immutable target business UUID; no cascading `ON DELETE SET NULL` updates).
+14. **Finalized Testing & Release Quality Gates (Gate M0-14):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Lightweight QA stack (Vitest, RTL, Playwright, DB tests, mock Gemini, P0/P1 blockers; tests conceptual/unexecuted).
+15. **Backup & Disaster Recovery Architecture (Gate M0-15):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Design B scheduled encrypted logical exports + Storage logo backups with founder-controlled recoverable keys (24h RPO / 2h RTO engineering targets). *(Note: Encryption protects data in transit and rest; it does not eliminate all operational or credential-management risks).*
+16. **Google Review Platform Policy Assessment (Gate M0-16):**
+    - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Design B enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal direct Google link; zero fabricated facts or praise; abstention when facts insufficient. *(Note: Zero claims of Google certification or endorsement; product is not certified by Google).*
+17. **Master Governance Audit & Pre-Implementation Sign-Off (Gate M0-17):**
+    - [ ] **NOT SIGNED OFF:** Documentation synchronized; formal M0 sign-off remains blocked and M1 development unauthorized.
 
 ---
 

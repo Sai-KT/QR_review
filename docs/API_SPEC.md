@@ -544,11 +544,12 @@ sequenceDiagram
 
 ### 8.2 Operational Invariants & Edge Cases
 
-1. **Authoritative Submission-Generation Cryptographic Binding:** `API-PUB-03` cannot be invoked without a valid `submissionToken` minted by `API-PUB-04`. The Edge Function cryptographically validates the token HMAC and proves `responseId` exists in `public.survey_responses`. A client-supplied `responseId` alone is never accepted as proof of validated submission. The verified answers feed directly into the server-authoritative request fingerprint (`payload_hash`), binding the quota reservation to the validated submission. Clients cannot supply their own payload hashes.
-2. **Retry Without Feedback Duplication:** If generation times out (`SCR-CUST-10`) and the customer taps "Retry Generation", the client resubmits to `API-PUB-03` with the **same `responseId` and `submissionToken`** but an incremented attempt key (`idempotencyKey: "${sessionUuid}_2"`). `API-PUB-04` is **not** called again, preventing duplicate survey rows.
+1. **Authoritative Submission-Generation Cryptographic Binding (FOUNDER APPROVED — TECHNICAL DESIGN ONLY):** `API-PUB-03` requires a valid `submissionToken` minted by `API-PUB-04`. Under approved Founder Decision M0-11, the Edge Function cryptographically validates the token HMAC-SHA256 (binding purpose, response ID, business ID, issuance timestamp, and expiry) with constant-time comparison and verifies that `responseId` exists in `public.survey_responses`. A client-supplied `responseId` alone is never accepted as proof of validated submission. Browser-supplied customer facts are never trusted; facts are retrieved directly from the validated database record. Submission-token validity mitigates tampering and replay; it does not represent proof that a customer physically visited the business.
+2. **Retry Without Feedback Duplication & Temporary Draft Recovery (FOUNDER APPROVED — TECHNICAL DESIGN ONLY):** If generation times out (`SCR-CUST-10`) and the customer taps "Retry Generation", the client resubmits to `API-PUB-03` with the **same `responseId` and `submissionToken`** but an incremented attempt key (`idempotencyKey: "${sessionUuid}_2"`). `API-PUB-04` is **not** called again, preventing duplicate survey rows. Under approved Founder Decision M0-12 (Design C + Option B + Recovery Authorization A), dispatch attempts are capped at maximum 3 per response. Under approved Option B, the generated draft proposal is cached in `quota_reservations.raw_draft` for up to 60 minutes to enable tab recovery without duplicate Gemini billing. Under approved Recovery Authorization A, retrieval strictly requires the original `submissionToken` to remain valid within its ~10-minute lifetime. Expired tokens cannot retrieve drafts. Database retention (up to 60-minute vacuum window) is strictly separated from retrieval authorization: drafts cannot be retrieved past token validity, and an immutable expiry reference (reservation `created_at`) is enforced at query time rather than relying on mutable timestamps or background vacuum timing. Expired authorization never permits draft recovery merely because unscrubbed bytes remain in the database.
 3. **Mid-Journey Suspension Handling:** If a merchant account is suspended while a customer is filling out the survey, the next call (`submit-feedback` or `generate-review`) revalidates account status in PostgreSQL and rejects the call with HTTP 403 `ERR_BUSINESS_SUSPENDED`. The client intercepts this and renders `SCR-CUST-13`.
 4. **Option Active Validation & Historical Integrity:** In `API-PUB-04`, the server validates that every submitted `optionId` exists, belongs to the business's vertical category, and has `is_active = TRUE` in `public.survey_options`. Submitting a retired/deactivated option returns HTTP 422 (`ERR_INVALID_SURVEY_OPTION`). Historical submissions remain unchanged in `survey_responses`.
 5. **Exclusion of Not-Applicable (N/A) Choices:** Survey options configured with `is_neutral_na = TRUE` are excluded from the AI prompt envelope, preventing the model from hallucinating services the customer did not experience.
+6. **Insufficient-Facts Abstention & Customer Choice (Founder Decision M0-16 Design B Approved):** If all affirmative survey selections are excluded (e.g., all selections are `is_neutral_na = TRUE` and no specific note is provided), the Edge Function abstains from fabricating an artificial draft. Rather than forcing an automatic redirect, the system presents the customer with an explicit choice on `SCR-CUST-10`: write their own review in their own words or open Google Reviews directly. Under no circumstances does the application force an automatic redirect to external sites.
 
 ---
 
@@ -1212,11 +1213,12 @@ END;
 $$;
 
 -- RPC-INT-06: Administrative Mutation Execution Context
--- (NON-EXECUTABLE DESIGN SPECIFICATION — Subject to M0-09 and M0-10 Verification)
--- Note: While this illustrative procedure demonstrates authoritative verification of admin_users.is_active
--- and atomic audit logging with actor_user_id and actor_role, client-forwarded administrative identities are
--- strictly untrusted. Establishing caller authenticity across the Edge Function -> Database boundary,
--- enforcing aal2 TOTP MFA in the caller JWT, and trigger compatibility remain pending resolution under gates M0-09 & M0-10.
+-- (FOUNDER APPROVED — TECHNICAL DESIGN ONLY)
+-- Note: Illustrative architectural procedure approved under Founder Decisions M0-09 & M0-10.
+-- Demonstrates authoritative server-side verification of admin_users.is_active, verified aal2 TOTP MFA assurance,
+-- atomic audit logging with actor_user_id (non-null human UUID) and actor_role ('super_admin'), restricted execution allowlists,
+-- and safe SECURITY DEFINER search_path = ''. Client-forwarded administrative identities are strictly untrusted;
+-- actual SQL migrations and implementation remain pending Milestone M2.
 CREATE OR REPLACE FUNCTION public.admin_execute_operation(
     p_admin_user_id UUID,
     p_action TEXT,
@@ -1377,13 +1379,13 @@ Free-text notes voluntarily typed by customers are classified as **pseudonymous 
 |                            | to `public.survey_responses`.     | 200 response delivery.           |
 |----------------------------+-----------------------------------+----------------------------------|
 | **Option B (30 Days)**     | Note saved to `survey_responses`; | Daily cron updates:              |
-| *(Provisional Recommended)*| visible to merchant in dashboard  | `UPDATE survey_responses         |
+| *(FOUNDER APPROVED M0-01)* | visible to merchant in dashboard  | `UPDATE survey_responses         |
 |                            | for 30 days.                      |  SET optional_note = NULL,       |
 |                            |                                   |      purged_at = NOW()           |
 |                            |                                   |  WHERE created_at < NOW()-30d`   |
 |----------------------------+-----------------------------------+----------------------------------|
-| **Option C (90 Days)**     | Note saved to `survey_responses`; | Daily cron executes identical    |
-| *(PRD Baseline)*           | visible to merchant for 90 days.  | purge with 90-day threshold.     |
+| **Option C (90 Days)**     | Legacy PRD proposal superseded   | Superseded by Founder Decision   |
+| *(Superseded Baseline)*    | by approved 30-day purge policy.  | M0-01; not applicable for MVP.   |
 +---------------------------------------------------------------------------------------------------+
 ```
 

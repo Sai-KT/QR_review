@@ -35,7 +35,7 @@ The following table documents the resolution of technical discrepancies across p
 | Conflict / Parameter | PRD v1.1 | Architecture / Schema | UI/UX v1.0 | Audited Resolution (UI/UX v1.1) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Optional Note Length** | 200 chars (`FR-CUST-004`) | 150 chars (`optional_note VARCHAR(150)`) | 200 chars | **150 chars (`maxlength="150"`).** Aligned to database constraint to prevent SQL truncation errors. |
-| **Customer Note Retention** | 90 days (`SEC-003`) | 30-day rolling purge proposed | 30 days hardcoded | **Configurable Privacy Notice.** Supports 0d (ephemeral), 30d, or 90d pending founder sign-off. |
+| **Customer Note Retention** | 30 days (`SEC-003`) | 30-day rolling purge (`purged_at`) | 30 days | **30-Day Rolling Purge.** Formally approved by founder (Decision M0-01); purged via daily pg_cron. |
 | **Merchant Profile Fields** | Implies store address | `businesses` has no address column | Included address field | **Schema-Aligned.** Only schema fields (`name`, `slug`, `whatsapp_phone`, `logo_url`) shown in MVP. |
 | **Stored Customer Review Text** | Not explicitly stored | `survey_responses` stores MCQs + note | Showed final review text | **Data-Minimized.** Dashboard shows MCQ selections and optional note; does not fabricate final text storage. |
 | **Google Review URL Updates** | Owner sets URL | Revoked direct UPDATE (`TC-02`) | Generic form input | **Edge Function Gateway.** Updates route through `POST /functions/v1/update-destination` with whitelist. |
@@ -350,9 +350,8 @@ The 15 customer screen states are specified below in a rigorous, implementation-
 - **Error State:** Text truncated at 150 characters with warning text.
 - **Authorization Dependency:** Public anonymous.
 - **Configurable Privacy Notice Model:**
-  - *Option A (Ephemeral):* *"Your selections and optional notes are processed in-memory by Google Gemini to draft your review and are not stored in our database. [Privacy Policy]"*
-  - *Option B (30 Days — Recommended):* *"Your feedback is processed by Google Gemini to draft your review. Notes are stored pseudonymously and automatically deleted after 30 days. [Privacy Policy]"*
-  - *Option C (90 Days — PRD Baseline):* *"Your feedback is processed by Google Gemini to draft your review. Notes are stored pseudonymously and automatically deleted after 90 days. [Privacy Policy]"*
+  - *Option B (30 Days — FOUNDER APPROVED M0-01):* *"Your feedback is processed by Google Gemini to draft your review. Notes are stored pseudonymously and automatically deleted after 30 days via daily pg_cron. [Privacy Policy]"*
+- **Authenticity Safeguard (FOUNDER APPROVED — TECHNICAL DESIGN ONLY):** Unselected neutral confirmation checkbox: [ ] *"This feedback reflects my genuine, personal experience at this business."* (Approved under Founder Decision M0-16 Design B; not treated as independent proof of physical visit; not required to access direct Google link; frontend implementation pending Milestone M4).
 - **Acceptance Criteria:** Field character limit strictly capped at 150 characters to prevent database constraint exceptions (`VARCHAR(150)`).
 - **Traceability:** `FR-CUST-004`, `SEC-003`, `PC-01`, `PC-03`.
 
@@ -374,6 +373,7 @@ The 15 customer screen states are specified below in a rigorous, implementation-
 - **User Role:** Public Anonymous Patron
 - **Primary Purpose:** Present generated review draft for customer review, direct editing, and explicit approval before any external action.
 - **Key Components:** `ReviewDraftEditor` (`CMP-05`), Word Count Badge, `CopyActionButton` (`CMP-06`).
+- **AI Transparency Notice (FOUNDER APPROVED — TECHNICAL DESIGN ONLY):** Clear visual notice above the draft editor: *"This draft is an AI suggestion based on your selections. Please edit or rewrite it as you see fit before posting."* (Approved under Founder Decision M0-16 Design B; frontend implementation pending Milestone M4).
 - **Required Data:** `ai_generated_draft` string (maximum 60 words).
 - **Primary Actions:** Tap `📋 Copy Review Draft` (copies text and advances to `SCR-CUST-08`).
 - **Secondary Actions:** Tap directly into textarea to edit words; tap `Regenerate Draft` (limited to 1 retry); tap `Review Directly on Google`.
@@ -415,18 +415,19 @@ The 15 customer screen states are specified below in a rigorous, implementation-
 #### `SCR-CUST-10`: AI Generation Error & Manual Retry / Direct Fallback
 - **Route:** `/q/:qrId?state=error_generation`
 - **User Role:** Public Anonymous Patron
-- **Primary Purpose:** Gracefully handle Edge Function timeouts, model rate limits, or transient generation failures without a dead-end experience.
+- **Primary Purpose:** Gracefully handle Edge Function timeouts, model rate limits, transient generation failures, or insufficient-facts abstention without a dead-end experience.
 - **Key Components:** `BrandHeader` (`CMP-01`), `FallbackErrorCard` (`CMP-10`), `GoogleHandoffButton` (`CMP-07`), Retry Button.
 - **Required Data:** `business.name`, `business.google_review_url`, cached MCQ selections in memory.
 - **Primary Actions:** Tap `Review Directly on Google Maps →` (opens Google Maps with zero progress lost).
-- **Secondary Actions:** Tap `Retry Generating Draft` (triggers 1 retry reservation).
+- **Secondary Actions:** Tap `Retry Generating Draft` (triggers 1 retry reservation); or write review in their own words.
+- **Insufficient Information / Abstention State (Founder Decision M0-16):** When customer feedback does not contain enough specific facts for an authentic AI-assisted draft, the system abstains from generating a draft, displays a neutral explanation (*"We cannot generate a reliable draft from the provided information."*), and offers the customer the choice to open Google Maps or compose their own review without an AI suggestion. Under no circumstances does the application force an automatic redirect.
 - **Loading Behavior:** Small spinner on retry button if re-attempted.
 - **Empty State:** N/A.
 - **Error State:** Persistent failure after retry prominently emphasizes the direct Google review bypass.
 - **Authorization Dependency:** Public anonymous.
 - **Mobile/Responsive Behavior:** Centered card (max-w: 480px).
-- **Acceptance Criteria:** In-flight MCQ selections are preserved in state; customer is never blocked from reviewing.
-- **Traceability:** `FR-CUST-002`, `FR-AI-001`.
+- **Acceptance Criteria:** In-flight MCQ selections are preserved in state; customer is never blocked from reviewing; customer choice is strictly preserved without automatic navigation.
+- **Traceability:** `FR-CUST-002`, `FR-AI-001`, `FR-CUST-009`.
 
 #### `SCR-CUST-11`: Monthly Quota Exhaustion Fallback
 - **Route:** `/q/:qrId?state=quota_exhausted`

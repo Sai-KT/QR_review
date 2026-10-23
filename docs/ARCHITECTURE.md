@@ -640,10 +640,24 @@ stateDiagram-v2
     note right of Expired: Abandoned requests automatically freed<br/>by scheduled vacuum job.
 ```
 
-#### Quota vs. Billing Policy Distinction:
-1. **Customer Quota Usage:** Deducted only upon **successful delivery** of an editable review draft (`commit_generation_quota`).
-2. **Actual Paid API Usage:** Incurred whenever tokens are processed by the Gemini API endpoint.
-3. **Failure Policy:** If the Gemini API call fails, times out, or produces malformed JSON, the reservation is released (`release_generation_quota`). The merchant's 150-generation quota is **not penalized** for system delivery failures. The small token fee (fractions of a cent) is absorbed by the platform as Cost of Goods Sold (COGS).
+#### Quota vs. Billing Policy Distinction & Lock Boundaries:
+1. **Transaction Isolation & Lock Boundaries:** The PostgreSQL row lock acquired during `reserve_generation_quota` (`SELECT ... FOR UPDATE`) is held strictly for the duration of the reservation database transaction (~5–10ms) and is committed/released **before** the external Gemini HTTP request is dispatched. **Under no circumstances is a database connection or transaction row lock held open during external AI processing.**
+2. **Customer Quota Usage:** Deducted only upon **successful delivery** of an editable review draft (`commit_generation_quota`).
+3. **Actual Paid API Usage:** Incurred whenever tokens are processed by the Gemini API endpoint.
+4. **Failure Policy:** If the Gemini API call fails, times out, or produces malformed JSON, the reservation is released (`release_generation_quota`). The merchant's 150-generation quota is **not penalized** for system delivery failures. The small token fee (fractions of a cent) is absorbed by the platform as Cost of Goods Sold (COGS).
+
+---
+
+### 12.4 Concurrency, Idempotency & Draft Recovery Architecture (FOUNDER APPROVED — TECHNICAL DESIGN ONLY)
+- **Approved Architecture (Founder Decision M0-12 Approved):**
+  1. *Response-Level Uniqueness & Dispatch Accounting:* `survey_responses.generation_attempts` tracked server-side; capped at maximum 3 provider dispatch attempts per response to prevent bot abuse or cost runaway.
+  2. *Two-Phase Lock Isolation:* Database transaction commits immediately after reservation. Gemini API invocation runs in Edge Function without holding DB transactions or row locks during model latency.
+  3. *Approved Draft Recovery Architecture (Option B + Recovery Authorization A):*
+     - **Option B (Protected Temporary Recovery Buffer):** Temporarily holds raw AI draft proposal in `quota_reservations.raw_draft` for up to **60 minutes** to allow patron tab recovery without duplicate Gemini billing.
+     - **Recovery Authorization A:** Draft retrieval strictly requires the original `submissionToken` to remain valid within its ~10-minute lifetime. Expired tokens cannot retrieve drafts. Possession of response UUID alone is insufficient.
+     - **Access-Time Expiry Enforcement:** Query-time authorization checks draft age against the immutable reservation `created_at` timestamp. Expired authorization cannot retrieve drafts even if unscrubbed bytes remain before periodic vacuum execution.
+     - **No Duplicate Billing:** Stored draft retrieval returns the existing draft without invoking Gemini or incrementing quota usage.
+- **Status:** `APPROVED (TECHNICAL DESIGN ONLY)` (Ref: Founder Decision M0-12 Design C + Option B + Auth A; DDL/Edge Function implementation pending Milestone M2/M3)
 
 ---
 
@@ -842,6 +856,20 @@ DECISION AREA                   STATUS                 WORKING SPECIFICATION & N
                                                        preview (M0-02).
 9. Merchant Logo Upload         FOUNDER APPROVED       PNG/JPEG/WebP only, 2 MB max, server-side magic bytes
                                                        inspection, SVG excluded from MVP (M0-03).
+10. Schema Amendments 1–5       FOUNDER APPROVED       Approved 5 schema design amendments: quota_id,
+                                (SCHEMA DESIGN ONLY)   payload_hash, admin is_active, actor_user_id/role (M0-06).
+11. Question Replacement        FOUNDER APPROVED       Question versioning & soft retirement (M0-07).
+12. Option Deactivation         FOUNDER APPROVED       survey_options.is_active soft deactivation (M0-08).
+13. Admin RPC Security          APPROVED (TECH DESIGN) Hardened admin gateway; aal2 MFA check (M0-09).
+14. Auth & Key Configuration    APPROVED (TECH DESIGN) Separation of anon key vs service_role (M0-10).
+15. Submission Token Binding    APPROVED (TECH DESIGN) HMAC-SHA256 survey submission token (M0-11).
+16. Quota & Draft Recovery      APPROVED (TECH DESIGN) Design C two-phase reservation; Option B draft
+                                                       recovery with Auth A (10-min token) approved (M0-12).
+17. Audit Actor Attribution     APPROVED (TECH DESIGN) Option A+ actor integrity; Alt A immutable UUID (M0-13).
+18. Testing & Release Gates     APPROVED (TECH DESIGN) Lightweight QA stack; P0/P1 release blockers (M0-14).
+19. Backup & Disaster Recovery  APPROVED (TECH DESIGN) Design B independent encrypted backup dumps (M0-15).
+20. Google Policy Compliance    APPROVED (TECH DESIGN) Design B customer consent checkbox & disclosure (M0-16).
+21. Pre-Implementation Sign-Off NOT SIGNED OFF         Documentation synchronized; M0 sign-off blocked (M0-17).
 ===================================================================================================
 ```
 

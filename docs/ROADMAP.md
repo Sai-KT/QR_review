@@ -165,6 +165,39 @@ The founder has explicitly approved the five core product decisions M0-01 throug
 | **6. Database Schema**     | **Approved (Design Only)** | Defer amendments to code   | Locks 5 schema adjustments    |
 |    Amendments 1–5          | 5 Schema Design Amendments | phase without documented   | (quota_id, payload_hash,      |
 |    (Decision M0-06)        | (FOUNDER APPROVED)         | safeguards (M0-06 approved)| is_active, actor_user_id/role)|
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **7. Question Replacement**| **Question Versioning**    | In-place text mutation     | Immutable question versioning |
+|    (Decision M0-07)        | (FOUNDER APPROVED)         | (Breaks historical data)   | with soft retirement flag.    |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **8. Option Deactivation** | **survey_options.is_active**| Hard row deletion         | Preserves historical answer   |
+|    (Decision M0-08)        | (FOUNDER APPROVED)         | (Cascades to responses)    | snapshots and foreign keys.   |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **9. Admin RPC Security**  | **Hardened Admin Gateway** | Direct RPC invocation      | aal2 MFA + server allowlist   |
+|    (Gate M0-09)            | (FOUNDER APPROVED — TECH)  | without strict check       | + SECURITY DEFINER search_path|
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **10. Auth & Key Config**  | **Client Anon / Svc Role** | Exposing elevated keys     | Zero service_role in browser  |
+|    (Gate M0-10)            | (APPROVED — TECH DESIGN)   | in frontend bundles        | (Technical design approved).  |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **11. Submission Binding** | **HMAC-SHA256 Token**      | Browser-supplied facts     | Cryptographic 10-min binding; |
+|    (Gate M0-11)            | (FOUNDER APPROVED — TECH)  | without token verification | facts retrieved from DB only. |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **12. Quota & Recovery**   | **Design C + Option B**    | Hold locks during Gemini;  | Two-phase reservation; 1-hour |
+|    (Gate M0-12)            | (FOUNDER APPROVED — TECH)  | unbounded client retries   | draft recovery + Auth A (10m).|
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **13. Audit Attribution**  | **Option A+ Integrity**    | Fabricated worker IP /     | Non-null human UUID; system   |
+|    (Gate M0-13)            | (FOUNDER APPROVED — TECH)  | founder synthetic user     | worker NULL UUID; Alt A UUID. |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **14. Quality Gates**      | **Lightweight Open-Source**| Arbitrary coverage claims  | Vitest, Playwright, DB tests, |
+|    (Gate M0-14)            | (FOUNDER APPROVED — TECH)  | without automated tests    | mock Gemini, P0/P1 blockers.  |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **15. Backup & Recovery**  | **Design B Encrypted Dump**| Supabase Free automated    | Scheduled encrypted pg_dump   |
+|    (Gate M0-15)            | (FOUNDER APPROVED — TECH)  | daily backup assumption    | + Storage logo recovery drill.|
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **16. Google Policy**      | **Design B Authenticity**  | Claiming Google approval;  | Neutral consent checkbox, <60w|
+|    (Gate M0-16)            | (FOUNDER APPROVED — TECH)  | sentiment gating           | draft, universal Google link. |
+|----------------------------+----------------------------+----------------------------+-------------------------------|
+| **17. Governance Sign-Off**| **Controlled Alignment**   | Automatic M1 authorization | Pre-implementation governance |
+|    (Gate M0-17)            | (NOT SIGNED OFF)           | upon document edits        | audit; M1 requires directive. |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -184,7 +217,7 @@ The founder has explicitly approved the five core product decisions M0-01 throug
 - **Styling & Components:** Tailwind CSS v4, Lucide React icons, shadcn/ui accessible component primitives (Radix UI foundation).
 - **Backend Infrastructure:** Supabase CLI (local PostgreSQL 16 emulation), Deno 1.40+ Edge Functions, Supabase Storage buckets.
 - **Testing Harness:** Vitest 2.0+ (unit & contract tests), React Testing Library (component integration), Playwright (E2E mobile browser emulation), `@axe-core/playwright` (WCAG 2.2 AA accessibility).
-- **Local AI Mock Server:** Lightweight Deno HTTP server listening at `http://localhost:54323/v1beta` emulating Google Gemini Flash responses.
+- **Local AI Mock Server:** Lightweight Deno HTTP server listening at `http://localhost:54329/v1beta` (configurable; avoids collision with default Supabase Studio on `:54323`) emulating Google Gemini Flash responses.
 
 ### 6.3 Development Testing Strategy: TDD vs. Test-After
 - **TDD (Test-Driven Development) Mandatory For:**
@@ -667,7 +700,7 @@ The absolute critical path governing delivery timeline is:
 #### Task M1-T07: Supabase CLI Local Emulation & Mock Gemini Deno Server Setup
 - **Task ID:** `M1-T07`
 - **Title:** Supabase Local CLI Environment & Mock AI Deno Server
-- **Description:** Initialize local Supabase configuration (`supabase/config.toml`). Implement a lightweight local Deno mock server (`supabase/functions/mock-gemini.ts`) that listens on `http://localhost:54323/v1beta` to emulate Google Gemini Flash responses for offline development and CI.
+- **Description:** Initialize local Supabase configuration (`supabase/config.toml`). Implement a lightweight local Deno mock server (`supabase/functions/mock-gemini.ts`) that listens on a configurable port (default `http://localhost:54329/v1beta`, avoiding port collision with Supabase Studio on `:54323`) to emulate Google Gemini Flash responses for offline development and CI.
 - **Target Files / Directories:** `supabase/config.toml`, `supabase/functions/mock-gemini.ts`, `scripts/start-local-dev.sh`.
 - **Prerequisites:** M1-T01.
 - **Complexity & Effort:** Medium | 2.0 hrs
@@ -2020,17 +2053,23 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 |--------------------------------------------------------------------------------------------------------+-------------|
 | [ ] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | PENDING      |
 | [ ] 73 granular tasks and acceptance criteria reviewed and approved.                                   | PENDING      |
-| [x] 5 Founder Product Decisions (M0-01 through M0-05) approved.                                        | FOUNDER APPROVED (M0-01..05 Only)|
-| [x] Database Schema Amendments 1–5 (Decision M0-06) approved.                                          | FOUNDER APPROVED (Design Only)|
-| [ ] Remaining technical gates (M0-07 through M0-17) approved.                                          | PENDING      |
-| [ ] Master Delivery Strategy and 10-Milestone Sequencing reviewed and approved.                        | PENDING      |
-| [ ] 73 granular tasks and acceptance criteria reviewed and approved.                                   | PENDING      |
+| [x] Founder Product Decisions M0-01 through M0-05 approved.                                            | APPROVED     |
+| [x] Database Schema Amendments 1–5 (Decision M0-06) approved.                                          | APPROVED     |
+| [x] Active Question Replacement (Decision M0-07) approved.                                              | APPROVED     |
+| [x] Survey Option Activation Semantics (Decision M0-08) approved.                                      | APPROVED     |
+| [x] Supabase Auth & Key Configuration (Gate M0-10) approved.                                            | APPROVED (TD)|
+| [x] Technical design gates (M0-09, M0-11 through M0-16) approved.                                       | APPROVED (TD)|
+| [ ] Pre-Implementation Governance Sign-Off (M0-17) signed.                                             | NOT SIGNED   |
 | [ ] 10-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | PENDING      |
 | [ ] Operational budget models (modeled ~₹120–₹500/mo pilot opex) and spending limits approved.         | PENDING      |
 | [ ] Stage-by-stage security release gates and Definition of Done approved.                             | PENDING      |
-| [ ] Permission granted to proceed to Stage 9 (Phase 2: Project Initialization & Foundation).           | NOT GRANTED  |
+| [ ] Separate Milestone M1 Implementation Directive issued by founder.                                  | NOT GRANTED  |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
+
+> [!IMPORTANT]
+> **Pre-Implementation & Implementation Boundary Notice:**
+> Formal M0-17 sign-off closes pre-implementation design governance only. It does **not** automatically authorize beginning Milestone M1 development. Application code development, database migrations, package installations, and live deployments require a separate, explicit founder directive.
 
 ---
 
