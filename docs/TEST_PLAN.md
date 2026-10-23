@@ -1283,7 +1283,7 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 16. **Google Review Platform Policy Assessment (Gate M0-16):**
     - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Approved Design B enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal direct Google link; zero fabricated facts or praise; abstention when facts insufficient; zero Google certification claims.
 17. **Master Governance Audit & Sign-Off (Gate M0-17):**
-    - [ ] **NOT SIGNED OFF:** Documentation synchronized; formal M0 sign-off remains blocked and M1 development unauthorized.
+    - [x] **M0-17 — FOUNDER SIGNED OFF (M0 — COMPLETE: PLANNING AND TECHNICAL DESIGN ONLY):** Formally approved by founder on October 23, 2026 (anchored to commit `aafb588`). Test cases (196 total) remain conceptual specifications and are labeled `NOT EXECUTED`. Milestone M1 development remains UNAUTHORIZED until a separate directive is issued.
 
 ---
 

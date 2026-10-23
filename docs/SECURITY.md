@@ -727,7 +727,7 @@ The following five schema-design amendments were approved under Founder Decision
 16. **Google Review Platform Policy Assessment (Gate M0-16):**
     - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Design B enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal direct Google link; zero fabricated facts or praise; abstention when facts insufficient. *(Note: Zero claims of Google certification or endorsement; product is not certified by Google).*
 17. **Master Governance Audit & Pre-Implementation Sign-Off (Gate M0-17):**
-    - [ ] **NOT SIGNED OFF:** Documentation synchronized; formal M0 sign-off remains blocked and M1 development unauthorized.
+    - [x] **M0-17 — FOUNDER SIGNED OFF (M0 — COMPLETE: PLANNING AND TECHNICAL DESIGN ONLY):** Formally approved by founder on October 23, 2026 (anchored to commit `aafb588`). Software implementation, database migrations, security test executions, and live deployments are not certified. Milestone M1 development remains UNAUTHORIZED until a separate directive is issued.
 
 ---
 

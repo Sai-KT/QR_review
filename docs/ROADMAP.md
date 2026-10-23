@@ -196,8 +196,9 @@ The founder has explicitly approved the five core product decisions M0-01 throug
 | **16. Google Policy**      | **Design B Authenticity**  | Claiming Google approval;  | Neutral consent checkbox, <60w|
 |    (Gate M0-16)            | (FOUNDER APPROVED — TECH)  | sentiment gating           | draft, universal Google link. |
 |----------------------------+----------------------------+----------------------------+-------------------------------|
-| **17. Governance Sign-Off**| **Controlled Alignment**   | Automatic M1 authorization | Pre-implementation governance |
-|    (Gate M0-17)            | (NOT SIGNED OFF)           | upon document edits        | audit; M1 requires directive. |
+| **17. Governance Sign-Off**| **M0-17 — FOUNDER SIGNED** | Automatic M1 authorization | Pre-implementation governance |
+|    (Gate M0-17)            | **OFF (M0: COMPLETE —**    | upon document edits        | audit; Oct 23, 2026 (aafb588);|
+|                            | **PLANNING & DESIGN ONLY)**|                            | M1 requires directive.        |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -2059,7 +2060,7 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 | [x] Survey Option Activation Semantics (Decision M0-08) approved.                                      | APPROVED     |
 | [x] Supabase Auth & Key Configuration (Gate M0-10) approved.                                            | APPROVED (TD)|
 | [x] Technical design gates (M0-09, M0-11 through M0-16) approved.                                       | APPROVED (TD)|
-| [ ] Pre-Implementation Governance Sign-Off (M0-17) signed.                                             | NOT SIGNED   |
+| [x] Pre-Implementation Governance Sign-Off (M0-17) signed.                                             | SIGNED OFF   |
 | [ ] 10-step Antigravity Execution Protocol and Human Approval Boundaries approved.                     | PENDING      |
 | [ ] Operational budget models (modeled ~₹120–₹500/mo pilot opex) and spending limits approved.         | PENDING      |
 | [ ] Stage-by-stage security release gates and Definition of Done approved.                             | PENDING      |
@@ -2068,8 +2069,8 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 ```
 
 > [!IMPORTANT]
-> **Pre-Implementation & Implementation Boundary Notice:**
-> Formal M0-17 sign-off closes pre-implementation design governance only. It does **not** automatically authorize beginning Milestone M1 development. Application code development, database migrations, package installations, and live deployments require a separate, explicit founder directive.
+> **Pre-Implementation & Implementation Boundary Notice (M0-17 — FOUNDER SIGNED OFF):**
+> Formal M0-17 sign-off (founder approved Oct 23, 2026; anchored to commit `aafb588`) closes pre-implementation design governance only (**M0 — COMPLETE: PLANNING AND TECHNICAL DESIGN ONLY**). It does **not** certify application code, database migrations, automated test execution, backup infrastructure, or deployments, and does not authorize beginning Milestone M1 development. Application code development, database migrations, package installations, and live deployments require a separate, explicit founder directive (Milestone M1 remains NOT AUTHORIZED).
 
 ---
 

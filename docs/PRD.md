@@ -984,7 +984,7 @@ DECISION AREA                   STATUS                 WORKING ASSUMPTION & NEXT
 21. Testing & Release Gates     APPROVED (TECH DESIGN) Lightweight QA stack; P0/P1 release blockers (M0-14).
 22. Backup & Disaster Recovery  APPROVED (TECH DESIGN) Design B independent encrypted backup dumps (M0-15).
 23. Google Policy Compliance    APPROVED (TECH DESIGN) Design B customer consent checkbox & disclosure (M0-16).
-24. Pre-Implementation Sign-Off NOT SIGNED OFF         Documentation synchronized; M0 sign-off blocked (M0-17).
+24. Pre-Implementation Sign-Off FOUNDER SIGNED OFF     Formal closure of M0 planning & design; M1 requires directive (M0-17).
 ===================================================================================================
 ```
 
@@ -1074,9 +1074,9 @@ Before proceeding to Phase 1 — Stage 2 (Technical & Architecture Specification
 - [ ] **Policy Adherence Confirmed:** Universal WhatsApp owner channel and direct Google bypass link confirmed.
 - [ ] **Provisional Pricing Confirmed:** ₹399/month accepted as working commercial hypothesis; setup package revised to exclude deferred physical standee manufacturing.
 - [ ] **Revenue Mathematics Realignment Confirmed:** Milestone scenario modeling distinguishing MRR, setup revenue, direct costs, fixed costs, and taxes accepted.
-- [ ] **Full M0 Sign-Off Status:** Note that technical and product-policy designs for gates M0-01 through M0-16 have been approved by the founder (technical design only). Full Milestone M0 formal sign-off (M0-17) is NOT SIGNED OFF and M1 development remains UNAUTHORIZED.
+- [x] **Full M0 Sign-Off Status (M0-17 — FOUNDER SIGNED OFF):** M0 formal sign-off approved by founder on October 23, 2026 (anchored to commit `aafb588`). **M0 — COMPLETE: PLANNING AND TECHNICAL DESIGN ONLY**. Software implementation, database migrations, tests, and deployments are not certified. Milestone M1 development remains UNAUTHORIZED until an explicit task directive is issued.
 
 ---
 
 *End of Product Requirements Document (PRD).*
-*Status: Awaiting Founder Formal Sign-Off to proceed to Phase 1 — Stage 2.*
+*Status: Milestone M0 Signed Off (Planning & Design Only). Ready for Phase 2 implementation upon separate founder task directive.*

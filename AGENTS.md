@@ -84,15 +84,15 @@ Agents operate in one of three distinct modes. The **DEFAULT MODE IS ALWAYS PLAN
 | **M0-14** | Finalized Testing & Release Gates | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved lightweight QA stack (Vitest, RTL, Playwright, Supabase CLI, real DB RLS tests, mock Gemini server, P0/P1 blockers; tests conceptual/unexecuted). |
 | **M0-15** | Backup & Disaster Recovery Architecture | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved Design B (scheduled encrypted logical database dumps + separate Storage logo backup; founder-controlled recoverable keys; 24h RPO / 2h RTO engineering targets). |
 | **M0-16** | Google Review Platform Policy Assessment | **FOUNDER APPROVED (TECHNICAL DESIGN ONLY)** | Approved Design B (enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal Google link; zero Google certification claims; abstention when facts insufficient). |
-| **M0-17** | Master Governance Audit & Sign-Off | **NOT SIGNED OFF** | Controlled specification alignment and pre-implementation governance closure. Documentation-only synchronization authorized; M0 sign-off remains blocked. |
+| **M0-17** | Master Governance Audit & Sign-Off | **FOUNDER SIGNED OFF**<br/>**M0 — COMPLETE: PLANNING AND TECHNICAL DESIGN ONLY** | Formally signed off by founder on October 23, 2026, anchored to commit `aafb588`. Pre-implementation planning, governance, and technical-design phase closed. Milestone M1 development remains unauthorized until separate directive is issued. |
 
 ### Pre-Implementation Governance Progression Workflow:
 The transition from pre-implementation governance to application implementation is governed by five strictly separated stages:
 - **Stage A — Founder Technical Decisions:** Explicit approval of all outstanding M0 technical and product-policy decisions completed (M0-01..08 approved; M0-09, M0-10, M0-11..16 approved at technical design level).
 - **Stage B — Documentation Alignment Authorization:** Explicit permission to modify the ten authorized specification files only. Does NOT authorize software implementation, database migrations, SQL execution, or Git commits/pushes.
 - **Stage C — Documentation Verification:** Read-only audit confirming that the approved decision register and specifications match with zero material contradictions.
-- **Stage D — M0-17 Formal Sign-Off:** Founder decision formally closing pre-implementation design governance only. Does NOT automatically authorize beginning M1 development.
-- **Stage E — M1 Implementation Authorization:** Separate founder decision defining exactly which development tasks, tools, and Git operations are permitted.
+- **Stage D — M0-17 Formal Sign-Off:** COMPLETED. Founder formal sign-off (Oct 23, 2026, commit `aafb588`). Milestone M0 complete: planning and technical design only. Implementation, migrations, test execution, backups, and deployments are not certified.
+- **Stage E — M1 Implementation Authorization:** Separate founder decision defining exactly which development tasks, tools, and Git operations are permitted. Milestone M1 remains STRICTLY NOT AUTHORIZED until explicit task directive is issued.
 
 *Automatic milestone progression is strictly prohibited. Creating or editing documentation never constitutes authorization to write code or execute SQL.*
 
