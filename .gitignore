@@ -13,6 +13,10 @@ node_modules/
 dist/
 build/
 .cache/
+# Supabase CLI local state
+.supabase/
+/supabase/.branches/
+/supabase/.temp/
 
 # Test coverage & artifacts
 coverage/
