@@ -14,8 +14,10 @@ dist/
 build/
 .cache/
 
-# Test coverage
+# Test coverage & artifacts
 coverage/
+test-results/
+playwright-report/
 
 # Logs
 logs/

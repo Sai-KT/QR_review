@@ -20,7 +20,7 @@ const variantStyles: Record<BadgeVariant, string> = {
   destructive: 'border-transparent bg-state-danger text-destructive-foreground',
   success: 'border-state-success/20 bg-state-success-bg text-state-success',
   warning: 'border-state-warning/20 bg-state-warning-bg text-state-warning',
-  accent: 'border-brand-accent/20 bg-brand-accent/10 text-brand-accent',
+  accent: 'border-brand-accent/20 bg-brand-accent/10 text-blue-700',
 };
 
 const shapeStyles: Record<BadgeShape, string> = {
