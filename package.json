@@ -11,10 +11,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "preview": "vite preview",
-    "verify:tokens": "node --experimental-strip-types scripts/verify-design-tokens.ts"
+    "verify:tokens": "node --experimental-strip-types scripts/verify-design-tokens.ts",
+    "test:adapters": "node --experimental-strip-types scripts/verify-adapters.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.3.1",
+    "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",
     "clsx": "^2.1.1",
     "react": "^19.3.1",
