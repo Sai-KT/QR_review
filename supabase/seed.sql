@@ -1,0 +1,18 @@
+-- ============================================================================
+-- Supabase Default Seed Entrypoint (Safe Placeholder)
+-- ============================================================================
+-- Automatic database seeding is explicitly disabled in supabase/config.toml:
+--   [db.seed]
+--   enabled = false
+--
+-- This guarantees that 'supabase start', 'supabase db reset', or linked
+-- cloud database operations cannot silently execute synthetic test personas
+-- or fictional merchant records.
+--
+-- The canonical synthetic development personas and fixtures reside strictly in:
+--   supabase/fixtures/local_seed.sql
+--
+-- To execute the local synthetic seed dataset against a verified local Supabase
+-- container, run the explicit local runner:
+--   bash scripts/seed-local.sh
+-- ============================================================================
