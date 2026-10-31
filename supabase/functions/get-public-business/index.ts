@@ -56,6 +56,7 @@ export interface HandlerOptions {
   rateLimitSalt?: string;
   currentTime?: Date;
   bypassAuth?: boolean;
+  expectedApiKey?: string;
 }
 
 // Database projection return row shape from get_public_business_by_qr
@@ -207,60 +208,111 @@ export function isValidIpv6(ip: string): boolean {
 }
 
 /**
- * Extracts, validates, and normalizes client IP address from ingress headers.
- * Converts IPv4-mapped IPv6 (::ffff:192.0.2.1) to standard IPv4.
- * Returns null if the address is malformed, ambiguous, or untrusted.
+ * Cleans and normalizes an IP candidate string:
+ * - Strips leading/trailing whitespace
+ * - Strips IPv6 brackets (e.g. [::1])
+ * - Strips port suffix from IPv4 (e.g. 192.0.2.1:443)
+ * - Normalizes IPv4-mapped IPv6 (::ffff:192.0.2.1) to standard IPv4
+ * - Validates strict IPv4 and IPv6 format
+ * Returns normalized string or null if invalid.
  */
-export function extractClientIp(req: Request): string | null {
-  const cfConnectingIp = req.headers.get('cf-connecting-ip');
-  let rawIp = cfConnectingIp?.trim();
+export function cleanAndNormalizeIp(raw: string): string | null {
+  let cleaned = raw.trim();
+  if (!cleaned) return null;
 
-  if (!rawIp) {
-    const xRealIp = req.headers.get('x-real-ip');
-    rawIp = xRealIp?.trim();
-  }
-
-  if (!rawIp) {
-    const xForwardedFor = req.headers.get('x-forwarded-for');
-    if (xForwardedFor) {
-      const first = xForwardedFor.split(',')[0];
-      rawIp = first?.trim();
-    }
-  }
-
-  if (!rawIp) {
-    // In local development or testing with no ingress proxy, fallback to loopback
-    return '127.0.0.1';
-  }
-
-  // Handle port suffix if present (e.g. 192.0.2.1:443)
-  if (rawIp.includes('.') && rawIp.includes(':')) {
-    const colonIdx = rawIp.lastIndexOf(':');
-    const portPart = rawIp.slice(colonIdx + 1);
+  // Handle port suffix on IPv4 (e.g. 192.0.2.1:443)
+  if (cleaned.includes('.') && cleaned.includes(':') && !cleaned.toLowerCase().includes('::ffff:')) {
+    const colonIdx = cleaned.lastIndexOf(':');
+    const portPart = cleaned.slice(colonIdx + 1);
     if (/^\d+$/.test(portPart)) {
-      rawIp = rawIp.slice(0, colonIdx);
+      cleaned = cleaned.slice(0, colonIdx);
     }
   }
 
-  // Handle IPv4-mapped IPv6 addresses (e.g., ::ffff:192.0.2.1 or [::ffff:192.0.2.1])
+  // Handle IPv6 brackets (e.g. [::1] or [::ffff:192.0.2.1])
+  cleaned = cleaned.replace(/^\[|\]$/g, '');
+
+  // Handle IPv4-mapped IPv6 addresses (e.g., ::ffff:192.0.2.1)
   const mappedPrefix = '::ffff:';
-  const cleanIp = rawIp.replace(/^\[|\]$/g, '');
-  if (cleanIp.toLowerCase().startsWith(mappedPrefix)) {
-    const ipv4Candidate = cleanIp.slice(mappedPrefix.length);
+  if (cleaned.toLowerCase().startsWith(mappedPrefix)) {
+    const ipv4Candidate = cleaned.slice(mappedPrefix.length);
     if (isValidIpv4(ipv4Candidate)) {
       return ipv4Candidate;
     }
   }
 
-  if (isValidIpv4(cleanIp)) {
-    return cleanIp;
+  if (isValidIpv4(cleaned)) {
+    return cleaned;
   }
 
-  if (isValidIpv6(cleanIp)) {
-    return cleanIp.toLowerCase();
+  if (isValidIpv6(cleaned)) {
+    return cleaned.toLowerCase();
   }
 
   return null;
+}
+
+/**
+ * Extracts, validates, and normalizes client IP address from ingress headers.
+ *
+ * Trust Strategy:
+ * 1. Primary: X-Real-IP is strictly overwritten and enforced by the Supabase Kong gateway
+ *    with the client connection address ($remote_addr). Client-supplied X-Real-IP is discarded by Kong.
+ * 2. Secondary: X-Forwarded-For. Trusted proxies append each hop to the right. To prevent
+ *    attacker-injected leftmost spoofing ("1.2.3.4, real_ip"), we evaluate from right to left.
+ * 3. Cloudflare: cf-connecting-ip is accepted ONLY if TRUST_CLOUDFLARE_PROXY === 'true' in server environment.
+ *    In direct gateway connections, client-supplied cf-connecting-ip is untrusted and ignored.
+ * 4. Fail Closed: If ingress headers are provided but malformed, returns null (triggering HTTP 400).
+ *    Fallback to loopback ('127.0.0.1') occurs ONLY when no IP headers were present at all (e.g. direct unit tests).
+ */
+export function extractClientIp(req: Request): string | null {
+  const hasIpHeaders =
+    req.headers.has('x-real-ip') ||
+    req.headers.has('x-forwarded-for') ||
+    req.headers.has('cf-connecting-ip');
+
+  // 1. Primary: X-Real-IP (strictly overwritten by Supabase Kong gateway)
+  const xRealIp = req.headers.get('x-real-ip');
+  if (xRealIp) {
+    const normalized = cleanAndNormalizeIp(xRealIp);
+    if (normalized) return normalized;
+    // Malformed X-Real-IP -> fail closed
+    return null;
+  }
+
+  // 2. Secondary: X-Forwarded-For (evaluate rightmost IP added by immediate proxy)
+  const xForwardedFor = req.headers.get('x-forwarded-for');
+  if (xForwardedFor) {
+    const parts = xForwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const candidate = parts[i];
+      if (candidate) {
+        const normalized = cleanAndNormalizeIp(candidate);
+        if (normalized) return normalized;
+      }
+    }
+    // Present but all parts malformed -> fail closed
+    return null;
+  }
+
+  // 3. Cloudflare: only if explicitly trusted
+  const trustCf = getEnv('TRUST_CLOUDFLARE_PROXY') === 'true';
+  if (trustCf) {
+    const cfConnectingIp = req.headers.get('cf-connecting-ip');
+    if (cfConnectingIp) {
+      const normalized = cleanAndNormalizeIp(cfConnectingIp);
+      if (normalized) return normalized;
+      return null;
+    }
+  }
+
+  // If headers were present but none were accepted, fail closed
+  if (hasIpHeaders) {
+    return null;
+  }
+
+  // In local development / test environments with no ingress headers, fallback to loopback
+  return '127.0.0.1';
 }
 
 /**
@@ -379,7 +431,7 @@ export async function handleGetPublicBusiness(
     );
   }
 
-  // 3. Public API Authentication (Work Package C)
+  // 3. Public API Authentication (Work Package C & Security Hardening)
   if (!options?.bypassAuth) {
     const rawApiKey =
       req.headers.get('apikey') ??
@@ -390,6 +442,42 @@ export async function handleGetPublicBusiness(
         401,
         'ERR_UNAUTHORIZED',
         'Missing or empty apikey header. Anonymous customer requests require a valid publishable key.',
+        correlationId,
+        false,
+      );
+    }
+
+    const trimmedKey = rawApiKey.trim();
+    const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+
+    // Never accept elevated service role keys on public anonymous endpoints
+    if (serviceRoleKey && trimmedKey === serviceRoleKey.trim()) {
+      return createErrorResponse(
+        401,
+        'ERR_UNAUTHORIZED',
+        'Service role key cannot be used for public anonymous client requests.',
+        correlationId,
+        false,
+      );
+    }
+
+    const expectedKey = options?.expectedApiKey;
+    const internalPublishable = getEnv('SUPABASE_INTERNAL_PUBLISHABLE_KEY');
+    const anonKey = getEnv('SUPABASE_ANON_KEY');
+
+    const isMatchingEnv =
+      (expectedKey && trimmedKey === expectedKey.trim()) ||
+      (internalPublishable && trimmedKey === internalPublishable.trim()) ||
+      (anonKey && trimmedKey === anonKey.trim());
+
+    const isPublishableFormat = /^sb_publishable_[A-Za-z0-9_-]+$/.test(trimmedKey);
+    const isJwtFormat = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(trimmedKey);
+
+    if (!isMatchingEnv && !isPublishableFormat && !isJwtFormat) {
+      return createErrorResponse(
+        401,
+        'ERR_UNAUTHORIZED',
+        'Invalid apikey. Provided key is not recognized as a valid publishable key or session token.',
         correlationId,
         false,
       );

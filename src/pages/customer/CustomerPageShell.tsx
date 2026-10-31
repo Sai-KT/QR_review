@@ -337,9 +337,6 @@ export function CustomerPageShell(): React.JSX.Element | null {
           <Badge variant="secondary" size="sm" className="capitalize">
             {business.categoryId}
           </Badge>
-          <Badge variant="success" size="sm">
-            Verified Merchant
-          </Badge>
         </div>
         <CardDescription className="text-sm mt-3 text-muted-foreground">
           How was your experience today? Help us improve or share your thoughts on Google Maps.

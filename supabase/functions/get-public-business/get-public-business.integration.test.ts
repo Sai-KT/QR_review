@@ -288,8 +288,8 @@ describe('M3-T01: Live PostgreSQL Integration Suite', () => {
       {
         method: 'GET',
         headers: {
-          apikey: 'test-publishable-key',
-          'cf-connecting-ip': '203.0.113.88',
+          apikey: 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH',
+          'x-real-ip': '203.0.113.88',
         },
       },
     );
@@ -305,5 +305,86 @@ describe('M3-T01: Live PostgreSQL Integration Suite', () => {
     expect(body.name).toBe('Luxe Studio Unisex Salon');
     expect(body.isActive).toBe(true);
     expect(body.isDirectGoogleOnly).toBe(false);
+  });
+
+  it('INT-10: verifies anonymous PostgREST direct RPC access is denied', async () => {
+    const anonClient = createClient(
+      LOCAL_SUPABASE_URL,
+      'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH',
+      { auth: { persistSession: false } },
+    );
+
+    const { error: rpcErr } = await anonClient.rpc('get_public_business_by_qr', {
+      p_qr_id: 'luxe000001',
+    });
+
+    // PostgreSQL error 42501 permission denied
+    expect(rpcErr).not.toBeNull();
+    expect(rpcErr?.message).toContain('permission denied');
+  });
+
+  it('INT-11: verifies subscription matrix and default pilot status', async () => {
+    // 1. Create a transient business with NO subscription record
+    const tempQrId = `t${Date.now().toString().slice(-9)}`;
+    const { data: insertedBiz, error: insErr } = await supabase
+      .from('businesses')
+      .insert({
+        owner_id: '00000000-0000-4000-8000-000000000002',
+        name: 'Transient Trial Salon',
+        category_id: 'salon',
+        public_qr_id: tempQrId,
+        vanity_slug: tempQrId,
+        account_status: 'pilot',
+        is_active: true,
+      })
+      .select('id, public_qr_id')
+      .single();
+
+    expect(insErr).toBeNull();
+    expect(insertedBiz).toBeTruthy();
+
+    try {
+      // 2. Query projection - missing subscription record must resolve to 'pilot'
+      const { data: projData, error: projErr } = await supabase.rpc(
+        'get_public_business_by_qr',
+        { p_qr_id: tempQrId },
+      );
+
+      expect(projErr).toBeNull();
+      expect(projData).toHaveLength(1);
+      const biz = (projData as PublicBusinessRow[])[0];
+      expect(biz.subscription_status).toBe('pilot');
+      expect(biz.is_direct_google_only).toBe(false);
+      expect(biz.is_suspended).toBe(false);
+    } finally {
+      // Clean up transient business
+      if (insertedBiz?.id) {
+        await supabase.from('businesses').delete().eq('id', insertedBiz.id);
+      }
+    }
+  });
+
+  it('INT-12: verifies IP spoofing resistance against client-injected cf-connecting-ip', async () => {
+    const spoofedReq = new Request(
+      `${LOCAL_SUPABASE_URL}/functions/v1/get-public-business?qrId=luxe000001`,
+      {
+        method: 'GET',
+        headers: {
+          apikey: 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH',
+          'x-real-ip': '198.51.100.77',
+          'cf-connecting-ip': 'spoofed.attacker.ip.attempt',
+        },
+      },
+    );
+
+    // Handler must prioritize un-spoofable x-real-ip and succeed
+    const res = await handleGetPublicBusiness(spoofedReq, {
+      supabaseClient: supabase,
+      rateLimitSalt: TEST_RATE_LIMIT_SALT,
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.publicQrId).toBe('luxe000001');
   });
 });

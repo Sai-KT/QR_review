@@ -52,8 +52,8 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
       expect(screen.getByText('Green Salon & Spa')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Verified Merchant')).toBeInTheDocument();
     expect(screen.getByText('salon')).toBeInTheDocument();
+    expect(screen.getByAltText('Green Salon & Spa logo')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Start 30-Sec Review →/i })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /Review Directly on Google Maps ↗/i }),

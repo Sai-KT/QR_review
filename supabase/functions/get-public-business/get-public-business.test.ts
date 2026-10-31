@@ -52,12 +52,13 @@ function createMockSupabase(params: {
 
 function makeGetRequest(
   url: string,
-  headers: Record<string, string> = { apikey: 'test-publishable-key' },
+  customHeaders: Record<string, string> = {},
 ): Request {
   return new Request(url, {
     method: 'GET',
     headers: {
-      ...headers,
+      apikey: 'sb_publishable_test_valid_key_123',
+      ...customHeaders,
     },
   });
 }
@@ -246,14 +247,14 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
     expect(body.error.code).toBe('ERR_UNAUTHORIZED');
   });
 
-  it('accepts authorization bearer token as publishable key', async () => {
+  it('accepts authorization bearer token with publishable key format', async () => {
     const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
     const req = new Request(
       'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
       {
         method: 'GET',
         headers: {
-          Authorization: 'Bearer sb_pub_test_123',
+          Authorization: 'Bearer sb_publishable_valid_test_token_123',
         },
       },
     );
@@ -263,6 +264,59 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
       rateLimitSalt: TEST_SALT,
     });
     expect(res.status).toBe(200);
+  });
+
+  it('rejects arbitrary invalid apikey strings with HTTP 401', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const req = new Request(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      {
+        method: 'GET',
+        headers: {
+          apikey: 'fake-invalid-string-12345',
+        },
+      },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_UNAUTHORIZED');
+  });
+
+  it('rejects elevated service role key on public anonymous endpoint with HTTP 401', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const originalServiceKey = process.env['SUPABASE_SERVICE_ROLE_KEY'];
+    process.env['SUPABASE_SERVICE_ROLE_KEY'] = 'service-role-secret-key-do-not-leak';
+
+    try {
+      const req = new Request(
+        'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+        {
+          method: 'GET',
+          headers: {
+            apikey: 'service-role-secret-key-do-not-leak',
+          },
+        },
+      );
+
+      const res = await handleGetPublicBusiness(req, {
+        supabaseClient: mockClient,
+        rateLimitSalt: TEST_SALT,
+      });
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_UNAUTHORIZED');
+    } finally {
+      if (originalServiceKey !== undefined) {
+        process.env['SUPABASE_SERVICE_ROLE_KEY'] = originalServiceKey;
+      } else {
+        delete process.env['SUPABASE_SERVICE_ROLE_KEY'];
+      }
+    }
   });
 
   /* ------------------------------------------------------------------------ */
@@ -330,8 +384,7 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
     const req = makeGetRequest(
       'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
       {
-        apikey: 'test-key',
-        'cf-connecting-ip': '203.0.113.195',
+        'x-real-ip': '203.0.113.195',
       },
     );
 
@@ -376,25 +429,31 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
       expect(isValidIpv6('192.168.1.1')).toBe(false);
     });
 
-    it('normalizes IPv4-mapped IPv6 addresses', () => {
+    it('normalizes IPv4-mapped IPv6 addresses from x-real-ip', () => {
       const req = makeGetRequest('https://example.com', {
-        apikey: 'test',
-        'cf-connecting-ip': '::ffff:192.0.2.128',
+        'x-real-ip': '::ffff:192.0.2.128',
       });
       expect(extractClientIp(req)).toBe('192.0.2.128');
     });
 
-    it('extracts leftmost IP from x-forwarded-for', () => {
+    it('prioritizes x-real-ip over client-supplied cf-connecting-ip or x-forwarded-for', () => {
       const req = makeGetRequest('https://example.com', {
-        apikey: 'test',
-        'x-forwarded-for': '198.51.100.1, 10.0.0.1, 127.0.0.1',
+        'x-real-ip': '198.51.100.99',
+        'cf-connecting-ip': 'spoofed.ip.attacker',
+        'x-forwarded-for': 'spoofed.ip.attacker2, 10.0.0.1',
       });
-      expect(extractClientIp(req)).toBe('198.51.100.1');
+      expect(extractClientIp(req)).toBe('198.51.100.99');
+    });
+
+    it('evaluates rightmost IP from x-forwarded-for to prevent leftmost client spoofing', () => {
+      const req = makeGetRequest('https://example.com', {
+        'x-forwarded-for': '198.51.100.1, 10.0.0.1, 192.0.2.55',
+      });
+      expect(extractClientIp(req)).toBe('192.0.2.55');
     });
 
     it('strips port from IPv4 address', () => {
       const req = makeGetRequest('https://example.com', {
-        apikey: 'test',
         'x-real-ip': '198.51.100.22:443',
       });
       expect(extractClientIp(req)).toBe('198.51.100.22');
@@ -407,8 +466,7 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
       const req = makeGetRequest(
         'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
         {
-          apikey: 'test',
-          'cf-connecting-ip': 'invalid-malformed-ip',
+          'x-real-ip': 'invalid-malformed-ip',
         },
       );
 
@@ -475,8 +533,7 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
       const req = makeGetRequest(
         'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
         {
-          apikey: 'test',
-          'cf-connecting-ip': '203.0.113.10',
+          'x-real-ip': '203.0.113.10',
         },
       );
 
