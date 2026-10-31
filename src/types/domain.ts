@@ -151,6 +151,27 @@ export interface CustomerFeedbackSubmissionResult {
 }
 
 /**
+ * Public survey submission wire request payload (API-PUB-04 / SCR-CUST-05).
+ * Uses publicQrId rather than surrogate database UUID to preserve tenant boundary.
+ */
+export interface SubmitFeedbackRequest {
+  publicQrId: string;
+  sessionUuid: string;
+  responses: SelectedSurveyOption[];
+  optionalNote?: string | null;
+}
+
+/**
+ * Public survey submission wire response payload (API-PUB-04).
+ */
+export interface SubmitFeedbackResponse {
+  status: 'recorded';
+  responseId: string;
+  submissionToken: string;
+}
+
+
+/**
  * Customer feedback item rendered in merchant dashboard feedback feed (API-OWN-05 / SCR-OWN-08).
  */
 export interface CustomerFeedback {
