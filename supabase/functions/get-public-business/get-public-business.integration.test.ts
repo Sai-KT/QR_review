@@ -13,6 +13,8 @@ describe('M3-T01: Live PostgreSQL Integration Suite', () => {
   const testKeyHashes: string[] = [];
 
   beforeAll(() => {
+    process.env['SUPABASE_URL'] = LOCAL_SUPABASE_URL;
+    process.env['RATE_LIMIT_SALT'] = TEST_RATE_LIMIT_SALT;
     supabase = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
     });

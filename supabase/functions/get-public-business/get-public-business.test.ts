@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createHmac } from 'node:crypto';
 import {
   handleGetPublicBusiness,
   isValidIpv4,
@@ -57,24 +58,31 @@ function makeGetRequest(
   return new Request(url, {
     method: 'GET',
     headers: {
-      apikey: 'sb_publishable_test_valid_key_123',
+      apikey: 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH',
       ...customHeaders,
     },
   });
 }
 
 describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
-  const originalEnv = process.env['RATE_LIMIT_SALT'];
+  const originalSaltEnv = process.env['RATE_LIMIT_SALT'];
+  const originalUrlEnv = process.env['SUPABASE_URL'];
 
   beforeEach(() => {
     process.env['RATE_LIMIT_SALT'] = TEST_SALT;
+    process.env['SUPABASE_URL'] = 'http://127.0.0.1:54321';
   });
 
   afterEach(() => {
-    if (originalEnv !== undefined) {
-      process.env['RATE_LIMIT_SALT'] = originalEnv;
+    if (originalSaltEnv !== undefined) {
+      process.env['RATE_LIMIT_SALT'] = originalSaltEnv;
     } else {
       delete process.env['RATE_LIMIT_SALT'];
+    }
+    if (originalUrlEnv !== undefined) {
+      process.env['SUPABASE_URL'] = originalUrlEnv;
+    } else {
+      delete process.env['SUPABASE_URL'];
     }
   });
 
@@ -224,10 +232,39 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
   });
 
   /* ------------------------------------------------------------------------ */
-  /* 4. Public API Authentication (Work Package C)                            */
+  /* 4. Public API Authentication & Cryptographic Verification                */
   /* ------------------------------------------------------------------------ */
 
-  it('rejects requests missing the apikey header with HTTP 401 ERR_UNAUTHORIZED', async () => {
+  const TEST_JWT_SECRET = 'test-jwt-secret-for-signing-unit-tests-12345';
+  const VALID_CONFIGURED_KEY = 'sb_publishable_my_project_valid_key_001';
+
+  function makeTestJwt(payload: Record<string, unknown>, secret: string): string {
+    const header = Buffer.from(
+      JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
+    ).toString('base64url');
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const sig = createHmac('sha256', secret)
+      .update(`${header}.${body}`)
+      .digest('base64url');
+    return `${header}.${body}.${sig}`;
+  }
+
+  it('1. accepts genuine configured publishable key', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const req = makeGetRequest(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      { apikey: VALID_CONFIGURED_KEY },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('2. rejects requests missing the apikey header with HTTP 401 ERR_UNAUTHORIZED', async () => {
     const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
     const req = new Request(
       'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
@@ -240,6 +277,7 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
     const res = await handleGetPublicBusiness(req, {
       supabaseClient: mockClient,
       rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
     });
     expect(res.status).toBe(401);
 
@@ -247,65 +285,72 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
     expect(body.error.code).toBe('ERR_UNAUTHORIZED');
   });
 
-  it('accepts authorization bearer token with publishable key format', async () => {
+  it('3. rejects arbitrary invalid apikey strings with HTTP 401', async () => {
     const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
-    const req = new Request(
+    const req = makeGetRequest(
       'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
-      {
-        method: 'GET',
-        headers: {
-          Authorization: 'Bearer sb_publishable_valid_test_token_123',
-        },
-      },
+      { apikey: 'fake-invalid-string-12345' },
     );
 
     const res = await handleGetPublicBusiness(req, {
       supabaseClient: mockClient,
       rateLimitSalt: TEST_SALT,
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it('rejects arbitrary invalid apikey strings with HTTP 401', async () => {
-    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
-    const req = new Request(
-      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
-      {
-        method: 'GET',
-        headers: {
-          apikey: 'fake-invalid-string-12345',
-        },
-      },
-    );
-
-    const res = await handleGetPublicBusiness(req, {
-      supabaseClient: mockClient,
-      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
     });
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error.code).toBe('ERR_UNAUTHORIZED');
   });
 
-  it('rejects elevated service role key on public anonymous endpoint with HTTP 401', async () => {
+  it('4. rejects random syntactically valid sb_publishable_... key not matching project', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const req = makeGetRequest(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      { apikey: 'sb_publishable_attacker_random_token_99999' },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_UNAUTHORIZED');
+  });
+
+  it('5. rejects valid publishable key belonging to a different project', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const req = makeGetRequest(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      { apikey: 'sb_publishable_another_legit_project_888' },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_UNAUTHORIZED');
+  });
+
+  it('6. rejects elevated service role key on public anonymous endpoint with HTTP 401', async () => {
     const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
     const originalServiceKey = process.env['SUPABASE_SERVICE_ROLE_KEY'];
     process.env['SUPABASE_SERVICE_ROLE_KEY'] = 'service-role-secret-key-do-not-leak';
 
     try {
-      const req = new Request(
+      const req = makeGetRequest(
         'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
-        {
-          method: 'GET',
-          headers: {
-            apikey: 'service-role-secret-key-do-not-leak',
-          },
-        },
+        { apikey: 'service-role-secret-key-do-not-leak' },
       );
 
       const res = await handleGetPublicBusiness(req, {
         supabaseClient: mockClient,
         rateLimitSalt: TEST_SALT,
+        expectedApiKey: VALID_CONFIGURED_KEY,
       });
       expect(res.status).toBe(401);
       const body = await res.json();
@@ -317,6 +362,94 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
         delete process.env['SUPABASE_SERVICE_ROLE_KEY'];
       }
     }
+  });
+
+  it('7. rejects malformed JWT strings with HTTP 401', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const req = makeGetRequest(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      { apikey: 'header.payload' }, // missing signature
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+      jwtSecret: TEST_JWT_SECRET,
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_UNAUTHORIZED');
+  });
+
+  it('8. rejects forged or incorrectly signed JWT with HTTP 401', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const forgedToken = makeTestJwt(
+      { sub: 'attacker-uuid', role: 'anon', exp: Math.floor(Date.now() / 1000) + 3600 },
+      'wrong-signing-secret-attacker',
+    );
+
+    const req = makeGetRequest(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      { apikey: forgedToken },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+      jwtSecret: TEST_JWT_SECRET,
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_UNAUTHORIZED');
+  });
+
+  it('9. accepts valid user JWT signed by project JWT secret', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const validUserJwt = makeTestJwt(
+      { sub: '00000000-0000-4000-8000-000000000002', role: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 },
+      TEST_JWT_SECRET,
+    );
+
+    const req = new Request(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      {
+        method: 'GET',
+        headers: {
+          apikey: VALID_CONFIGURED_KEY,
+          Authorization: `Bearer ${validUserJwt}`,
+        },
+      },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+      jwtSecret: TEST_JWT_SECRET,
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('10. accepts genuine publishable key passed in Authorization: Bearer', async () => {
+    const mockClient = createMockSupabase({ projectionData: [mockActiveRow] });
+    const req = new Request(
+      'https://edge.example.com/functions/v1/get-public-business?qrId=luxe000001',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${VALID_CONFIGURED_KEY}`,
+        },
+      },
+    );
+
+    const res = await handleGetPublicBusiness(req, {
+      supabaseClient: mockClient,
+      rateLimitSalt: TEST_SALT,
+      expectedApiKey: VALID_CONFIGURED_KEY,
+    });
+    expect(res.status).toBe(200);
   });
 
   /* ------------------------------------------------------------------------ */
@@ -443,6 +576,53 @@ describe('M3-T01: Edge Function get-public-business (API-PUB-01)', () => {
         'x-forwarded-for': 'spoofed.ip.attacker2, 10.0.0.1',
       });
       expect(extractClientIp(req)).toBe('198.51.100.99');
+    });
+
+    it('discards forged cf-connecting-ip when TRUST_CLOUDFLARE_PROXY is enabled but connecting peer is not Cloudflare', () => {
+      const origTrust = process.env['TRUST_CLOUDFLARE_PROXY'];
+      process.env['TRUST_CLOUDFLARE_PROXY'] = 'true';
+      try {
+        const req = makeGetRequest('https://example.com', {
+          'x-real-ip': '172.18.0.1', // Non-Cloudflare direct connection
+          'cf-connecting-ip': '198.51.100.42', // Attacker attempt to forge client IP
+        });
+        // Must reject cf-connecting-ip and use verified connection IP
+        expect(extractClientIp(req)).toBe('172.18.0.1');
+      } finally {
+        if (origTrust !== undefined) process.env['TRUST_CLOUDFLARE_PROXY'] = origTrust;
+        else delete process.env['TRUST_CLOUDFLARE_PROXY'];
+      }
+    });
+
+    it('accepts cf-connecting-ip when TRUST_CLOUDFLARE_PROXY is enabled and connecting peer is authentic Cloudflare proxy CIDR', () => {
+      const origTrust = process.env['TRUST_CLOUDFLARE_PROXY'];
+      process.env['TRUST_CLOUDFLARE_PROXY'] = 'true';
+      try {
+        const req = makeGetRequest('https://example.com', {
+          'x-real-ip': '162.158.25.10', // Authentic Cloudflare IPv4 CIDR (162.158.0.0/15)
+          'cf-connecting-ip': '203.0.113.88', // Authentic patron IP
+        });
+        expect(extractClientIp(req)).toBe('203.0.113.88');
+      } finally {
+        if (origTrust !== undefined) process.env['TRUST_CLOUDFLARE_PROXY'] = origTrust;
+        else delete process.env['TRUST_CLOUDFLARE_PROXY'];
+      }
+    });
+
+    it('ignores cf-connecting-ip when TRUST_CLOUDFLARE_PROXY is disabled even from Cloudflare peer', () => {
+      const origTrust = process.env['TRUST_CLOUDFLARE_PROXY'];
+      delete process.env['TRUST_CLOUDFLARE_PROXY'];
+      try {
+        const req = makeGetRequest('https://example.com', {
+          'x-real-ip': '162.158.25.10',
+          'cf-connecting-ip': '203.0.113.88',
+        });
+        // When not trusting CF proxy, always use direct peer
+        expect(extractClientIp(req)).toBe('162.158.25.10');
+      } finally {
+        if (origTrust !== undefined) process.env['TRUST_CLOUDFLARE_PROXY'] = origTrust;
+        else delete process.env['TRUST_CLOUDFLARE_PROXY'];
+      }
     });
 
     it('evaluates rightmost IP from x-forwarded-for to prevent leftmost client spoofing', () => {
