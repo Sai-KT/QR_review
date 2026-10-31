@@ -49,6 +49,9 @@ enabled = false
 enabled = false
 
 # Edge Functions Gateway Configuration
+[functions.get-public-business]
+verify_jwt = false
+
 [functions.submit-feedback]
 verify_jwt = false
 

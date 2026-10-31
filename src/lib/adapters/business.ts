@@ -55,7 +55,19 @@ export function toPublicBusinessProjection(row: {
   account_status: string;
   is_active: boolean;
   subscription_status?: string | null;
+  is_direct_google_only?: boolean;
+  is_suspended?: boolean;
 }): PublicBusinessProjection {
+  const subscriptionStatus = (row.subscription_status ?? 'pilot') as SubscriptionStatus;
+  const isDirectGoogleOnly =
+    row.is_direct_google_only !== undefined
+      ? row.is_direct_google_only
+      : subscriptionStatus === 'past_due' || subscriptionStatus === 'canceled';
+  const isSuspended =
+    row.is_suspended !== undefined
+      ? row.is_suspended
+      : row.account_status === 'suspended' || row.is_active !== true;
+
   return {
     publicQrId: row.public_qr_id,
     name: row.name,
@@ -65,7 +77,9 @@ export function toPublicBusinessProjection(row: {
     whatsappNumber: row.whatsapp_number,
     accountStatus: row.account_status as Business['accountStatus'],
     isActive: row.is_active,
-    subscriptionStatus: (row.subscription_status ?? 'pilot') as SubscriptionStatus,
+    subscriptionStatus,
+    isDirectGoogleOnly,
+    isSuspended,
   };
 }
 

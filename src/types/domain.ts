@@ -87,6 +87,8 @@ export interface PublicBusinessProjection {
   accountStatus: AccountStatus;
   isActive: boolean;
   subscriptionStatus: SubscriptionStatus;
+  isDirectGoogleOnly?: boolean;
+  isSuspended?: boolean;
 }
 
 /* -------------------------------------------------------------------------- */

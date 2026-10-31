@@ -573,6 +573,24 @@ export interface Database {
           },
         ];
       };
+      rate_limit_events: {
+        Row: {
+          id: string;
+          key_hash: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          key_hash: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          key_hash?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
 
     Views: {
@@ -594,7 +612,25 @@ export interface Database {
           is_active: boolean;
           account_status: string;
           subscription_status: string;
+          is_direct_google_only: boolean;
+          is_suspended: boolean;
         }[];
+      };
+      check_exact_rate_limit: {
+        Args: {
+          p_key_hash: string;
+          p_prev_key_hash?: string | null;
+          p_max_requests?: number;
+          p_window_seconds?: number;
+        };
+        Returns: boolean;
+      };
+      purge_expired_rate_limit_events: {
+        Args: {
+          p_retention_seconds?: number;
+          p_batch_limit?: number;
+        };
+        Returns: number;
       };
       reserve_generation_quota: {
         Args: {

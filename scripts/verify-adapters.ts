@@ -174,6 +174,49 @@ assertEquals(
   'active',
   'toPublicBusinessProjection maps subscriptionStatus',
 );
+assertEquals(
+  publicProjection.isDirectGoogleOnly,
+  false,
+  'toPublicBusinessProjection sets isDirectGoogleOnly to false for active subscription',
+);
+assertEquals(
+  publicProjection.isSuspended,
+  false,
+  'toPublicBusinessProjection sets isSuspended to false for active account',
+);
+
+const pastDueProjection = toPublicBusinessProjection({
+  public_qr_id: 'abc123xyz0',
+  name: 'Past Due Cafe',
+  logo_url: null,
+  category_id: 'cafe',
+  google_review_url: 'https://search.google.com/local/writereview?placeid=123',
+  whatsapp_number: null,
+  account_status: 'active',
+  is_active: true,
+  subscription_status: 'past_due',
+});
+assertEquals(
+  pastDueProjection.isDirectGoogleOnly,
+  true,
+  'toPublicBusinessProjection flags isDirectGoogleOnly for past_due subscription',
+);
+
+const suspendedProjection = toPublicBusinessProjection({
+  public_qr_id: 'abc123xyz0',
+  name: 'Suspended Salon',
+  logo_url: null,
+  category_id: 'salon',
+  google_review_url: null,
+  whatsapp_number: null,
+  account_status: 'suspended',
+  is_active: true,
+});
+assertEquals(
+  suspendedProjection.isSuspended,
+  true,
+  'toPublicBusinessProjection flags isSuspended for suspended account_status',
+);
 
 // Destination update mapping
 const destinationPayload = toDestinationUpdatePayload({

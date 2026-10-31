@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window"],
+    "strict": true
+  },
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@^2.118.0",
+    "zod": "npm:zod@^3.24.2"
+  }
+}
