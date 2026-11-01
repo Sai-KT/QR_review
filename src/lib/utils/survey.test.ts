@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateQuestionnaire } from './survey';
+import { validateQuestionnaire, truncateCustomerNote } from './survey';
 import type { SurveyQuestionDto } from '../api/survey';
 
 describe('Survey Integrity Validator (validateQuestionnaire)', () => {
@@ -114,4 +114,85 @@ describe('Survey Integrity Validator (validateQuestionnaire)', () => {
     expect(validateQuestionnaire(undefined as unknown as SurveyQuestionDto[])).toBe(false);
   });
 });
+
+describe('truncateCustomerNote (Unicode & Surrogate Pair Safety)', () => {
+  it('returns empty string for null, undefined, or empty text', () => {
+    expect(truncateCustomerNote('')).toBe('');
+    expect(truncateCustomerNote(null)).toBe('');
+    expect(truncateCustomerNote(undefined)).toBe('');
+  });
+
+  it('preserves text that is strictly within limit', () => {
+    expect(truncateCustomerNote('Loved the haircut!')).toBe('Loved the haircut!');
+    expect(truncateCustomerNote('a'.repeat(150))).toBe('a'.repeat(150));
+  });
+
+  it('truncates standard ASCII strings at 150 characters', () => {
+    const input = 'a'.repeat(160);
+    const result = truncateCustomerNote(input, 150);
+    expect(result.length).toBe(150);
+    expect(result).toBe('a'.repeat(150));
+  });
+
+  it('prevents splitting surrogate pairs at the exact 149 + emoji boundary', () => {
+    // Boundary test explicitly requested by founder:
+    // "a".repeat(149) + "💇" has length 151.
+    // Naive .slice(0, 150) would split "💇" (\uD83D\uDC87) leaving orphaned high surrogate \uD83D.
+    const input = 'a'.repeat(149) + '💇';
+    const naiveTruncated = input.slice(0, 150);
+
+    // Confirm that naive slice DOES produce an orphaned high surrogate
+    const naiveLastCode = naiveTruncated.charCodeAt(naiveLastCodeIndex(naiveTruncated));
+    expect(naiveLastCode >= 0xd800 && naiveLastCode <= 0xdbff).toBe(true);
+
+    // Confirm that truncateCustomerNote SAFELY drops the orphaned surrogate
+    const safeResult = truncateCustomerNote(input, 150);
+    expect(safeResult.length).toBe(149);
+    expect(safeResult).toBe('a'.repeat(149));
+
+    // Confirm last character is a valid ASCII 'a', not an orphaned surrogate
+    const lastCode = safeResult.charCodeAt(safeResult.length - 1);
+    expect(lastCode >= 0xd800 && lastCode <= 0xdfff).toBe(false);
+    expect(JSON.parse(JSON.stringify({ text: safeResult }))).toEqual({ text: 'a'.repeat(149) });
+  });
+
+  it('preserves full emoji when it fits within limit', () => {
+    const input = 'a'.repeat(148) + '💇';
+    const result = truncateCustomerNote(input, 150);
+    expect(result.length).toBe(150);
+    expect(result).toBe('a'.repeat(148) + '💇');
+    expect(result.endsWith('💇')).toBe(true);
+  });
+
+  it('truncates trailing content after emoji safely', () => {
+    const input = 'a'.repeat(148) + '💇' + 'extra';
+    const result = truncateCustomerNote(input, 150);
+    expect(result.length).toBe(150);
+    expect(result).toBe('a'.repeat(148) + '💇');
+  });
+
+  it('safely handles repeated multi-byte emojis without splitting', () => {
+    // 76 emojis = 152 code units. 75 emojis = 150 code units.
+    const input = '💇'.repeat(76);
+    const result = truncateCustomerNote(input, 150);
+    expect(result.length).toBe(150);
+    expect(result).toBe('💇'.repeat(75));
+  });
+
+  it('safely strips dangling Zero-Width Joiner (ZWJ)', () => {
+    // "👨\u200D💻" is 5 units (👨[2] + ZWJ[1] + 💻[2])
+    // 147 chars + 5 units = 152 units.
+    // Slicing at 150 would cut after ZWJ (147 + 2 + 1 = 150).
+    // The safe function drops the trailing ZWJ, keeping 👨 intact (149 units).
+    const input = 'a'.repeat(147) + '👨\u200D💻';
+    const result = truncateCustomerNote(input, 150);
+    expect(result.length).toBe(149);
+    expect(result).toBe('a'.repeat(147) + '👨');
+    expect(result.endsWith('\u200D')).toBe(false);
+  });
+});
+
+function naiveLastCodeIndex(str: string): number {
+  return str.length - 1;
+}
 

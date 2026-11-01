@@ -67,6 +67,46 @@ describe('NoteEditor Component (M3-T06 / SCR-CUST-05)', () => {
     expect(changeSpy).toHaveBeenCalledWith('a'.repeat(150));
   });
 
+  it('prevents splitting surrogate pairs at 149 chars + emoji boundary during paste', async () => {
+    const user = userEvent.setup();
+    const changeSpy = vi.fn();
+
+    render(
+      <NoteEditor
+        businessName="Luxe Salon"
+        note=""
+        onChangeNote={changeSpy}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    // Exact boundary requested by founder: 149 ASCII + 2-unit emoji "💇"
+    const boundaryText = 'a'.repeat(149) + '💇';
+    const textarea = screen.getByRole('textbox', { name: /Personal Note/i });
+    await user.click(textarea);
+    await user.paste(boundaryText);
+
+    // Must safely drop the orphaned high surrogate, yielding exactly 149 characters
+    expect(changeSpy).toHaveBeenCalledWith('a'.repeat(149));
+  });
+
+  it('renders safe character count and sanitized note when boundary prop is passed', () => {
+    // If a note with boundary input is passed as prop, safeNote prevents invalid surrogate rendering
+    render(
+      <NoteEditor
+        businessName="Luxe Salon"
+        note={'a'.repeat(149) + '💇'}
+        onChangeNote={vi.fn()}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    // Displays 149 / 150 without broken surrogate
+    expect(screen.getByText('149 / 150')).toBeInTheDocument();
+  });
+
   it('handles multi-byte emoji character count accurately', () => {
     render(
       <NoteEditor

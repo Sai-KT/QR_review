@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { sanitizeGoogleReviewUrl } from '../../lib/utils/customer';
+import { truncateCustomerNote } from '../../lib/utils/survey';
 
 export interface NoteEditorProps {
   businessName: string;
@@ -55,19 +56,15 @@ export function NoteEditor({
     window.open(destinationUrl, '_blank', 'noopener,noreferrer');
   };
 
+  const safeNote = truncateCustomerNote(note, 150);
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    // Strict 150-character ceiling
-    if (val.length <= 150) {
-      onChangeNote(val);
-    } else {
-      onChangeNote(val.slice(0, 150));
-    }
+    onChangeNote(truncateCustomerNote(e.target.value, 150));
   };
 
-  const charCount = note.length;
+  const charCount = safeNote.length;
   const isNearLimit = charCount >= 140;
-  const isAtLimit = charCount === 150;
+  const isAtLimit = charCount >= 150;
 
   return (
     <Card className={`w-full shadow-md border-border ${className ?? ''}`.trim()}>
@@ -134,7 +131,7 @@ export function NoteEditor({
           </label>
           <Textarea
             id="optional-customer-note"
-            value={note}
+            value={safeNote}
             onChange={handleChange}
             maxLength={150}
             rows={4}
