@@ -58,3 +58,6 @@ verify_jwt = false
 [functions.get-survey-questions]
 verify_jwt = false
 
+[functions.track-event]
+verify_jwt = false
+
