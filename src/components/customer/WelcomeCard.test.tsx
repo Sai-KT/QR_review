@@ -109,6 +109,34 @@ describe('WelcomeCard Component (SCR-CUST-01)', () => {
     );
   });
 
+  it('renders Google Maps search fallback when googleReviewUrl is null', async () => {
+    const user = userEvent.setup();
+    const handleDirectClick = vi.fn();
+
+    render(
+      <WelcomeCard
+        business={{ ...mockBusiness, googleReviewUrl: null }}
+        onDirectGoogleClick={handleDirectClick}
+      />,
+    );
+
+    expect(
+      screen.getByText(/A direct review link is not configured for this location\./i),
+    ).toBeInTheDocument();
+
+    const searchBtn = screen.getByRole('button', { name: /Search on Google Maps ↗/i });
+    expect(searchBtn).toBeInTheDocument();
+
+    await user.click(searchBtn);
+
+    expect(handleDirectClick).toHaveBeenCalledTimes(1);
+    expect(window.open).toHaveBeenCalledWith(
+      'https://www.google.com/maps',
+      '_blank',
+      'noopener,noreferrer',
+    );
+  });
+
   it('renders universal WhatsApp manager link when number is provided', async () => {
     const user = userEvent.setup();
     const handleWhatsAppClick = vi.fn();

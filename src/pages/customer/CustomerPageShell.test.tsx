@@ -183,4 +183,29 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
     });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
+
+  it('renders HTTP 429 (ERR_RATE_LIMITED) with retry and direct Google search bypass', async () => {
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockRejectedValue(
+      new publicApi.ApiClientError(
+        'Too many requests. Please wait before scanning or refreshing again.',
+        429,
+        'ERR_RATE_LIMITED',
+        undefined,
+        true,
+      ),
+    );
+
+    render(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Unable to Load Review Portal')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(/Too many requests\. Please wait before scanning or refreshing again\./i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Try Again/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Search on Google Maps ↗/i })).toBeInTheDocument();
+    expect(screen.getByText(/Active QR token parameter: "DEMO123456"/i)).toBeInTheDocument();
+  });
 });

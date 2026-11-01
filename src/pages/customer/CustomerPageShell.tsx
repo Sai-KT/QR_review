@@ -292,7 +292,7 @@ export function CustomerPageShell(): React.JSX.Element | null {
               'A network error occurred. Please check your mobile data and try again.'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="pt-2">
+        <CardContent className="space-y-3 pt-2">
           <Button
             variant="default"
             size="touch"
@@ -300,6 +300,16 @@ export function CustomerPageShell(): React.JSX.Element | null {
             onClick={() => void handleRetry()}
           >
             Try Again
+          </Button>
+          <Button
+            variant="outline"
+            size="touch"
+            className="w-full"
+            onClick={() => {
+              window.open('https://www.google.com/maps', '_blank', 'noopener,noreferrer');
+            }}
+          >
+            Search on Google Maps ↗
           </Button>
         </CardContent>
         <CardFooter className="pt-2 flex justify-center border-t border-border-subtle">

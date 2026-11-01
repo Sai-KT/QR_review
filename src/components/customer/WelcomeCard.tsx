@@ -50,7 +50,8 @@ export function WelcomeCard({
   const [failedLogoUrl, setFailedLogoUrl] = React.useState<string | null>(null);
   const isImageFailed = Boolean(business.logoUrl && business.logoUrl === failedLogoUrl);
 
-  const sanitizedGoogleUrl =
+  const hasConfiguredGoogleUrl = Boolean(sanitizeGoogleReviewUrl(business.googleReviewUrl));
+  const targetGoogleUrl =
     sanitizeGoogleReviewUrl(business.googleReviewUrl) || 'https://www.google.com/maps';
 
   const whatsAppUrl = formatWhatsAppUrl(business.whatsappNumber);
@@ -59,7 +60,7 @@ export function WelcomeCard({
 
   const handleGoogleClick = () => {
     onDirectGoogleClick?.();
-    window.open(sanitizedGoogleUrl, '_blank', 'noopener,noreferrer');
+    window.open(targetGoogleUrl, '_blank', 'noopener,noreferrer');
   };
 
   const handleWhatsAppClick = () => {
@@ -124,7 +125,9 @@ export function WelcomeCard({
         {/* Anti-Gating Direct Google Review Bypass (Always Accessible) */}
         <div className="rounded-lg border border-border-subtle bg-surface-subtle p-3 text-center">
           <p className="text-xs text-muted-foreground mb-2">
-            Prefer to write directly without AI assistance?
+            {hasConfiguredGoogleUrl
+              ? 'Prefer to write directly without AI assistance?'
+              : 'A direct review link is not configured for this location.'}
           </p>
           <Button
             variant="outline"
@@ -132,7 +135,9 @@ export function WelcomeCard({
             className="w-full text-xs font-medium min-h-[44px]"
             onClick={handleGoogleClick}
           >
-            Review Directly on Google Maps ↗
+            {hasConfiguredGoogleUrl
+              ? 'Review Directly on Google Maps ↗'
+              : 'Search on Google Maps ↗'}
           </Button>
         </div>
 

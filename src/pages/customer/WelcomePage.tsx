@@ -90,13 +90,22 @@ export function WelcomePage({
     });
   }, [business.publicQrId, sessionUuid]);
 
-  // 3. Navigation: Return from SCR-CUST-09 back to SCR-CUST-01
+  // 3. Navigation: Start review flow (navigates to ?step=1 matching M3-T06 contract)
+  const handleStartReview = React.useCallback(() => {
+    searchParams.set('step', '1');
+    setSearchParams(searchParams);
+    onStartReview?.();
+  }, [searchParams, setSearchParams, onStartReview]);
+
+  // 4. Navigation: Return from SCR-CUST-09 back to SCR-CUST-01
   const handleBackFromHandoff = React.useCallback(() => {
     searchParams.delete('handoff');
     setSearchParams(searchParams, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  // 4. SCR-CUST-09: Direct Google Review Handoff State
+  const hasStartedStep = isStarted || searchParams.get('step') === '1';
+
+  // 5. SCR-CUST-09: Direct Google Review Handoff State
   if (isDirectHandoff) {
     return (
       <DirectGoogleHandoff
@@ -108,13 +117,13 @@ export function WelcomePage({
     );
   }
 
-  // 5. SCR-CUST-01: Welcome Screen
+  // 6. SCR-CUST-01: Welcome Screen
   return (
     <WelcomeCard
       business={business}
-      onStartReview={onStartReview}
+      onStartReview={handleStartReview}
       onDirectGoogleClick={handleBypassClick}
-      isStarted={isStarted}
+      isStarted={hasStartedStep}
       activeTokenText={activeTokenText}
     />
   );

@@ -1,18 +1,45 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
+import { createHmac } from 'node:crypto';
+
+const targetDbUrl = process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
+const isLocalEnvironment =
+  targetDbUrl.includes('127.0.0.1') || targetDbUrl.includes('localhost');
 
 const supabaseAdmin = createClient(
-  process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321',
+  targetDbUrl,
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU',
 );
 
+function computeLocalTestKeyHashes(): string[] {
+  const masterSecret =
+    process.env.RATE_LIMIT_SALT ||
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dailySalt = createHmac('sha256', Buffer.from(masterSecret, 'hex'))
+    .update(`qr_rate_limit_salt:${todayStr}`)
+    .digest('hex');
+
+  // Local loopback and Docker bridge network gateway IPs
+  const localIps = ['127.0.0.1', '172.18.0.1', '172.17.0.1'];
+  return localIps.map((ip) =>
+    createHmac('sha256', Buffer.from(dailySalt, 'hex'))
+      .update(`qr_ip:${ip}`)
+      .digest('hex'),
+  );
+}
+
 test.describe('M3-T05: Customer Welcome Screen & Direct Google Bypass (SCR-CUST-01 & SCR-CUST-09)', () => {
-  test.beforeEach(async () => {
-    // Reset rate-limit events to prevent noisy cross-suite exhaustion on local 127.0.0.1
+  test.beforeAll(async () => {
+    // Isolated local pre-flight cleanup: only runs on local host (127.0.0.1/localhost)
+    // and targets ONLY the local test runner IP hashes to prevent cross-suite exhaustion.
+    // Does NOT run in beforeEach and never runs against staging or production.
+    if (!isLocalEnvironment) return;
     try {
-      await supabaseAdmin.from('rate_limit_events').delete().neq('key_hash', 'none');
+      const hashes = computeLocalTestKeyHashes();
+      await supabaseAdmin.from('rate_limit_events').delete().in('key_hash', hashes);
     } catch {
       // Best-effort in offline/standalone mock environments
     }
@@ -61,6 +88,16 @@ test.describe('M3-T05: Customer Welcome Screen & Direct Google Bypass (SCR-CUST-
       'href',
       /^https:\/\/wa\.me\/919876543210\?text=/,
     );
+
+    // Tap Start 30-Second Review CTA -> navigates to ?step=1 (M3-T06 routing contract)
+    await startCta.click();
+    await expect(page).toHaveURL('/q/luxe000001?step=1');
+    await expect(
+      page.getByRole('button', { name: /Survey Started \(3 Quick MCQs\)/i }),
+    ).toBeVisible();
+
+    // Direct Google bypass remains accessible independently
+    await expect(googleBypassBtn).toBeVisible();
 
     // Footer token
     await expect(
@@ -177,5 +214,35 @@ test.describe('M3-T05: Customer Welcome Screen & Direct Google Bypass (SCR-CUST-
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
       .analyze();
     expect(auditCust09.violations).toEqual([]);
+  });
+
+  // ── 6. Real HTTP 429 Rate Limit UI Verification ───────────────────────────
+  test('renders HTTP 429 rate-limited state with retry and anti-gating search fallback', async ({
+    page,
+  }) => {
+    // Intercept to simulate HTTP 429 ERR_RATE_LIMITED
+    await page.route('**/functions/v1/get-public-business*', (route) => {
+      return route.fulfill({
+        status: 429,
+        contentType: 'application/json',
+        headers: { 'Retry-After': '60' },
+        body: JSON.stringify({
+          error: {
+            code: 'ERR_RATE_LIMITED',
+            message: 'Too many requests. Please wait before scanning or refreshing again.',
+            retryable: true,
+          },
+        }),
+      });
+    });
+
+    await page.goto('/q/luxe000001');
+
+    await expect(page.getByText('Unable to Load Review Portal')).toBeVisible();
+    await expect(
+      page.getByText(/Too many requests\. Please wait before scanning or refreshing again\./i),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /Try Again/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Search on Google Maps ↗/i })).toBeVisible();
   });
 });
