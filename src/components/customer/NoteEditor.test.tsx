@@ -18,7 +18,7 @@ describe('NoteEditor Component (M3-T06 / SCR-CUST-05)', () => {
     expect(screen.getByText('Add an Optional Note')).toBeInTheDocument();
     expect(screen.getByLabelText(/Personal Note \(Optional/i)).toBeInTheDocument();
     expect(screen.getByText('0 / 150')).toBeInTheDocument();
-    expect(screen.getByText(/Notes are stored pseudonymously and automatically deleted after 30 days/i)).toBeInTheDocument();
+    expect(screen.getByText(/Notes are stored pseudonymously under our 30-day retention policy/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Submit feedback/i })).toBeInTheDocument();
   });
 

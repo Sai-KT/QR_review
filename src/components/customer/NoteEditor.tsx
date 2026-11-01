@@ -174,8 +174,7 @@ export function NoteEditor({
         >
           <p>
             🔒 <strong className="text-foreground">Privacy Notice:</strong> Notes are stored
-            pseudonymously and automatically deleted after 30 days via daily maintenance. We
-            never sell your personal data.
+            pseudonymously under our 30-day retention policy. We never sell your personal data.
           </p>
         </div>
 

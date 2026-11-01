@@ -150,7 +150,7 @@ test.describe('M3-T06: Accessible Three-Question Survey Flow & Note Editor (SCR-
       timeout: 5000,
     });
     await expect(
-      page.getByText(/Notes are stored pseudonymously and automatically deleted after 30 days/i),
+      page.getByText(/Notes are stored pseudonymously under our 30-day retention policy/i),
     ).toBeVisible();
 
     // Live character counter check

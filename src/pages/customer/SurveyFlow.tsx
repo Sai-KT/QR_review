@@ -279,6 +279,7 @@ export function SurveyFlow({
           err.status === 400 &&
           (err.message.includes('is retired') ||
             err.message.includes('not an active question') ||
+            err.message.includes('invalid or not found') ||
             err.code === 'ERR_QUESTION_OPTION_MISMATCH');
 
         if (isStale) {
