@@ -6,10 +6,16 @@ import * as publicApi from '../../lib/api/public';
 import type { PublicBusinessProjection } from '../../types/domain';
 
 const mockUseParams = vi.fn();
+const mockUseSearchParams = vi.fn().mockReturnValue([new URLSearchParams(), vi.fn()]);
 
-vi.mock('react-router', () => ({
-  useParams: () => mockUseParams(),
-}));
+vi.mock('react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router')>();
+  return {
+    ...actual,
+    useParams: () => mockUseParams(),
+    useSearchParams: () => mockUseSearchParams(),
+  };
+});
 
 describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
   const mockActiveBusiness: PublicBusinessProjection = {
@@ -29,6 +35,7 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseParams.mockReturnValue({ qrId: 'DEMO123456' });
+    mockUseSearchParams.mockReturnValue([new URLSearchParams(), vi.fn()]);
   });
 
   it('renders loading state initially while resolving public business', () => {
@@ -52,9 +59,9 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
       expect(screen.getByText('Green Salon & Spa')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('salon')).toBeInTheDocument();
+    expect(screen.getByText(/^salon$/i)).toBeInTheDocument();
     expect(screen.getByAltText('Green Salon & Spa logo')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Start 30-Sec Review →/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /Review Directly on Google Maps ↗/i }),
     ).toBeInTheDocument();
@@ -72,7 +79,7 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
       expect(screen.getByText('Green Salon & Spa')).toBeInTheDocument();
     });
 
-    const startButton = screen.getByRole('button', { name: /Start 30-Sec Review →/i });
+    const startButton = screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i });
     await user.click(startButton);
 
     expect(

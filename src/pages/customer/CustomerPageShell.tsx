@@ -13,6 +13,7 @@ import {
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Skeleton } from '../../components/ui/skeleton';
+import { WelcomePage } from './WelcomePage';
 
 export type CustomerViewState =
   'loading' | 'active' | 'direct_only' | 'suspended' | 'not_found' | 'error';
@@ -308,89 +309,18 @@ export function CustomerPageShell(): React.JSX.Element | null {
     );
   }
 
-  // 6. SCR-CUST-01: Active Welcome Card & Anti-Gating Google Option
+  // 6. SCR-CUST-01 / SCR-CUST-09: Active Customer Welcome Experience
   if (!business) {
     return null;
   }
 
-  const googleUrl = business.googleReviewUrl || 'https://www.google.com/maps';
-
   return (
-    <Card className="w-full shadow-md border-border">
-      <CardHeader className="flex flex-col items-center text-center pb-3">
-        {business.logoUrl ? (
-          <img
-            src={business.logoUrl}
-            alt={`${business.name} logo`}
-            className="h-20 w-20 rounded-full object-cover border border-border shadow-xs mb-2"
-          />
-        ) : (
-          <div
-            className="h-20 w-20 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold text-2xl mb-2"
-            aria-hidden="true"
-          >
-            {business.name.slice(0, 2).toUpperCase()}
-          </div>
-        )}
-        <CardTitle className="text-heading-1">{business.name}</CardTitle>
-        <div className="flex items-center gap-2 mt-1">
-          <Badge variant="secondary" size="sm" className="capitalize">
-            {business.categoryId}
-          </Badge>
-        </div>
-        <CardDescription className="text-sm mt-3 text-muted-foreground">
-          How was your experience today? Help us improve or share your thoughts on Google Maps.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="space-y-4 pt-2">
-        {/* Primary CTA (Navigates to 3-MCQ Questionnaire) */}
-        <Button
-          variant="default"
-          size="touch"
-          className="w-full font-semibold text-base shadow-sm"
-          onClick={() => setIsStarted(true)}
-        >
-          {isStarted ? 'Survey Started (3 Quick MCQs)' : 'Start 30-Sec Review →'}
-        </Button>
-
-        {/* Anti-Gating Direct Google Review Bypass (Always Accessible) */}
-        <div className="rounded-lg border border-border-subtle bg-surface-subtle p-3 text-center">
-          <p className="text-xs text-muted-foreground mb-2">
-            Prefer to write directly without AI assistance?
-          </p>
-          <Button
-            variant="outline"
-            size="default"
-            className="w-full text-xs font-medium"
-            onClick={() => {
-              window.open(googleUrl, '_blank', 'noopener,noreferrer');
-            }}
-          >
-            Review Directly on Google Maps ↗
-          </Button>
-        </div>
-
-        {/* Secondary Contact Link */}
-        {business.whatsappNumber && (
-          <div className="text-center pt-1">
-            <a
-              href={`https://wa.me/${business.whatsappNumber}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 inline-flex items-center gap-1"
-            >
-              <span>Message Manager on WhatsApp</span>
-              <span aria-hidden="true">↗</span>
-            </a>
-          </div>
-        )}
-      </CardContent>
-
-      <CardFooter className="pt-2 flex justify-center border-t border-border-subtle">
-        <p className="text-xs text-muted-foreground">{activeTokenText}</p>
-      </CardFooter>
-    </Card>
+    <WelcomePage
+      business={business}
+      isStarted={isStarted}
+      onStartReview={() => setIsStarted(true)}
+      activeTokenText={activeTokenText}
+    />
   );
 }
 
