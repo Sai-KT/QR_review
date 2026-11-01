@@ -5,7 +5,6 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
-  CardFooter,
 } from '../ui/card';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
@@ -22,8 +21,6 @@ export interface GenerationShimmerProps {
   onDirectGoogleClick?: () => void;
   /** Optional cancellation callback if caller genuinely supports aborting */
   onCancel?: () => void;
-  /** Active session token or correlation text for footer traceability */
-  activeTokenText?: string;
   /** Custom class name */
   className?: string;
 }
@@ -65,7 +62,6 @@ export function GenerationShimmer({
   targetGoogleUrl,
   onDirectGoogleClick,
   onCancel,
-  activeTokenText,
   className,
 }: GenerationShimmerProps): React.JSX.Element {
   const [statusMessage, setStatusMessage] = React.useState<string>(SHIMMER_MESSAGES.STAGE_1);
@@ -185,18 +181,14 @@ export function GenerationShimmer({
           aria-hidden="true"
           data-testid="shimmer-skeleton-box"
         >
-          {/* Header Row: Simulated Avatar & Star Rating */}
+          {/* Header Row: Neutral Draft Metadata (Strictly Sentiment-Neutral, Zero Assumed Stars) */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Skeleton shimmer className="h-7 w-7 rounded-full" />
               <Skeleton shimmer className="h-3.5 w-24 rounded" />
             </div>
-            {/* Simulated 5-Star Row */}
-            <div className="flex gap-1">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} shimmer className="h-3.5 w-3.5 rounded-sm" />
-              ))}
-            </div>
+            {/* Sentiment-Neutral Draft Indicator (replaces any five-star rating assumption) */}
+            <Skeleton shimmer className="h-3.5 w-16 rounded" />
           </div>
 
           {/* Body Lines: Simulating Grounded Review Paragraph */}
@@ -252,13 +244,6 @@ export function GenerationShimmer({
           </div>
         )}
       </CardContent>
-
-      {/* Traceability Footer */}
-      {activeTokenText && (
-        <CardFooter className="pt-2 flex justify-center border-t border-border-subtle">
-          <p className="text-xs text-muted-foreground">{activeTokenText}</p>
-        </CardFooter>
-      )}
     </Card>
   );
 }

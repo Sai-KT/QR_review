@@ -100,12 +100,28 @@ describe('GenerationShimmer Component (SCR-CUST-06 / M4-T05)', () => {
       expect(screen.getByText('GL')).toBeInTheDocument();
     });
 
-    it('renders active token text in footer when supplied', () => {
-      render(<GenerationShimmer activeTokenText="Session ID: 9b1deb4d • Token: Valid" />);
+    it('never renders authentication tokens, credentials, or footer secret text in DOM or accessibility tree (P1 Privacy)', () => {
+      const { container } = render(
+        <GenerationShimmer businessName="Luxe Unisex Salon" />,
+      );
 
-      expect(
-        screen.getByText('Session ID: 9b1deb4d • Token: Valid'),
-      ).toBeInTheDocument();
+      // Verify no footer or token text exists in DOM
+      expect(container.querySelector('footer')).toBeNull();
+      expect(container.querySelector('[role="contentinfo"]')).toBeNull();
+      expect(container.textContent).not.toMatch(/token|secret|session id|bearer|apikey|jwt/i);
+    });
+
+    it('maintains strict sentiment neutrality without fabricated star ratings or rating placeholders in skeleton (P2 Sentiment Neutrality)', () => {
+      const { container } = render(<GenerationShimmer />);
+
+      const skeletonBox = screen.getByTestId('shimmer-skeleton-box');
+      expect(skeletonBox).toBeInTheDocument();
+
+      // Verify zero star icons, zero star rating grids, zero rating text
+      expect(skeletonBox.querySelectorAll('svg')).toHaveLength(0);
+      expect(container.textContent).not.toMatch(/star|rating|★|☆/i);
+      expect(skeletonBox.querySelector('[role="radiogroup"]')).toBeNull();
+      expect(skeletonBox.querySelector('[aria-valuenow]')).toBeNull();
     });
   });
 
