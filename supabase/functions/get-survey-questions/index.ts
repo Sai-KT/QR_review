@@ -26,6 +26,7 @@ import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { computeSurveyVersion } from '../_shared/crypto.ts';
 
 // ============================================================================
 // Response Headers & Constants
@@ -86,6 +87,7 @@ export interface PublicSurveyQuestionDto {
 
 export interface SurveyQuestionsSuccessResponse {
   categoryId: 'salon' | 'cafe';
+  surveyVersion: string;
   questions: PublicSurveyQuestionDto[];
 }
 
@@ -457,10 +459,14 @@ export function validateAndProjectQuestionnaire(
     });
   }
 
+  const questionIds = projectedQuestions.map((q) => q.id);
+  const surveyVersion = computeSurveyVersion(questionIds);
+
   return {
     valid: true,
     data: {
       categoryId,
+      surveyVersion,
       questions: projectedQuestions,
     },
   };

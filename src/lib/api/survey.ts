@@ -34,6 +34,7 @@ export interface SurveyQuestionDto {
 
 export interface SurveyQuestionsDto {
   categoryId: SurveyCategory;
+  surveyVersion: string;
   questions: SurveyQuestionDto[];
 }
 

@@ -396,4 +396,310 @@ describe('M3-T02: Live PostgreSQL Integration & Cross-Task Suite', () => {
     expect(errBody.error.code).toBe('ERR_INVALID_PAYLOAD');
     expect(errBody.error.message).toContain('is not an active question for category salon');
   });
+
+  /* ------------------------------------------------------------------------ */
+  /* 5. Question Replacement & Stale-Cache Simulation (Section 2 & 3)        */
+  /* ------------------------------------------------------------------------ */
+
+  it('INT-10: executes question replacement lifecycle, verifies cache/version divergence and records stale submission failure', async () => {
+    const CAFE_QR_ID = 'daily00001';
+    const ORIGINAL_Q2_ID = '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b6d'; // Cafe Question 2
+    const REPLACEMENT_Q2_ID = '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b88';
+    const REPLACEMENT_OPT_PREFIX = '1a2b3c4d-8888-4000-8000';
+
+    // Step 1: Retrieve Questionnaire A (Original active cafe survey)
+    const qReqA = new Request(
+      `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=cafe`,
+      {
+        method: 'GET',
+        headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+      },
+    );
+    const qResA = await handleGetSurveyQuestions(qReqA, {
+      supabaseClient: supabase,
+      expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+    });
+    expect(qResA.status).toBe(200);
+    const bodyA = (await qResA.json()) as SurveyQuestionsSuccessResponse;
+
+    expect(bodyA.questions).toHaveLength(3);
+    expect(bodyA.questions[1]!.id).toBe(ORIGINAL_Q2_ID);
+    const surveyVersionA = bodyA.surveyVersion;
+    expect(surveyVersionA).toBeDefined();
+
+    // Step 2: Emulate cached copy of Questionnaire A
+    // (A patron has loaded this questionnaire before question replacement occurred)
+    const cachedSelectionsA = bodyA.questions.map((q) => ({
+      questionId: q.id,
+      optionId: q.options[0]!.id,
+    }));
+
+    try {
+      // Step 3: Replace Question 2 with a new published question in PostgreSQL
+      // 3a. Insert new replacement question with is_active = false initially to avoid partial index collision
+      const { error: insQErr } = await supabase.from('survey_questions').insert({
+        id: REPLACEMENT_Q2_ID,
+        category_id: 'cafe',
+        question_text: 'How was the food and beverage presentation and temperature?',
+        display_order: 2,
+        is_active: false,
+      });
+      expect(insQErr).toBeNull();
+
+      // 3b. Insert 4 options for replacement question (including 1 neutral N/A option)
+      const replacementOptions = [
+        {
+          id: `${REPLACEMENT_OPT_PREFIX}-000000000001`,
+          question_id: REPLACEMENT_Q2_ID,
+          option_text: 'Artfully presented & perfect temperature',
+          emoji_anchor: '☕',
+          sentiment_label: 'positive',
+          is_neutral_na: false,
+          is_active: true,
+          display_order: 1,
+        },
+        {
+          id: `${REPLACEMENT_OPT_PREFIX}-000000000002`,
+          question_id: REPLACEMENT_Q2_ID,
+          option_text: 'Standard presentation & good taste',
+          emoji_anchor: '👍',
+          sentiment_label: 'positive',
+          is_neutral_na: false,
+          is_active: true,
+          display_order: 2,
+        },
+        {
+          id: `${REPLACEMENT_OPT_PREFIX}-000000000003`,
+          question_id: REPLACEMENT_Q2_ID,
+          option_text: 'Lukewarm / sloppy presentation',
+          emoji_anchor: '⏳',
+          sentiment_label: 'negative',
+          is_neutral_na: false,
+          is_active: true,
+          display_order: 3,
+        },
+        {
+          id: `${REPLACEMENT_OPT_PREFIX}-000000000004`,
+          question_id: REPLACEMENT_Q2_ID,
+          option_text: 'Not applicable / Not sure',
+          emoji_anchor: '🤷',
+          sentiment_label: 'neutral',
+          is_neutral_na: true,
+          is_active: true,
+          display_order: 4,
+        },
+      ];
+      const { error: insOptErr } = await supabase.from('survey_options').insert(replacementOptions);
+      expect(insOptErr).toBeNull();
+
+      // 3c. Atomically soft-retire old Question 2 and activate replacement Question 2
+      const { error: deactErr } = await supabase
+        .from('survey_questions')
+        .update({ is_active: false })
+        .eq('id', ORIGINAL_Q2_ID);
+      expect(deactErr).toBeNull();
+
+      const { error: actErr } = await supabase
+        .from('survey_questions')
+        .update({ is_active: true })
+        .eq('id', REPLACEMENT_Q2_ID);
+      expect(actErr).toBeNull();
+
+      // Step 4: Verify fresh M3-T02 retrieval returns Questionnaire B
+      const qReqB = new Request(
+        `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=cafe`,
+        {
+          method: 'GET',
+          headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+        },
+      );
+      const qResB = await handleGetSurveyQuestions(qReqB, {
+        supabaseClient: supabase,
+        expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      });
+      expect(qResB.status).toBe(200);
+      const bodyB = (await qResB.json()) as SurveyQuestionsSuccessResponse;
+
+      expect(bodyB.questions).toHaveLength(3);
+      expect(bodyB.questions[1]!.id).toBe(REPLACEMENT_Q2_ID);
+      expect(bodyB.questions[1]!.questionText).toBe(
+        'How was the food and beverage presentation and temperature?',
+      );
+      const surveyVersionB = bodyB.surveyVersion;
+
+      // Survey version must diverge from Questionnaire A
+      expect(surveyVersionB).not.toBe(surveyVersionA);
+
+      // Step 5: Verify the cached copy's behavior:
+      // The cached copy held by client A contains question ORIGINAL_Q2_ID, which is now is_active = FALSE.
+
+      // Step 6 & 7: Submit the previously cached Questionnaire A selections through M3-T03
+      const subReqA = new Request(
+        `${LOCAL_SUPABASE_URL}/functions/v1/submit-feedback`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: LOCAL_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            publicQrId: CAFE_QR_ID,
+            sessionUuid: crypto.randomUUID(),
+            responses: cachedSelectionsA,
+            optionalNote: 'Submitting stale cached survey.',
+          }),
+        },
+      );
+
+      const subResA = await handleFeedbackSubmission(subReqA, supabase, TEST_SIGNING_SECRET);
+
+      // RECORDED FAILURE EVIDENCE:
+      // M3-T03 server-side validation strictly rejects the submission because Question 2 is no longer active
+      expect(subResA.status).toBe(400);
+      const errBodyA = await subResA.json();
+      expect(errBodyA.error.code).toBe('ERR_INVALID_PAYLOAD');
+      expect(errBodyA.error.message).toContain(
+        `Question ${ORIGINAL_Q2_ID} is not an active question for category cafe`,
+      );
+
+      // In contrast, submitting fresh Questionnaire B selections succeeds
+      const freshSelectionsB = bodyB.questions.map((q) => ({
+        questionId: q.id,
+        optionId: q.options[0]!.id,
+      }));
+      const subReqB = new Request(
+        `${LOCAL_SUPABASE_URL}/functions/v1/submit-feedback`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: LOCAL_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            publicQrId: CAFE_QR_ID,
+            sessionUuid: crypto.randomUUID(),
+            responses: freshSelectionsB,
+            optionalNote: 'Submitting fresh survey questionnaire B.',
+          }),
+        },
+      );
+      const subResB = await handleFeedbackSubmission(subReqB, supabase, TEST_SIGNING_SECRET);
+      expect(subResB.status).toBe(201);
+
+      // Step 8: Verify what adding ?v= changes and what it does not change
+      // Adding ?v=bypasses CDN cache key:
+      const qReqWithV = new Request(
+        `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=cafe&v=2`,
+        {
+          method: 'GET',
+          headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+        },
+      );
+      const qResWithV = await handleGetSurveyQuestions(qReqWithV, {
+        supabaseClient: supabase,
+        expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      });
+      expect(qResWithV.status).toBe(200);
+      const bodyWithV = (await qResWithV.json()) as SurveyQuestionsSuccessResponse;
+      expect(bodyWithV.questions[1]!.id).toBe(REPLACEMENT_Q2_ID);
+
+      // Adding ?v=old_version does NOT resurrect retired question A
+      const qReqWithOldV = new Request(
+        `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=cafe&v=1`,
+        {
+          method: 'GET',
+          headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+        },
+      );
+      const qResWithOldV = await handleGetSurveyQuestions(qReqWithOldV, {
+        supabaseClient: supabase,
+        expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      });
+      expect(qResWithOldV.status).toBe(200);
+      const bodyWithOldV = (await qResWithOldV.json()) as SurveyQuestionsSuccessResponse;
+      // It still returns active Questionnaire B, confirming ?v= cannot expose inactive questions
+      expect(bodyWithOldV.questions[1]!.id).toBe(REPLACEMENT_Q2_ID);
+    } finally {
+      // Clean up & fully restore PostgreSQL reference data to original baseline
+      await supabase
+        .from('survey_questions')
+        .update({ is_active: false })
+        .eq('id', REPLACEMENT_Q2_ID);
+
+      await supabase
+        .from('survey_questions')
+        .update({ is_active: true })
+        .eq('id', ORIGINAL_Q2_ID);
+
+      await supabase
+        .from('survey_options')
+        .delete()
+        .eq('question_id', REPLACEMENT_Q2_ID);
+
+      await supabase
+        .from('survey_questions')
+        .delete()
+        .eq('id', REPLACEMENT_Q2_ID);
+    }
+  });
+
+  it('INT-11: verifies version parameter ?v= validation and security boundaries', async () => {
+    // 1. Valid alphanumeric version succeeds
+    const validReq = new Request(
+      `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=cafe&v=v2_20261101`,
+      {
+        method: 'GET',
+        headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+      },
+    );
+    const validRes = await handleGetSurveyQuestions(validReq, {
+      supabaseClient: supabase,
+      expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+    });
+    expect(validRes.status).toBe(200);
+
+    // 2. Malformed version containing spaces / special characters fails with HTTP 400 ERR_INVALID_VERSION
+    const badReq = new Request(
+      `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=salon&v=invalid%20version!@#$`,
+      {
+        method: 'GET',
+        headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+      },
+    );
+    const badRes = await handleGetSurveyQuestions(badReq, {
+      supabaseClient: supabase,
+      expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+    });
+    expect(badRes.status).toBe(400);
+    const badBody = await badRes.json();
+    expect(badBody.error.code).toBe('ERR_INVALID_VERSION');
+
+    // 3. Path traversal attack attempt fails with HTTP 400 ERR_INVALID_VERSION
+    const traversalReq = new Request(
+      `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=salon&v=../../admin`,
+      {
+        method: 'GET',
+        headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+      },
+    );
+    const traversalRes = await handleGetSurveyQuestions(traversalReq, {
+      supabaseClient: supabase,
+      expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+    });
+    expect(traversalRes.status).toBe(400);
+
+    // 4. Overly long string (>32 chars) fails with HTTP 400 ERR_INVALID_VERSION
+    const longReq = new Request(
+      `${LOCAL_SUPABASE_URL}/functions/v1/get-survey-questions?categoryId=salon&v=this_version_string_is_much_longer_than_thirty_two_characters`,
+      {
+        method: 'GET',
+        headers: { apikey: LOCAL_PUBLISHABLE_KEY },
+      },
+    );
+    const longRes = await handleGetSurveyQuestions(longReq, {
+      supabaseClient: supabase,
+      expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+    });
+    expect(longRes.status).toBe(400);
+  });
 });

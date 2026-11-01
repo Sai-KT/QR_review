@@ -180,6 +180,8 @@ describe('M3-T02: Edge Function get-survey-questions (API-PUB-02)', () => {
 
     const body = await res.json();
     expect(body.categoryId).toBe('salon');
+    expect(body.surveyVersion).toBeDefined();
+    expect(body.surveyVersion).toMatch(/^sv_[a-f0-9]{16}$/);
     expect(body.questions).toHaveLength(3);
 
     // Verify ordering
@@ -658,6 +660,7 @@ describe('M3-T02: Edge Function get-survey-questions (API-PUB-02)', () => {
   it('29. fetchSurveyQuestions client adapter parses response into SurveyQuestionsDto', async () => {
     const mockResponsePayload = {
       categoryId: 'salon',
+      surveyVersion: 'sv_test_salon_v1',
       questions: [
         {
           id: 'q-1',
@@ -726,6 +729,9 @@ describe('M3-T02: Edge Function get-survey-questions (API-PUB-02)', () => {
     const raw = makeMockQuestions('salon');
     const result = validateAndProjectQuestionnaire('salon', raw);
     expect(result.valid).toBe(true);
+    expect(result.data?.categoryId).toBe('salon');
+    expect(result.data?.surveyVersion).toBeDefined();
+    expect(result.data?.surveyVersion).toMatch(/^sv_[a-f0-9]{16}$/);
     expect(result.data?.questions).toHaveLength(3);
 
     // Empty list
