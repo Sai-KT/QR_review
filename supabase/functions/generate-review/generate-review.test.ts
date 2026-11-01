@@ -5,6 +5,7 @@ import {
   GenerateReviewRequestSchema,
   extractApiKey,
   validateProjectApiKey,
+  extractClientIp,
   cleanAndNormalizeIp,
   deriveDailySalt,
   computeIpHash,
@@ -94,6 +95,13 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       expect(extractApiKey(reqWithBearer)).toBe(mockValidApiKey);
     });
 
+    it('strictly rejects API key provided via URL query string', () => {
+      const reqWithQuery = new Request(
+        `http://localhost/generate-review?apikey=${mockValidApiKey}`,
+      );
+      expect(extractApiKey(reqWithQuery)).toBeNull();
+    });
+
     it('validates project publishable keys and rejects privileged service-role keys', () => {
       const validSet = new Set([mockValidApiKey]);
       const validRes = validateProjectApiKey(mockValidApiKey, validSet, mockJwtSecret);
@@ -133,6 +141,64 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       expect(hash1).toBe(hash2);
       expect(hash1).not.toBe(hashDifferentIp);
       expect(hash1).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it('prioritizes direct x-real-ip over caller-supplied cf-connecting-ip and x-forwarded-for', () => {
+      const req = new Request('http://localhost/generate-review', {
+        headers: {
+          'x-real-ip': '198.51.100.1',
+          'cf-connecting-ip': '203.0.113.1',
+          'x-forwarded-for': '203.0.113.2',
+        },
+      });
+      // Direct peer is not in Cloudflare CIDRs, so caller-supplied cf-connecting-ip is ignored
+      expect(extractClientIp(req)).toBe('198.51.100.1');
+    });
+
+    it('discards caller-supplied cf-connecting-ip when connecting peer is not in Cloudflare CIDRs', () => {
+      const req = new Request('http://localhost/generate-review', {
+        headers: {
+          'x-real-ip': '198.51.100.1',
+          'cf-connecting-ip': '203.0.113.1',
+        },
+      });
+      expect(extractClientIp(req, { trustCloudflareProxy: true })).toBe('198.51.100.1');
+    });
+
+    it('accepts cf-connecting-ip when peer is in Cloudflare CIDRs and trustCloudflareProxy is true', () => {
+      const req = new Request('http://localhost/generate-review', {
+        headers: {
+          'x-real-ip': '103.21.244.1', // Inside Cloudflare CIDR 103.21.244.0/22
+          'cf-connecting-ip': '203.0.113.50',
+        },
+      });
+      expect(extractClientIp(req, { trustCloudflareProxy: true })).toBe('203.0.113.50');
+    });
+
+    it('evaluates rightmost valid IP in multi-hop x-forwarded-for chain when direct IP is absent', () => {
+      const req = new Request('http://localhost/generate-review', {
+        headers: {
+          'x-forwarded-for': '203.0.113.1, 198.51.100.25, 192.0.2.99',
+        },
+      });
+      expect(extractClientIp(req)).toBe('192.0.2.99');
+    });
+
+    it('fails closed and returns null on malformed IP header values', () => {
+      const malformedRealIp = new Request('http://localhost/generate-review', {
+        headers: { 'x-real-ip': 'malformed-ip' },
+      });
+      expect(extractClientIp(malformedRealIp)).toBeNull();
+
+      const malformedForwarded = new Request('http://localhost/generate-review', {
+        headers: { 'x-forwarded-for': 'invalid1, invalid2' },
+      });
+      expect(extractClientIp(malformedForwarded)).toBeNull();
+    });
+
+    it('falls back to 127.0.0.1 when no IP headers are present in test context', () => {
+      const req = new Request('http://localhost/generate-review');
+      expect(extractClientIp(req)).toBe('127.0.0.1');
     });
   });
 
@@ -764,6 +830,206 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       const json = await res.json();
       expect(json.reviewDraft).toContain('Had a masterful and precise service today');
       expect(json.wordCount).toBe(23);
+    });
+
+    it('rejects expired submission token at pre-lookup without performing database query', async () => {
+      let dbQueryAttempted = false;
+      const trackingSupabase = {
+        from: () => {
+          dbQueryAttempted = true;
+          return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) };
+        },
+        rpc: async () => ({ data: null, error: null }),
+      } as unknown as SupabaseClient;
+
+      const expiredEpoch = Math.floor(Date.now() / 1000) - 30; // 30s in past
+      const expiredToken = `${mockResponseId}.${expiredEpoch}.${'a'.repeat(64)}`;
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: expiredToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: trackingSupabase,
+      });
+
+      expect(res.status).toBe(401);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_TOKEN_EXPIRED');
+      expect(dbQueryAttempted).toBe(false);
+    });
+
+    it('rejects token with mismatched responseId at pre-lookup without database query', async () => {
+      let dbQueryAttempted = false;
+      const trackingSupabase = {
+        from: () => {
+          dbQueryAttempted = true;
+          return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) };
+        },
+        rpc: async () => ({ data: null, error: null }),
+      } as unknown as SupabaseClient;
+
+      // Token responseId differs from body responseId
+      const mismatchedToken = `11111111-2222-3333-4444-555555555555.${Math.floor(Date.now() / 1000) + 300}.${'b'.repeat(64)}`;
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: mismatchedToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: trackingSupabase,
+      });
+
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_INVALID_SUBMISSION_TOKEN');
+      expect(dbQueryAttempted).toBe(false);
+    });
+
+    it('rejects nonexistent response UUID with HTTP 403 matching forged token behavior (anti-enumeration)', async () => {
+      const mockSupabase = createMockSupabase({
+        surveyResponse: null, // Response row does not exist in DB
+      });
+
+      const nonexistentToken = `${mockResponseId}.${Math.floor(Date.now() / 1000) + 300}.${'c'.repeat(64)}`;
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: nonexistentToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      // Must return HTTP 403, NOT 404, to prevent response-existence enumeration
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_INVALID_SUBMISSION_TOKEN');
+    });
+
+    it('rejects valid token presented with mismatched client sessionUuid with HTTP 403 ERR_SESSION_MISMATCH', async () => {
+      const mockSupabase = createMockSupabase();
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+          sessionUuid: '00000000-0000-0000-0000-000000000000', // Mismatched session
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_SESSION_MISMATCH');
+    });
+
+    it('rejects valid token bound to another business ID with HTTP 403', async () => {
+      // Mint a token validly signed, but for a different business ID
+      const otherBusinessId = 'e9999999-9999-4000-8000-000000000009';
+      const foreignBizToken = signSubmissionToken({
+        responseId: mockResponseId,
+        businessId: otherBusinessId,
+        sessionUuid: mockSessionUuid,
+        surveyVersion: mockSurveyVersion,
+        exp: Math.floor(Date.now() / 1000) + 300,
+        secret: mockSigningSecret,
+      });
+
+      const mockSupabase = createMockSupabase(); // Has mockBusinessId, not otherBusinessId
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: foreignBizToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_INVALID_SUBMISSION_TOKEN');
+    });
+
+    it('strictly rejects query-string-only API keys with HTTP 401 ERR_UNAUTHORIZED', async () => {
+      const mockSupabase = createMockSupabase();
+
+      const req = new Request(`http://localhost/generate-review?apikey=${mockValidApiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(401);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_UNAUTHORIZED');
     });
   });
 });

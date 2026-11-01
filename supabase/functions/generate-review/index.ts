@@ -37,6 +37,7 @@ import {
   computeSurveyVersion,
   getSigningSecret as getCryptoSigningSecret,
   verifySubmissionToken,
+  constantTimeHexEqual,
 } from '../_shared/crypto.ts';
 import {
   buildGroundedPrompt,
@@ -352,10 +353,6 @@ export function extractApiKey(req: Request): string | null {
     return authHeader.slice(7).trim();
   }
 
-  const url = new URL(req.url);
-  const queryKey = url.searchParams.get('apikey');
-  if (queryKey) return queryKey.trim();
-
   return null;
 }
 
@@ -402,8 +399,72 @@ export function validateProjectApiKey(
 }
 
 // ============================================================================
-// Client IP Extraction & Hashing
+// Client IP Extraction & Ingress Provenance Verification
 // ============================================================================
+
+export const CLOUDFLARE_IPV4_CIDRS: readonly string[] = [
+  '173.245.48.0/20',
+  '103.21.244.0/22',
+  '103.22.200.0/22',
+  '103.31.4.0/22',
+  '141.101.64.0/18',
+  '108.162.192.0/18',
+  '190.93.240.0/20',
+  '188.114.96.0/20',
+  '197.234.240.0/22',
+  '198.41.128.0/17',
+  '162.158.0.0/15',
+  '104.16.0.0/13',
+  '104.24.0.0/14',
+  '172.64.0.0/13',
+  '131.0.72.0/22',
+];
+
+export function isIpv4InCidr(ip: string, cidr: string): boolean {
+  const [net, bitsStr] = cidr.split('/');
+  if (!net || !bitsStr) return false;
+  const bits = parseInt(bitsStr, 10);
+  if (isNaN(bits) || bits < 0 || bits > 32) return false;
+
+  const ipParts = ip.split('.').map(Number);
+  const netParts = net.split('.').map(Number);
+  if (ipParts.length !== 4 || netParts.length !== 4) return false;
+
+  const ipInt =
+    (((ipParts[0] ?? 0) << 24) |
+      ((ipParts[1] ?? 0) << 16) |
+      ((ipParts[2] ?? 0) << 8) |
+      (ipParts[3] ?? 0)) >>>
+    0;
+  const netInt =
+    (((netParts[0] ?? 0) << 24) |
+      ((netParts[1] ?? 0) << 16) |
+      ((netParts[2] ?? 0) << 8) |
+      (netParts[3] ?? 0)) >>>
+    0;
+
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (ipInt & mask) === (netInt & mask);
+}
+
+export function isCloudflareProxyIp(ip: string): boolean {
+  if (isValidIpv4(ip)) {
+    return CLOUDFLARE_IPV4_CIDRS.some((cidr) => isIpv4InCidr(ip, cidr));
+  }
+  if (isValidIpv6(ip)) {
+    const lower = ip.toLowerCase();
+    return (
+      lower.startsWith('2400:cb00:') ||
+      lower.startsWith('2606:4700:') ||
+      lower.startsWith('2803:f800:') ||
+      lower.startsWith('2405:b500:') ||
+      lower.startsWith('2405:8100:') ||
+      lower.startsWith('2a06:98c0:') ||
+      lower.startsWith('2c0f:f248:')
+    );
+  }
+  return false;
+}
 
 export function isValidIpv4(ip: string): boolean {
   const parts = ip.split('.');
@@ -434,27 +495,79 @@ export function isValidIpv6(ip: string): boolean {
 }
 
 export function cleanAndNormalizeIp(raw: string): string | null {
-  const trimmed = raw.trim();
-  const cleaned = trimmed.replace(/^\[|\]$/g, '').replace(/:\d+$/, '');
+  let cleaned = raw.trim();
+  if (!cleaned) return null;
 
-  if (isValidIpv4(cleaned)) return cleaned;
-  if (isValidIpv6(cleaned)) return cleaned.toLowerCase();
+  // Handle port suffix on IPv4 (e.g. 192.0.2.1:443)
+  if (cleaned.includes('.') && cleaned.includes(':') && !cleaned.toLowerCase().includes('::ffff:')) {
+    const colonIdx = cleaned.lastIndexOf(':');
+    const portPart = cleaned.slice(colonIdx + 1);
+    if (/^\d+$/.test(portPart)) {
+      cleaned = cleaned.slice(0, colonIdx);
+    }
+  }
+
+  // Handle IPv6 brackets (e.g. [::1] or [::ffff:192.0.2.1])
+  cleaned = cleaned.replace(/^\[|\]$/g, '');
+
+  // Handle IPv4-mapped IPv6 addresses (e.g., ::ffff:192.0.2.1)
+  const mappedPrefix = '::ffff:';
+  if (cleaned.toLowerCase().startsWith(mappedPrefix)) {
+    const ipv4Candidate = cleaned.slice(mappedPrefix.length);
+    if (isValidIpv4(ipv4Candidate)) {
+      return ipv4Candidate;
+    }
+  }
+
+  if (isValidIpv4(cleaned)) {
+    return cleaned;
+  }
+
+  if (isValidIpv6(cleaned)) {
+    return cleaned.toLowerCase();
+  }
+
   return null;
 }
 
-export function extractClientIp(req: Request): string | null {
+export function extractClientIp(
+  req: Request,
+  options?: { trustCloudflareProxy?: boolean },
+): string | null {
   const hasIpHeaders =
     req.headers.has('x-real-ip') ||
     req.headers.has('x-forwarded-for') ||
     req.headers.has('cf-connecting-ip');
 
+  // 1. Direct connection IP from ingress gateway (Kong overwrites X-Real-IP with $remote_addr)
   const rawRealIp = req.headers.get('x-real-ip');
+  let directConnectingIp: string | null = null;
   if (rawRealIp) {
-    const directIp = cleanAndNormalizeIp(rawRealIp);
-    if (!directIp) return null;
-    return directIp;
+    directConnectingIp = cleanAndNormalizeIp(rawRealIp);
+    if (!directConnectingIp) {
+      // Malformed X-Real-IP -> fail closed
+      return null;
+    }
   }
 
+  // 2. Cloudflare Ingress Verification
+  const trustCf = options?.trustCloudflareProxy ?? (getEnv('TRUST_CLOUDFLARE_PROXY') === 'true');
+  const rawCfIp = req.headers.get('cf-connecting-ip');
+  if (trustCf && rawCfIp && directConnectingIp) {
+    if (isCloudflareProxyIp(directConnectingIp)) {
+      const normalizedCf = cleanAndNormalizeIp(rawCfIp);
+      if (normalizedCf) return normalizedCf;
+      return null;
+    }
+    // Direct connecting peer is not in Cloudflare CIDRs -> discard untrusted CF header
+  }
+
+  // 3. Return verified direct connection IP from ingress gateway
+  if (directConnectingIp) {
+    return directConnectingIp;
+  }
+
+  // 4. Secondary: X-Forwarded-For (evaluate rightmost IP added by immediate proxy)
   const xForwardedFor = req.headers.get('x-forwarded-for');
   if (xForwardedFor) {
     const parts = xForwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
@@ -468,8 +581,12 @@ export function extractClientIp(req: Request): string | null {
     return null;
   }
 
-  if (hasIpHeaders) return null;
+  // If headers were present but none were valid, fail closed
+  if (hasIpHeaders) {
+    return null;
+  }
 
+  // In local development / test environments with no ingress headers, fallback to loopback
   return '127.0.0.1';
 }
 
@@ -578,6 +695,7 @@ export interface GenerateReviewHandlerOptions {
   rateLimitSalt?: string;
   jwtSecret?: string;
   expectedApiKey?: string;
+  trustCloudflareProxy?: boolean;
 }
 
 export async function handleGenerateReview(
@@ -655,10 +773,90 @@ export async function handleGenerateReview(
   const { responseId, submissionToken, idempotencyKey, sessionUuid: clientSessionUuid } =
     parseResult.data;
 
+  // 5. Pre-Lookup Cryptographic Submission Token Structure & Expiry Verification
+  // Rejects malformed, mismatched responseId, and expired tokens before any database read!
+  const tokenParts = submissionToken.trim().split('.');
+  if (tokenParts.length !== 3) {
+    return buildErrorResponse(
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Cryptographic signature mismatch or malformed submission token.',
+      correlationId,
+      false,
+    );
+  }
+
+  const [tokenResponseId, tokenExpStr, tokenSigHex] = tokenParts as [string, string, string];
+  if (!tokenResponseId || !tokenExpStr || !tokenSigHex) {
+    return buildErrorResponse(
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Cryptographic signature mismatch or empty token segments.',
+      correlationId,
+      false,
+    );
+  }
+
+  // Token responseId must strictly match request body responseId
+  if (tokenResponseId !== responseId) {
+    return buildErrorResponse(
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Submission token was minted for a different survey response.',
+      correlationId,
+      false,
+    );
+  }
+
+  const tokenExp = parseInt(tokenExpStr, 10);
+  if (Number.isNaN(tokenExp) || !Number.isFinite(tokenExp)) {
+    return buildErrorResponse(
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Submission token expiry is invalid.',
+      correlationId,
+      false,
+    );
+  }
+
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  // Strictly rejects expired tokens without touching PostgreSQL!
+  if (tokenExp <= nowEpoch) {
+    return buildErrorResponse(
+      401,
+      'ERR_TOKEN_EXPIRED',
+      'The survey submission token has expired.',
+      correlationId,
+      false,
+    );
+  }
+
+  // Sanity check future expiry (max TTL 600s + 30s clock skew)
+  if (tokenExp > nowEpoch + 630) {
+    return buildErrorResponse(
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Submission token expiry exceeds permitted lifetime.',
+      correlationId,
+      false,
+    );
+  }
+
+  // Signature format check (64 hex characters)
+  if (!/^[0-9a-fA-F]{64}$/.test(tokenSigHex)) {
+    return buildErrorResponse(
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Submission token signature format is invalid.',
+      correlationId,
+      false,
+    );
+  }
+
   // Initialize service-role database client
   const supabase = getServiceRoleClient(options?.supabaseClient);
 
-  // 5. Authoritative Feedback Retrieval from PostgreSQL
+  // 6. Authoritative Feedback Retrieval from PostgreSQL
   const { data: responseData, error: responseErr } = await supabase
     .from('survey_responses')
     .select(
@@ -677,12 +875,27 @@ export async function handleGenerateReview(
     );
   }
 
+  // Anti-Enumeration Defense:
+  // If response row does not exist, execute a constant-time dummy HMAC and return HTTP 403
+  // identical to an invalid signature against an existing row!
   if (!responseData) {
+    let dummySigningSecret = '00'.repeat(32);
+    try {
+      dummySigningSecret = getSigningSecret(options?.signingSecret);
+    } catch {
+      // Use fallback dummy
+    }
+    const dummyHmac = createHmac('sha256', Buffer.from(dummySigningSecret, 'hex'))
+      .update(`dummy:${responseId}:${nowEpoch}`)
+      .digest('hex');
+    constantTimeHexEqual(tokenSigHex, dummyHmac);
+
     return buildErrorResponse(
-      404,
-      'ERR_RESPONSE_NOT_FOUND',
-      'The specified survey response was not found.',
+      403,
+      'ERR_INVALID_SUBMISSION_TOKEN',
+      'Cryptographic signature mismatch or forged submission token.',
       correlationId,
+      false,
     );
   }
 
@@ -699,7 +912,7 @@ export async function handleGenerateReview(
   const businessId = responseData.business_id;
   const sessionUuid = responseData.session_uuid;
 
-  // 6. Cryptographic Submission Token Verification
+  // 7. Cryptographic Submission Token Verification
   // Derive canonical survey version from persisted selected options
   const selectedOptions = (responseData.selected_options ?? []) as Array<{
     questionId?: string;
@@ -825,7 +1038,9 @@ export async function handleGenerateReview(
   }
 
   // 9. IP Rate Limiting (30 requests / 10 minutes)
-  const clientIp = extractClientIp(req);
+  const clientIp = extractClientIp(req, {
+    trustCloudflareProxy: options?.trustCloudflareProxy,
+  });
   if (!clientIp) {
     return buildErrorResponse(
       400,
