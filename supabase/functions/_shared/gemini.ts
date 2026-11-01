@@ -203,17 +203,34 @@ export async function generateReviewDraft(
     },
   };
 
-  // 3. Configure abort & timeout controller
+  // 3. Configure abort & timeout controller with supervisor race
   const abortController = new AbortController();
   let timedOut = false;
+
+  let supervisorRejector: ((reason?: unknown) => void) | undefined;
+  const supervisorPromise = new Promise<Response>((_, reject) => {
+    supervisorRejector = reject;
+  });
 
   const timer = setTimeout(() => {
     timedOut = true;
     abortController.abort();
+    supervisorRejector?.(
+      new GeminiClientError(
+        'ERR_TIMEOUT',
+        `Gemini API request timed out after ${timeoutMs}ms.`,
+        { status: 504, retryable: true },
+      ),
+    );
   }, timeoutMs);
 
   const abortListener = () => {
     abortController.abort();
+    supervisorRejector?.(
+      new GeminiClientError('ERR_ABORTED', 'Operation was aborted by the caller.', {
+        retryable: false,
+      }),
+    );
   };
 
   if (callerSignal) {
@@ -228,7 +245,7 @@ export async function generateReviewDraft(
 
   let response: Response;
   try {
-    response = await transportFn(endpoint, {
+    const transportPromise = transportFn(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -237,19 +254,24 @@ export async function generateReviewDraft(
       body: JSON.stringify(requestBody),
       signal: abortController.signal,
     });
+
+    response = await Promise.race([transportPromise, supervisorPromise]);
   } catch (err: unknown) {
-    if (timedOut) {
+    if (timedOut || (err instanceof GeminiClientError && err.code === 'ERR_TIMEOUT')) {
       throw new GeminiClientError(
         'ERR_TIMEOUT',
         `Gemini API request timed out after ${timeoutMs}ms.`,
         { status: 504, retryable: true, cause: err },
       );
     }
-    if (callerSignal?.aborted) {
+    if (callerSignal?.aborted || (err instanceof GeminiClientError && err.code === 'ERR_ABORTED')) {
       throw new GeminiClientError('ERR_ABORTED', 'Operation was aborted by the caller.', {
         retryable: false,
         cause: err,
       });
+    }
+    if (err instanceof GeminiClientError) {
+      throw err;
     }
     throw new GeminiClientError(
       'ERR_NETWORK_ERROR',

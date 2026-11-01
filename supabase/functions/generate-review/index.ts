@@ -697,6 +697,7 @@ export interface GenerateReviewHandlerOptions {
   jwtSecret?: string;
   expectedApiKey?: string;
   trustCloudflareProxy?: boolean;
+  signal?: AbortSignal;
 }
 
 export async function handleGenerateReview(
@@ -1372,13 +1373,19 @@ export async function handleGenerateReview(
   // 13. Dispatch Grounded Gemini Generation (Strictly Mocked Transport in Local Mode)
   let geminiResult: GenerateReviewDraftResult;
   try {
+    const rawTimeout =
+      options?.geminiTimeoutMs ??
+      (getEnv('GENERATION_TIMEOUT_MS') ? Number(getEnv('GENERATION_TIMEOUT_MS')) : 8000);
+    const geminiTimeoutMs = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 8000;
+
     geminiResult = await generateReviewDraft({
       apiKey: options?.geminiApiKey ?? getEnv('GEMINI_API_KEY') ?? 'local-mock-gemini-key',
       baseUrl: options?.geminiBaseUrl ?? getEnv('GEMINI_BASE_URL'),
-      timeoutMs: options?.geminiTimeoutMs,
+      timeoutMs: geminiTimeoutMs,
       systemInstruction: promptResult.systemInstruction,
       userPrompt: promptResult.userPrompt,
       transportFn: options?.geminiTransportFn,
+      signal: options?.signal ?? req.signal,
     });
   } catch (err: unknown) {
     // 14. Minimum Safe Quota Cleanup on Failure
@@ -1391,6 +1398,16 @@ export async function handleGenerateReview(
     }
 
     if (err instanceof GeminiClientError) {
+      if (err.code === 'ERR_ABORTED') {
+        return buildErrorResponse(
+          400,
+          'ERR_CLIENT_ABORTED',
+          'Client aborted the review generation request. Your quota was not charged.',
+          correlationId,
+          false,
+        );
+      }
+
       if (err.code === 'ERR_TIMEOUT') {
         return buildErrorResponse(
           504,
@@ -1459,6 +1476,15 @@ export async function handleGenerateReview(
   });
 
   if (commitErr) {
+    if (commitErr.message?.includes('ERR_RESERVATION_TERMINATED')) {
+      return buildErrorResponse(
+        504,
+        'ERR_GEMINI_TIMEOUT',
+        'Generation deadline exceeded and reservation was released.',
+        correlationId,
+        true,
+      );
+    }
     return buildErrorResponse(
       500,
       'ERR_COMMIT_FAILED',

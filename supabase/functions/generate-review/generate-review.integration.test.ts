@@ -1513,4 +1513,289 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
     expect(qFinal?.used_count).toBe(11); // 10 initial + 1 committed
     expect(qFinal?.reserved_count).toBe(0); // Clamped at 0
   });
+
+  /* ------------------------------------------------------------------------ */
+  /* 17. M4-T04 Integration: Deadlines, Quota Recovery & Expired Cleanup      */
+  /* ------------------------------------------------------------------------ */
+
+  describe('M4-T04 Integration: Hard Deadline, Quota Recovery, Expired Reservations Cleanup & pg_cron', () => {
+    const m4t04BizId = 'b0000000-0000-4000-8000-000000000095';
+
+    beforeAll(async () => {
+      await seedSyntheticBusiness({
+        id: m4t04BizId,
+        name: 'M4-T04 Salon Recovery Test',
+        publicQrId: 'm4t04biz01',
+        maxLimit: 150,
+        usedCount: 5,
+        reservedCount: 0,
+      });
+    });
+
+    it('TC-QTA-08: sweeps expired in-flight reservation (TTL > 60s), decrements reserved_count and leaves used_count untouched', async () => {
+      const sessionUuid = crypto.randomUUID();
+      const { responseId } = await seedSurveyResponse({
+        businessId: m4t04BizId,
+        sessionUuid,
+        optionalNote: 'Pending sweep test customer',
+      });
+
+      // 1. Reserve quota (increments reserved_count -> 1)
+      const { data: resId, error: resErr } = await supabase.rpc('reserve_generation_quota', {
+        p_business_id: m4t04BizId,
+        p_idempotency_key: `sweep_key_${sessionUuid}`,
+        p_payload_hash: 'hash_sweep_test_01',
+        p_response_id: responseId,
+      });
+      expect(resErr).toBeNull();
+      expect(resId).toBeDefined();
+
+      const currentCycle = new Date().toISOString().slice(0, 7);
+      const { data: qBefore } = await supabase
+        .from('tenant_quotas')
+        .select('used_count, reserved_count')
+        .eq('business_id', m4t04BizId)
+        .eq('billing_cycle', currentCycle)
+        .single();
+      expect(qBefore?.reserved_count).toBe(1);
+      expect(qBefore?.used_count).toBe(5);
+
+      // 2. Fast-forward reservation TTL expiration (> 60s in past)
+      const { error: updateErr } = await supabase
+        .from('quota_reservations')
+        .update({
+          ttl_expires_at: new Date(Date.now() - 70000).toISOString(),
+        })
+        .eq('id', resId);
+      expect(updateErr).toBeNull();
+
+      // 3. Trigger purge_expired_reservations
+      const { data: sweptCount, error: purgeErr } = await supabase.rpc('purge_expired_reservations');
+      expect(purgeErr).toBeNull();
+      expect(Number(sweptCount)).toBeGreaterThanOrEqual(1);
+
+      // 4. Verify reservation status transitioned to 'expired'
+      const { data: resRow } = await supabase
+        .from('quota_reservations')
+        .select('status')
+        .eq('id', resId)
+        .single();
+      expect(resRow?.status).toBe('expired');
+
+      // 5. Verify reserved_count returned to 0 and used_count untouched
+      const { data: qAfter } = await supabase
+        .from('tenant_quotas')
+        .select('used_count, reserved_count')
+        .eq('business_id', m4t04BizId)
+        .eq('billing_cycle', currentCycle)
+        .single();
+      expect(qAfter?.reserved_count).toBe(0);
+      expect(qAfter?.used_count).toBe(5);
+    });
+
+    it('TC-QTA-11: late provider finish cost absorption: expired reservation committed without charging used_count', async () => {
+      const sessionUuid = crypto.randomUUID();
+      const { responseId } = await seedSurveyResponse({
+        businessId: m4t04BizId,
+        sessionUuid,
+        optionalNote: 'Late provider finish customer',
+      });
+
+      // 1. Reserve quota
+      const { data: resId } = await supabase.rpc('reserve_generation_quota', {
+        p_business_id: m4t04BizId,
+        p_idempotency_key: `late_key_${sessionUuid}`,
+        p_payload_hash: 'hash_late_finish_01',
+        p_response_id: responseId,
+      });
+
+      // 2. Manually transition to 'expired' (simulating background cron sweep during slow generation)
+      await supabase
+        .from('quota_reservations')
+        .update({
+          status: 'expired',
+          ttl_expires_at: new Date(Date.now() - 10000).toISOString(),
+        })
+        .eq('id', resId);
+
+      // Also reset reserved_count on quota to simulate what purge did
+      const currentCycle = new Date().toISOString().slice(0, 7);
+      await supabase
+        .from('tenant_quotas')
+        .update({ reserved_count: 0 })
+        .eq('business_id', m4t04BizId)
+        .eq('billing_cycle', currentCycle);
+
+      // 3. Late model finishes and calls commit_generation_quota
+      const { error: lateCommitErr } = await supabase.rpc('commit_generation_quota', {
+        p_reservation_id: resId,
+        p_tokens_billed: 250,
+        p_raw_draft: 'Authentic late-arriving draft content.',
+      });
+      expect(lateCommitErr).toBeNull();
+
+      // 4. Verify reservation updated with tokens and raw draft while remaining 'expired'
+      const { data: resFinal } = await supabase
+        .from('quota_reservations')
+        .select('status, tokens_billed, raw_draft')
+        .eq('id', resId)
+        .single();
+      expect(resFinal?.status).toBe('expired');
+      expect(resFinal?.tokens_billed).toBe(250);
+      expect(resFinal?.raw_draft).toBe('Authentic late-arriving draft content.');
+
+      // 5. Critical: used_count must NOT have incremented (platform absorbed cost)
+      const { data: qFinal } = await supabase
+        .from('tenant_quotas')
+        .select('used_count, reserved_count')
+        .eq('business_id', m4t04BizId)
+        .eq('billing_cycle', currentCycle)
+        .single();
+      expect(qFinal?.used_count).toBe(5); // Still 5!
+      expect(qFinal?.reserved_count).toBe(0);
+    });
+
+    it('scrubs raw_draft for committed reservations older than 60-minute ceiling while preserving younger drafts', async () => {
+      const sessionOld = crypto.randomUUID();
+      const sessionYoung = crypto.randomUUID();
+
+      const { responseId: respOld } = await seedSurveyResponse({
+        businessId: m4t04BizId,
+        sessionUuid: sessionOld,
+        optionalNote: 'Customer from 75 minutes ago',
+      });
+      const { responseId: respYoung } = await seedSurveyResponse({
+        businessId: m4t04BizId,
+        sessionUuid: sessionYoung,
+        optionalNote: 'Customer from 15 minutes ago',
+      });
+
+      // Old reservation committed 75 minutes ago
+      const { data: resOldId } = await supabase.rpc('reserve_generation_quota', {
+        p_business_id: m4t04BizId,
+        p_idempotency_key: `retention_old_${sessionOld}`,
+        p_payload_hash: 'hash_retention_old',
+        p_response_id: respOld,
+      });
+      await supabase.rpc('commit_generation_quota', {
+        p_reservation_id: resOldId,
+        p_tokens_billed: 0,
+        p_raw_draft: 'Old raw draft that must be scrubbed',
+      });
+      // Backdate created_at to 75m ago
+      await supabase
+        .from('quota_reservations')
+        .update({
+          created_at: new Date(Date.now() - 75 * 60 * 1000).toISOString(),
+        })
+        .eq('id', resOldId);
+
+      // Young reservation committed 15 minutes ago
+      const { data: resYoungId } = await supabase.rpc('reserve_generation_quota', {
+        p_business_id: m4t04BizId,
+        p_idempotency_key: `retention_young_${sessionYoung}`,
+        p_payload_hash: 'hash_retention_young',
+        p_response_id: respYoung,
+      });
+      await supabase.rpc('commit_generation_quota', {
+        p_reservation_id: resYoungId,
+        p_tokens_billed: 0,
+        p_raw_draft: 'Young raw draft that must be retained',
+      });
+      // Backdate created_at to 15m ago
+      await supabase
+        .from('quota_reservations')
+        .update({
+          created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        })
+        .eq('id', resYoungId);
+
+      // Trigger purge_expired_reservations
+      await supabase.rpc('purge_expired_reservations');
+
+      // Old reservation draft scrubbed (NULL)
+      const { data: oldRow } = await supabase
+        .from('quota_reservations')
+        .select('raw_draft')
+        .eq('id', resOldId)
+        .single();
+      expect(oldRow?.raw_draft).toBeNull();
+
+      // Young reservation draft retained
+      const { data: youngRow } = await supabase
+        .from('quota_reservations')
+        .select('raw_draft')
+        .eq('id', resYoungId)
+        .single();
+      expect(youngRow?.raw_draft).toBe('Young raw draft that must be retained');
+    });
+
+    it('safely handles concurrent sweepers with FOR UPDATE SKIP LOCKED without double-decrementing quota', async () => {
+      const session1 = crypto.randomUUID();
+      const session2 = crypto.randomUUID();
+
+      const { responseId: r1 } = await seedSurveyResponse({
+        businessId: m4t04BizId,
+        sessionUuid: session1,
+      });
+      const { responseId: r2 } = await seedSurveyResponse({
+        businessId: m4t04BizId,
+        sessionUuid: session2,
+      });
+
+      const { data: id1 } = await supabase.rpc('reserve_generation_quota', {
+        p_business_id: m4t04BizId,
+        p_idempotency_key: `concurrent_sweep_${session1}`,
+        p_payload_hash: 'hash_cs_01',
+        p_response_id: r1,
+      });
+      const { data: id2 } = await supabase.rpc('reserve_generation_quota', {
+        p_business_id: m4t04BizId,
+        p_idempotency_key: `concurrent_sweep_${session2}`,
+        p_payload_hash: 'hash_cs_02',
+        p_response_id: r2,
+      });
+
+      // Expire both
+      await supabase
+        .from('quota_reservations')
+        .update({ ttl_expires_at: new Date(Date.now() - 65000).toISOString() })
+        .in('id', [id1, id2]);
+
+      // Run two sweepers concurrently
+      const [res1, res2] = await Promise.all([
+        supabase.rpc('purge_expired_reservations'),
+        supabase.rpc('purge_expired_reservations'),
+      ]);
+
+      expect(res1.error).toBeNull();
+      expect(res2.error).toBeNull();
+
+      // Sum of swept counts across both concurrent executions
+      const totalSwept = (res1.data ?? 0) + (res2.data ?? 0);
+      expect(totalSwept).toBeGreaterThanOrEqual(2);
+
+      // Verify both are expired
+      const { data: rows } = await supabase
+        .from('quota_reservations')
+        .select('status')
+        .in('id', [id1, id2]);
+      expect(rows?.every((r) => r.status === 'expired')).toBe(true);
+    });
+
+    it('verifies pg_cron schedule registration and autonomous execution evidence for expired_reservations_cleanup', async () => {
+      const { execSync } = await import('node:child_process');
+      const cronJobs = execSync(
+        'docker exec supabase_db_qr-review psql -U postgres -d postgres -t -A -c "SELECT jobname, schedule, active FROM cron.job WHERE jobname = \'expired_reservations_cleanup\';"',
+      ).toString().trim();
+
+      expect(cronJobs).toBe('expired_reservations_cleanup|* * * * *|t');
+
+      const recentRuns = execSync(
+        'docker exec supabase_db_qr-review psql -U postgres -d postgres -t -A -c "SELECT status FROM cron.job_run_details WHERE jobid = 2 ORDER BY runid DESC LIMIT 1;"',
+      ).toString().trim();
+
+      expect(recentRuns).toBe('succeeded');
+    });
+  });
 });

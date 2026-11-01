@@ -1305,5 +1305,288 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       // Hashes must be strictly equal regardless of input fact order
       expect(capturedPayloadHash1).toBe(capturedPayloadHash2);
     });
+
+    /* ------------------------------------------------------------------------ */
+    /* M4-T04: Hard Deadline, Quota Release, Abort & Expired Cleanup            */
+    /* ------------------------------------------------------------------------ */
+
+    it('enforces deadline on slow model response, releases quota and returns HTTP 504 ERR_GEMINI_TIMEOUT', async () => {
+      let releasedReservationId: string | null = null;
+      const mockSupabase = createMockSupabase();
+      const originalRpc = mockSupabase.rpc.bind(mockSupabase);
+      mockSupabase.rpc = async (fn: string, args: Record<string, unknown>) => {
+        if (fn === 'release_generation_quota') {
+          releasedReservationId = (args?.['p_reservation_id'] as string) ?? null;
+          return { data: null, error: null };
+        }
+        return originalRpc(fn, args);
+      };
+
+      // Slow transport taking 150ms when timeout is 40ms
+      const slowTransport: typeof fetch = async (_url, init) => {
+        return new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(
+              new Response(
+                JSON.stringify({
+                  candidates: [
+                    {
+                      content: {
+                        parts: [{ text: JSON.stringify({ reviewDraft: 'Too late' }) }],
+                      },
+                    },
+                  ],
+                }),
+                { status: 200, headers: { 'Content-Type': 'application/json' } },
+              ),
+            );
+          }, 150);
+
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            const err = new Error('The operation was aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        });
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_timeout_01',
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: slowTransport,
+        geminiTimeoutMs: 40,
+      });
+
+      expect(res.status).toBe(504);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_GEMINI_TIMEOUT');
+      expect(json.error.retryable).toBe(true);
+      expect(releasedReservationId).toBe('b1c2d3e4-5555-4000-8000-000000000001');
+    });
+
+    it('triggers supervisor promise race when transport hangs indefinitely (ignores signal)', async () => {
+      let releasedReservationId: string | null = null;
+      const mockSupabase = createMockSupabase();
+      const originalRpc = mockSupabase.rpc.bind(mockSupabase);
+      mockSupabase.rpc = async (fn: string, args: Record<string, unknown>) => {
+        if (fn === 'release_generation_quota') {
+          releasedReservationId = (args?.['p_reservation_id'] as string) ?? null;
+          return { data: null, error: null };
+        }
+        return originalRpc(fn, args);
+      };
+
+      // Completely hanging transport that ignores AbortSignal
+      const hangingTransport: typeof fetch = async () => {
+        return new Promise<Response>(() => {
+          // Never resolves or rejects
+        });
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_hang_01',
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: hangingTransport,
+        geminiTimeoutMs: 40,
+      });
+
+      expect(res.status).toBe(504);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_GEMINI_TIMEOUT');
+      expect(json.error.retryable).toBe(true);
+      expect(releasedReservationId).toBe('b1c2d3e4-5555-4000-8000-000000000001');
+    });
+
+    it('handles caller abort mid-generation with HTTP 400 ERR_CLIENT_ABORTED and quota release', async () => {
+      let releasedReservationId: string | null = null;
+      const mockSupabase = createMockSupabase();
+      const originalRpc = mockSupabase.rpc.bind(mockSupabase);
+      mockSupabase.rpc = async (fn: string, args: Record<string, unknown>) => {
+        if (fn === 'release_generation_quota') {
+          releasedReservationId = (args?.['p_reservation_id'] as string) ?? null;
+          return { data: null, error: null };
+        }
+        return originalRpc(fn, args);
+      };
+
+      const callerController = new AbortController();
+
+      const abortingTransport: typeof fetch = async (_url, init) => {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const err = new Error('Caller aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+          // Abort from client side after 20ms
+          setTimeout(() => {
+            callerController.abort();
+          }, 20);
+        });
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_abort_01',
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: abortingTransport,
+        geminiTimeoutMs: 1000,
+        signal: callerController.signal,
+      });
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_CLIENT_ABORTED');
+      expect(json.error.retryable).toBe(false);
+      expect(releasedReservationId).toBe('b1c2d3e4-5555-4000-8000-000000000001');
+    });
+
+    it('rejects already-aborted caller signal without dispatching transport and releases quota', async () => {
+      let transportCalled = false;
+      let releasedReservationId: string | null = null;
+      const mockSupabase = createMockSupabase();
+      const originalRpc = mockSupabase.rpc.bind(mockSupabase);
+      mockSupabase.rpc = async (fn: string, args: Record<string, unknown>) => {
+        if (fn === 'release_generation_quota') {
+          releasedReservationId = (args?.['p_reservation_id'] as string) ?? null;
+          return { data: null, error: null };
+        }
+        return originalRpc(fn, args);
+      };
+
+      const callerController = new AbortController();
+      callerController.abort(); // Pre-aborted
+
+      const dummyTransport: typeof fetch = async () => {
+        transportCalled = true;
+        return new Response('{}');
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_preaborted_01',
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: dummyTransport,
+        geminiTimeoutMs: 1000,
+        signal: callerController.signal,
+      });
+
+      expect(transportCalled).toBe(false);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_CLIENT_ABORTED');
+      expect(releasedReservationId).toBe('b1c2d3e4-5555-4000-8000-000000000001');
+    });
+
+    it('handles race condition when committing terminated reservation with HTTP 504 ERR_GEMINI_TIMEOUT', async () => {
+      const mockTransport = createMockGeminiTransport({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: JSON.stringify({ reviewDraft: 'Valid late generated draft.' }) }],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      });
+
+      const mockSupabase = createMockSupabase();
+      mockSupabase.rpc = async (fn: string) => {
+        if (fn === 'check_rate_limit') return { data: true, error: null };
+        if (fn === 'reserve_generation_quota') {
+          return { data: 'b1c2d3e4-5555-4000-8000-000000000001', error: null };
+        }
+        if (fn === 'commit_generation_quota') {
+          return {
+            data: null,
+            error: {
+              message: 'ERR_RESERVATION_TERMINATED: Cannot commit terminated reservation',
+            },
+          };
+        }
+        return { data: null, error: null };
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_term_commit_01',
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: mockTransport,
+      });
+
+      expect(res.status).toBe(504);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_GEMINI_TIMEOUT');
+      expect(json.error.message).toContain('Generation deadline exceeded and reservation was released');
+      expect(json.error.retryable).toBe(true);
+    });
   });
 });
