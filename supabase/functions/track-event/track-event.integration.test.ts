@@ -95,6 +95,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res = await handleTrackEvent(req, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
 
     expect(res.status).toBe(202);
@@ -144,6 +145,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res1 = await handleTrackEvent(req1, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(res1.status).toBe(202);
 
@@ -165,6 +167,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res2 = await handleTrackEvent(req2, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
 
     // Must return HTTP 202 Accepted
@@ -211,6 +214,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
       handleTrackEvent(makeRequest(), {
         supabaseClient: adminSupabase,
         expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+        skipRateLimit: true,
       }),
     );
 
@@ -257,6 +261,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res1 = await handleTrackEvent(req1, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(res1.status).toBe(202);
 
@@ -276,6 +281,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res2 = await handleTrackEvent(req2, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(res2.status).toBe(202);
 
@@ -295,6 +301,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res3 = await handleTrackEvent(req3, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(res3.status).toBe(202);
 
@@ -337,6 +344,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const resSalon = await handleTrackEvent(reqSalon, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(resSalon.status).toBe(202);
 
@@ -356,6 +364,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const resCafe = await handleTrackEvent(reqCafe, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(resCafe.status).toBe(202);
 
@@ -395,6 +404,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res = await handleTrackEvent(req, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
 
     expect(res.status).toBe(403);
@@ -429,6 +439,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res = await handleTrackEvent(req, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
 
     expect(res.status).toBe(403);
@@ -532,6 +543,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res = await handleTrackEvent(req, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
 
     expect(res.status).toBe(202);
@@ -584,6 +596,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res = await handleTrackEvent(req, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
 
     expect(res.status).toBe(202);
@@ -635,6 +648,7 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const res = await handleTrackEvent(req, {
       supabaseClient: adminSupabase,
       expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+      skipRateLimit: true,
     });
     expect(res.status).toBe(202);
 
@@ -648,5 +662,175 @@ describe('M3-T04: Live PostgreSQL Integration Suite (track-event)', () => {
     const names = rows!.map((r) => r.event_name);
     expect(names).toContain('EVENT_SURVEY_COMPLETED');
     expect(names).toContain('EVENT_COPY_SUCCESS');
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 12. Cross-Minute Rolling Concurrency & Advisory Lock Serialization       */
+  /* ------------------------------------------------------------------------ */
+
+  it('INT-13: cross-minute concurrency: transaction advisory lock prevents race conditions and persists exactly 1 row', async () => {
+    const sessionUuid = makeTestSessionUuid('1013');
+
+    // Fire two concurrent calls to ingest_analytics_event_atomic simultaneously
+    const [res1, res2] = await Promise.all([
+      adminSupabase.rpc('ingest_analytics_event_atomic', {
+        p_public_qr_id: SALON_QR_ID,
+        p_event_name: 'EVENT_QR_PAGE_VIEW',
+        p_session_uuid: sessionUuid,
+        p_user_agent_category: 'mobile',
+        p_window_seconds: 60,
+      }),
+      adminSupabase.rpc('ingest_analytics_event_atomic', {
+        p_public_qr_id: SALON_QR_ID,
+        p_event_name: 'EVENT_QR_PAGE_VIEW',
+        p_session_uuid: sessionUuid,
+        p_user_agent_category: 'mobile',
+        p_window_seconds: 60,
+      }),
+    ]);
+
+    expect(res1.error).toBeNull();
+    expect(res2.error).toBeNull();
+
+    const status1 = res1.data?.[0]?.status;
+    const status2 = res2.data?.[0]?.status;
+
+    // One must have inserted, and the other must have deduplicated under lock
+    const statuses = [status1, status2].sort();
+    expect(statuses).toEqual(['deduplicated', 'inserted']);
+
+    // Exactly 1 row persisted in database
+    const { data: rows } = await adminSupabase
+      .from('analytics_events')
+      .select('*')
+      .eq('session_uuid', sessionUuid)
+      .eq('event_name', 'EVENT_QR_PAGE_VIEW');
+
+    expect(rows).toHaveLength(1);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 13. RPC Least Privilege & Access Control Defense                         */
+  /* ------------------------------------------------------------------------ */
+
+  it('INT-14: direct execution of ingest_analytics_event_atomic by anon role is rejected with permission denied (42501)', async () => {
+    const sessionUuid = makeTestSessionUuid('1014');
+
+    const { data, error } = await anonSupabase.rpc('ingest_analytics_event_atomic', {
+      p_public_qr_id: SALON_QR_ID,
+      p_event_name: 'EVENT_QR_PAGE_VIEW',
+      p_session_uuid: sessionUuid,
+      p_user_agent_category: 'mobile',
+      p_window_seconds: 60,
+    });
+
+    expect(data).toBeNull();
+    expect(error).toBeDefined();
+    // PostgreSQL error 42501: insufficient_privilege / permission denied
+    expect(error!.code).toBe('42501');
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 14. Server-Owned Event Rejection at Database RPC Level                   */
+  /* ------------------------------------------------------------------------ */
+
+  it('INT-15: ingest_analytics_event_atomic RPC strictly rejects server-owned events at database level', async () => {
+    const sessionUuid = makeTestSessionUuid('1015');
+
+    // 1. Attempt EVENT_SURVEY_COMPLETED via RPC
+    const { data: dataSurvey, error: errSurvey } = await adminSupabase.rpc(
+      'ingest_analytics_event_atomic',
+      {
+        p_public_qr_id: SALON_QR_ID,
+        p_event_name: 'EVENT_SURVEY_COMPLETED',
+        p_session_uuid: sessionUuid,
+        p_user_agent_category: 'mobile',
+        p_window_seconds: 60,
+      },
+    );
+
+    expect(errSurvey).toBeNull();
+    expect(dataSurvey?.[0]?.status).toBe('forbidden_event');
+
+    // 2. Attempt EVENT_GENERATION_SUCCESS via RPC
+    const { data: dataGen, error: errGen } = await adminSupabase.rpc(
+      'ingest_analytics_event_atomic',
+      {
+        p_public_qr_id: SALON_QR_ID,
+        p_event_name: 'EVENT_GENERATION_SUCCESS',
+        p_session_uuid: sessionUuid,
+        p_user_agent_category: 'mobile',
+        p_window_seconds: 60,
+      },
+    );
+
+    expect(errGen).toBeNull();
+    expect(dataGen?.[0]?.status).toBe('forbidden_event');
+
+    // Zero rows written to table
+    const { count } = await adminSupabase
+      .from('analytics_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('session_uuid', sessionUuid);
+
+    expect(count).toBe(0);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 15. Ingress Abuse Rate Limiting Defense                                  */
+  /* ------------------------------------------------------------------------ */
+
+  it('INT-16: rate limits excessive telemetry requests from same hashed IP (429 ERR_RATE_LIMITED)', async () => {
+    const testIp = '198.51.100.99';
+    const makeIpRequest = (suffix: string) =>
+      new Request(`${LOCAL_SUPABASE_URL}/functions/v1/track-event`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: LOCAL_PUBLISHABLE_KEY,
+          'x-real-ip': testIp,
+        },
+        body: JSON.stringify({
+          publicQrId: SALON_QR_ID,
+          eventName: 'EVENT_QR_PAGE_VIEW',
+          sessionUuid: makeTestSessionUuid(suffix),
+          userAgentCategory: 'mobile',
+        }),
+      });
+
+    // Prune any existing rate limit records for this test IP hash
+    const today = new Date().toISOString().slice(0, 10);
+    const salt = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const { createHmac } = await import('node:crypto');
+    const todaySalt = createHmac('sha256', Buffer.from(salt, 'hex'))
+      .update(`qr_rate_limit_salt:${today}`)
+      .digest('hex');
+    const testIpHash = createHmac('sha256', Buffer.from(todaySalt, 'hex'))
+      .update(`qr_ip:${testIp}`)
+      .digest('hex');
+
+    await adminSupabase.from('rate_limit_events').delete().eq('key_hash', testIpHash);
+
+    // Consume the 60-request allowance by populating 60 entries
+    const rateLimitRows = Array.from({ length: 60 }, () => ({
+      key_hash: testIpHash,
+      created_at: new Date().toISOString(),
+    }));
+    await adminSupabase.from('rate_limit_events').insert(rateLimitRows);
+
+    // 61st request from same IP must be rejected with 429 ERR_RATE_LIMITED
+    const resOverLimit = await handleTrackEvent(makeIpRequest('1016'), {
+      supabaseClient: adminSupabase,
+      expectedApiKey: LOCAL_PUBLISHABLE_KEY,
+    });
+
+    expect(resOverLimit.status).toBe(429);
+    const body = await resOverLimit.json();
+    expect(body.error.code).toBe('ERR_RATE_LIMITED');
+    expect(body.error.retryable).toBe(true);
+    expect(resOverLimit.headers.get('Retry-After')).toBe('60');
+
+    // Clean up rate limit events
+    await adminSupabase.from('rate_limit_events').delete().eq('key_hash', testIpHash);
   });
 });

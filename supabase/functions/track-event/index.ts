@@ -15,12 +15,12 @@
  *   - Validates publicQrId, sessionUuid, eventName, and userAgentCategory
  *   - Permits exactly 6 client-reported events
  *   - Strictly rejects 2 server-owned events (EVENT_SURVEY_COMPLETED, EVENT_GENERATION_SUCCESS) with HTTP 403 ERR_FORBIDDEN_EVENT
- *   - Resolves trusted server-side business identity from publicQrId
+ *   - Resolves trusted server-side business identity from publicQrId via atomic database RPC
  *   - Rejects unknown QR IDs with HTTP 404 ERR_QR_NOT_FOUND
- *   - Prevents cross-tenant event attribution (business_id is authoritative DB UUID)
- *   - Computes composite SHA-256 deduplication key from (business_id, event_name, session_uuid, time_window)
- *   - Atomic deduplication: rolling 60-second duplicate window + database unique constraint collision handling
- *   - Idempotent HTTP 202 Accepted {"status": "accepted"} for both initial and deduplicated requests
+ *   - Atomic transaction-scoped advisory locking: eliminates check-then-act races across calendar-minute boundaries
+ *   - Exact rolling 60-second duplicate window + secondary database unique constraint collision handling
+ *   - IP abuse rate limiting: 60 events / 600 seconds window using salted HMAC-SHA256 IP hashes
+ *   - Idempotent HTTP 202 Accepted {"status": "accepted"} for initial inserts and {"status": "accepted", "deduplicated": true} for duplicates
  *   - Privacy-safe: zero raw IP addresses, zero customer notes, zero PII persisted
  */
 
@@ -121,18 +121,50 @@ export const TrackEventRequestSchema = z.object({
 export type TrackEventRequestInput = z.infer<typeof TrackEventRequestSchema>;
 
 // ============================================================================
-// Helper Utilities
+// Environment & Configuration Helpers
 // ============================================================================
 
-function getEnv(key: string): string | undefined {
+function loadLocalEnv(): Record<string, string> {
   try {
-    if (typeof Deno !== 'undefined' && Deno.env && typeof Deno.env.get === 'function') {
-      return Deno.env.get(key);
+    // @ts-expect-error Deno global
+    if (typeof Deno !== 'undefined' && typeof Deno.readTextFileSync === 'function') {
+      // @ts-expect-error Deno global
+      const content = Deno.readTextFileSync('supabase/functions/.env');
+      const map: Record<string, string> = {};
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const k = trimmed.slice(0, eqIdx).trim();
+          const v = trimmed.slice(eqIdx + 1).trim();
+          map[k] = v;
+        }
+      }
+      return map;
     }
   } catch {
-    // Fall back to process.env
+    // Ignored if file does not exist
   }
-  return typeof process !== 'undefined' && process.env ? process.env[key] : undefined;
+  return {};
+}
+
+const localEnvMap = loadLocalEnv();
+
+export function getEnv(key: string): string | undefined {
+  // @ts-expect-error Deno global
+  if (typeof Deno !== 'undefined' && typeof Deno.env?.get === 'function') {
+    // @ts-expect-error Deno global
+    const val = Deno.env.get(key);
+    if (val) return val;
+  }
+  const g = globalThis as unknown as {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  const procVal = g.process?.env?.[key];
+  if (procVal) return procVal;
+
+  return localEnvMap[key];
 }
 
 export function generateCorrelationId(req?: Request): string {
@@ -294,6 +326,238 @@ export function verifyJwtSignature(token: string, secret: string): boolean {
 }
 
 // ============================================================================
+// IP Extraction & Abuse Rate Limiting Helpers
+// ============================================================================
+
+export function isValidIpv4(ip: string): boolean {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return false;
+
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return false;
+    if (part.length > 1 && part.startsWith('0')) return false;
+    const num = Number(part);
+    if (num < 0 || num > 255) return false;
+  }
+  return true;
+}
+
+export function isValidIpv6(ip: string): boolean {
+  if (!ip.includes(':')) return false;
+  if (ip.includes(':::')) return false;
+  if ((ip.match(/::/g) || []).length > 1) return false;
+
+  const parts = ip.split(':');
+  if (parts.length < 3 || parts.length > 8) return false;
+
+  for (const part of parts) {
+    if (part === '') continue;
+    if (!/^[0-9a-fA-F]{1,4}$/.test(part)) return false;
+  }
+  return true;
+}
+
+export const CLOUDFLARE_IPV4_CIDRS = [
+  '173.245.48.0/20',
+  '103.21.244.0/22',
+  '103.22.200.0/22',
+  '103.31.4.0/22',
+  '141.101.64.0/18',
+  '108.162.192.0/18',
+  '190.93.240.0/20',
+  '188.114.96.0/20',
+  '197.234.240.0/22',
+  '198.41.128.0/17',
+  '162.158.0.0/15',
+  '104.16.0.0/13',
+  '104.24.0.0/14',
+  '172.64.0.0/13',
+  '131.0.72.0/22',
+];
+
+export function isIpv4InCidr(ip: string, cidr: string): boolean {
+  const [net, bitsStr] = cidr.split('/');
+  if (!net || !bitsStr) return false;
+  const bits = parseInt(bitsStr, 10);
+  if (isNaN(bits) || bits < 0 || bits > 32) return false;
+
+  const ipParts = ip.split('.').map(Number);
+  const netParts = net.split('.').map(Number);
+  if (ipParts.length !== 4 || netParts.length !== 4) return false;
+
+  const ipInt =
+    (((ipParts[0] ?? 0) << 24) |
+      ((ipParts[1] ?? 0) << 16) |
+      ((ipParts[2] ?? 0) << 8) |
+      (ipParts[3] ?? 0)) >>>
+    0;
+  const netInt =
+    (((netParts[0] ?? 0) << 24) |
+      ((netParts[1] ?? 0) << 16) |
+      ((netParts[2] ?? 0) << 8) |
+      (netParts[3] ?? 0)) >>>
+    0;
+
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (ipInt & mask) === (netInt & mask);
+}
+
+export function isCloudflareProxyIp(ip: string): boolean {
+  if (isValidIpv4(ip)) {
+    return CLOUDFLARE_IPV4_CIDRS.some((cidr) => isIpv4InCidr(ip, cidr));
+  }
+  if (isValidIpv6(ip)) {
+    const lower = ip.toLowerCase();
+    return (
+      lower.startsWith('2400:cb00:') ||
+      lower.startsWith('2606:4700:') ||
+      lower.startsWith('2803:f800:') ||
+      lower.startsWith('2405:b500:') ||
+      lower.startsWith('2405:8100:') ||
+      lower.startsWith('2a06:98c0:') ||
+      lower.startsWith('2c0f:f248:')
+    );
+  }
+  return false;
+}
+
+export function cleanAndNormalizeIp(raw: string): string | null {
+  let cleaned = raw.trim();
+  if (!cleaned) return null;
+
+  if (cleaned.includes('.') && cleaned.includes(':') && !cleaned.toLowerCase().includes('::ffff:')) {
+    const colonIdx = cleaned.lastIndexOf(':');
+    const portPart = cleaned.slice(colonIdx + 1);
+    if (/^\d+$/.test(portPart)) {
+      cleaned = cleaned.slice(0, colonIdx);
+    }
+  }
+
+  cleaned = cleaned.replace(/^\[|\]$/g, '');
+
+  const mappedPrefix = '::ffff:';
+  if (cleaned.toLowerCase().startsWith(mappedPrefix)) {
+    const ipv4Candidate = cleaned.slice(mappedPrefix.length);
+    if (isValidIpv4(ipv4Candidate)) {
+      return ipv4Candidate;
+    }
+  }
+
+  if (isValidIpv4(cleaned)) {
+    return cleaned;
+  }
+
+  if (isValidIpv6(cleaned)) {
+    return cleaned.toLowerCase();
+  }
+
+  return null;
+}
+
+export function extractClientIp(req: Request): string | null {
+  const hasIpHeaders =
+    req.headers.has('x-real-ip') ||
+    req.headers.has('x-forwarded-for') ||
+    req.headers.has('cf-connecting-ip');
+
+  const rawRealIp = req.headers.get('x-real-ip');
+  let directConnectingIp: string | null = null;
+  if (rawRealIp) {
+    directConnectingIp = cleanAndNormalizeIp(rawRealIp);
+    if (!directConnectingIp) {
+      return null;
+    }
+  }
+
+  const trustCf = getEnv('TRUST_CLOUDFLARE_PROXY') === 'true';
+  const rawCfIp = req.headers.get('cf-connecting-ip');
+  if (trustCf && rawCfIp && directConnectingIp) {
+    if (isCloudflareProxyIp(directConnectingIp)) {
+      const normalizedCf = cleanAndNormalizeIp(rawCfIp);
+      if (normalizedCf) return normalizedCf;
+      return null;
+    }
+  }
+
+  if (directConnectingIp) {
+    return directConnectingIp;
+  }
+
+  const xForwardedFor = req.headers.get('x-forwarded-for');
+  if (xForwardedFor) {
+    const parts = xForwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const candidate = parts[i];
+      if (candidate) {
+        const normalized = cleanAndNormalizeIp(candidate);
+        if (normalized) return normalized;
+      }
+    }
+    return null;
+  }
+
+  if (hasIpHeaders) {
+    return null;
+  }
+
+  return '127.0.0.1';
+}
+
+export function getRateLimitSalt(customSecret?: string): string {
+  let secret = customSecret ?? getEnv('RATE_LIMIT_SALT');
+
+  if (!secret) {
+    const supabaseUrl = getEnv('SUPABASE_URL');
+    const isLocalOrTest =
+      !supabaseUrl ||
+      supabaseUrl.includes('localhost') ||
+      supabaseUrl.includes('127.0.0.1') ||
+      supabaseUrl.includes('kong:8000') ||
+      getEnv('NODE_ENV') === 'test';
+
+    if (isLocalOrTest) {
+      secret =
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    }
+  }
+
+  if (!secret || typeof secret !== 'string') {
+    throw new Error(
+      'ERR_CRYPTO_CONFIG: RATE_LIMIT_SALT is required and must be configured in server environment',
+    );
+  }
+
+  const trimmed = secret.trim();
+  if (!/^[a-fA-F0-9]{64}$/.test(trimmed)) {
+    throw new Error(
+      'ERR_CRYPTO_CONFIG: RATE_LIMIT_SALT must be a 64-character hexadecimal string (32-byte key)',
+    );
+  }
+
+  return trimmed.toLowerCase();
+}
+
+export function deriveDailySalt(masterSecret: string, dateStr: string): string {
+  return createHmac('sha256', Buffer.from(masterSecret, 'hex'))
+    .update(`qr_rate_limit_salt:${dateStr}`)
+    .digest('hex');
+}
+
+export function computeIpHash(dailySalt: string, normalizedIp: string): string {
+  return createHmac('sha256', Buffer.from(dailySalt, 'hex'))
+    .update(`qr_ip:${normalizedIp}`)
+    .digest('hex');
+}
+
+export function isUtcMidnightOverlap(date: Date = new Date()): boolean {
+  const secondsIntoDay =
+    date.getUTCHours() * 3600 +
+    date.getUTCMinutes() * 60 +
+    date.getUTCSeconds();
+  return secondsIntoDay < 630;
+}
+
+// ============================================================================
 // Deduplication Key Generator
 // ============================================================================
 
@@ -308,7 +572,6 @@ export function computeDeduplicationKey(
   sessionUuid: string,
   timestampMs = Date.now(),
 ): string {
-  // Quantize to 60-second calendar minute window: date_trunc('minute', timestamp)
   const minuteEpoch = Math.floor(timestampMs / 60000) * 60000;
   const minuteIso = new Date(minuteEpoch).toISOString();
 
@@ -326,6 +589,9 @@ export interface TrackEventOptions {
   expectedApiKey?: string;
   jwtSecret?: string;
   bypassAuth?: boolean;
+  skipRateLimit?: boolean;
+  rateLimitSalt?: string;
+  currentTime?: Date;
 }
 
 export async function handleTrackEvent(
@@ -373,7 +639,6 @@ export async function handleTrackEvent(
 
     const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY')?.trim();
 
-    // Privileged service-role key is strictly prohibited on public endpoints
     if (
       (serviceRoleKey && apiKeyHeader === serviceRoleKey) ||
       (serviceRoleKey && bearerToken === serviceRoleKey)
@@ -479,7 +744,6 @@ export async function handleTrackEvent(
   const rawObj = rawBody as Record<string, unknown>;
 
   // 5. Server-Owned Event Restriction Check (TC-ANA-02, TC-ANA-03)
-  // Check raw string before Zod validation to provide exact 403 ERR_FORBIDDEN_EVENT error
   const rawEventName = typeof rawObj.eventName === 'string' ? rawObj.eventName.trim() : '';
   if (
     rawEventName === 'EVENT_SURVEY_COMPLETED' ||
@@ -514,12 +778,21 @@ export async function handleTrackEvent(
   if (options?.supabaseClient) {
     supabase = options.supabaseClient;
   } else {
-    const supabaseUrl = getEnv('SUPABASE_URL');
-    const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-    const anonKey = getEnv('SUPABASE_ANON_KEY');
-    const authKey = serviceRoleKey ?? anonKey;
+    const supabaseUrl = getEnv('SUPABASE_URL') || 'http://127.0.0.1:54321';
+    const isLocalOrTest =
+      (supabaseUrl &&
+        (supabaseUrl.includes('localhost') ||
+          supabaseUrl.includes('127.0.0.1') ||
+          supabaseUrl.includes('kong:8000'))) ||
+      getEnv('NODE_ENV') === 'test';
 
-    if (!supabaseUrl || !authKey) {
+    const serviceRoleKey =
+      getEnv('SUPABASE_SERVICE_ROLE_KEY') ||
+      (isLocalOrTest
+        ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU'
+        : '');
+
+    if (!supabaseUrl || !serviceRoleKey) {
       return createErrorResponse(
         500,
         'ERR_INTERNAL',
@@ -529,95 +802,96 @@ export async function handleTrackEvent(
       );
     }
 
-    supabase = createClient(supabaseUrl, authKey, {
-      auth: { persistSession: false },
+    supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
   }
 
-  // 8. Resolve Target Business by Immutable publicQrId
-  let businessId: string;
-  try {
-    const { data: business, error: bizError } = await supabase
-      .from('businesses')
-      .select('id, name, account_status, is_active')
-      .eq('public_qr_id', publicQrId)
-      .maybeSingle();
-
-    if (bizError) {
+  // 8. Client IP Extraction & Abuse Rate Limiting (60 req / 600s)
+  if (!options?.skipRateLimit) {
+    const clientIp = extractClientIp(req);
+    if (!clientIp) {
       return createErrorResponse(
-        500,
-        'ERR_INTERNAL',
-        'Database query failed while resolving business QR.',
-        correlationId,
-        true,
-      );
-    }
-
-    if (!business) {
-      return createErrorResponse(
-        404,
-        'ERR_QR_NOT_FOUND',
-        `Business with public QR ID '${publicQrId}' was not found.`,
+        400,
+        'ERR_INVALID_PAYLOAD',
+        'Unable to determine a valid client IP address for rate limit evaluation.',
         correlationId,
         false,
       );
     }
 
-    businessId = business.id;
-  } catch {
-    return createErrorResponse(
-      500,
-      'ERR_INTERNAL',
-      'Unexpected error resolving business identity.',
-      correlationId,
-      true,
-    );
-  }
-
-  // 9. Deduplication Check & Ingestion
-  try {
-    const now = Date.now();
-    const dedupKey = computeDeduplicationKey(businessId, eventName, sessionUuid, now);
-
-    // 9a. Rolling 60-Second Window Check:
-    // Protects against rapid double-taps that happen to straddle a calendar minute boundary
-    const sixtySecondsAgo = new Date(now - 60000).toISOString();
-    const { data: recentEvent, error: recentError } = await supabase
-      .from('analytics_events')
-      .select('id')
-      .eq('business_id', businessId)
-      .eq('event_name', eventName)
-      .eq('session_uuid', sessionUuid)
-      .gte('created_at', sixtySecondsAgo)
-      .limit(1)
-      .maybeSingle();
-
-    if (!recentError && recentEvent) {
-      // Event already recorded within rolling 60s window; safely acknowledge as deduplicated
-      return createSuccessResponse(correlationId, true);
+    let salt: string;
+    try {
+      salt = getRateLimitSalt(options?.rateLimitSalt);
+    } catch {
+      return createErrorResponse(
+        500,
+        'ERR_INTERNAL',
+        'Cryptographic service configuration is invalid or uninitialized.',
+        correlationId,
+        false,
+      );
     }
 
-    // 9b. Atomic Database Insertion with Deduplication Key
-    const { error: insertError } = await supabase.from('analytics_events').insert({
-      business_id: businessId,
-      event_name: eventName,
-      session_uuid: sessionUuid,
-      user_agent_category: userAgentCategory,
-      deduplication_key: dedupKey,
-    });
+    const now = options?.currentTime ?? new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const todaySalt = deriveDailySalt(salt, todayStr);
+    const primaryHash = computeIpHash(todaySalt, clientIp);
 
-    if (insertError) {
-      // 23505: unique_violation on analytics_events_dedup_uq
-      if (
-        insertError.code === '23505' ||
-        insertError.message?.includes('analytics_events_dedup_uq') ||
-        insertError.details?.includes('deduplication_key')
-      ) {
-        // Concurrency race: another request with identical deduplication key committed first
-        return createSuccessResponse(correlationId, true);
-      }
+    let prevHash: string | null = null;
+    if (isUtcMidnightOverlap(now)) {
+      const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+      const yesterdayStr = yesterday.toISOString().slice(0, 10);
+      const yesterdaySalt = deriveDailySalt(salt, yesterdayStr);
+      prevHash = computeIpHash(yesterdaySalt, clientIp);
+    }
 
-      // Real database error: return 500 ERR_INTERNAL without masking
+    const { data: isAllowed, error: rlError } = await supabase.rpc(
+      'check_exact_rate_limit',
+      {
+        p_key_hash: primaryHash,
+        p_prev_key_hash: prevHash,
+        p_max_requests: 60,
+        p_window_seconds: 600,
+      },
+    );
+
+    if (rlError) {
+      return createErrorResponse(
+        503,
+        'ERR_DATABASE_UNAVAILABLE',
+        'Rate limit evaluation service is temporarily unavailable.',
+        correlationId,
+        true,
+      );
+    }
+
+    if (isAllowed === false) {
+      return createErrorResponse(
+        429,
+        'ERR_RATE_LIMITED',
+        'Too many telemetry requests. Please wait before retrying.',
+        correlationId,
+        true,
+        { 'Retry-After': '60' },
+      );
+    }
+  }
+
+  // 9. Atomic Event Ingestion via PostgreSQL RPC
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      'ingest_analytics_event_atomic',
+      {
+        p_public_qr_id: publicQrId,
+        p_event_name: eventName,
+        p_session_uuid: sessionUuid,
+        p_user_agent_category: userAgentCategory,
+        p_window_seconds: 60,
+      },
+    );
+
+    if (rpcError) {
       return createErrorResponse(
         500,
         'ERR_INTERNAL',
@@ -627,8 +901,56 @@ export async function handleTrackEvent(
       );
     }
 
-    // Successful first-time event ingestion
-    return createSuccessResponse(correlationId, false);
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (!row || typeof row !== 'object' || !('status' in row)) {
+      return createErrorResponse(
+        500,
+        'ERR_INTERNAL',
+        'Unexpected database response recording analytics event.',
+        correlationId,
+        true,
+      );
+    }
+
+    switch (row.status) {
+      case 'inserted':
+        return createSuccessResponse(correlationId, false);
+      case 'deduplicated':
+        return createSuccessResponse(correlationId, true);
+      case 'qr_not_found':
+        return createErrorResponse(
+          404,
+          'ERR_QR_NOT_FOUND',
+          `Business with public QR ID '${publicQrId}' was not found.`,
+          correlationId,
+          false,
+        );
+      case 'forbidden_event':
+        return createErrorResponse(
+          403,
+          'ERR_FORBIDDEN_EVENT',
+          `Server-owned event '${eventName}' is forbidden from client submission. This event is emitted strictly by server services.`,
+          correlationId,
+          false,
+        );
+      case 'invalid_event':
+      case 'invalid_payload':
+        return createErrorResponse(
+          400,
+          'ERR_INVALID_PAYLOAD',
+          'Invalid request payload or event name.',
+          correlationId,
+          false,
+        );
+      default:
+        return createErrorResponse(
+          500,
+          'ERR_INTERNAL',
+          'Failed to process analytics event.',
+          correlationId,
+          true,
+        );
+    }
   } catch {
     return createErrorResponse(
       500,
@@ -644,7 +966,9 @@ export async function handleTrackEvent(
 // Deno Edge Runtime Entrypoint
 // ============================================================================
 
+// @ts-expect-error Deno global
 if (typeof Deno !== 'undefined' && 'serve' in Deno) {
+  // @ts-expect-error Deno global
   Deno.serve(async (req: Request) => {
     return handleTrackEvent(req);
   });

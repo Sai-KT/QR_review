@@ -30,7 +30,11 @@ function createMockSupabase(overrides?: {
   businessError?: unknown;
   recentEventData?: unknown;
   recentEventError?: unknown;
-  insertError?: unknown;
+  insertError?: { code?: string; message?: string; details?: string } | null;
+  rpcResult?: unknown;
+  rpcError?: unknown;
+  rateLimitAllowed?: boolean;
+  rateLimitError?: unknown;
 }) {
   const businessData =
     overrides && 'businessData' in overrides
@@ -44,6 +48,90 @@ function createMockSupabase(overrides?: {
   const insertedRows: unknown[] = [];
 
   const mockClient = {
+    rpc: vi.fn((fnName: string, args: Record<string, unknown>) => {
+      if (fnName === 'check_exact_rate_limit') {
+        if (overrides?.rateLimitError) {
+          return Promise.resolve({ data: null, error: overrides.rateLimitError });
+        }
+        return Promise.resolve({
+          data: overrides?.rateLimitAllowed !== false,
+          error: null,
+        });
+      }
+
+      if (fnName === 'ingest_analytics_event_atomic') {
+        if (overrides?.rpcError) {
+          return Promise.resolve({ data: null, error: overrides.rpcError });
+        }
+        if (businessError) {
+          return Promise.resolve({ data: null, error: businessError });
+        }
+        if (insertError) {
+          if (insertError.code === '23505') {
+            return Promise.resolve({
+              data: [
+                {
+                  status: 'deduplicated',
+                  event_id: 'e1111111-1111-4000-8000-111111111111',
+                  business_id: BIZ_UUID,
+                  deduplication_key: 'dedup_key',
+                },
+              ],
+              error: null,
+            });
+          }
+          return Promise.resolve({ data: null, error: insertError });
+        }
+        if (businessData === null) {
+          return Promise.resolve({
+            data: [
+              {
+                status: 'qr_not_found',
+                event_id: null,
+                business_id: null,
+                deduplication_key: null,
+              },
+            ],
+            error: null,
+          });
+        }
+        if (recentEventData) {
+          return Promise.resolve({
+            data: [
+              {
+                status: 'deduplicated',
+                event_id: 'existing_id',
+                business_id: BIZ_UUID,
+                deduplication_key: null,
+              },
+            ],
+            error: null,
+          });
+        }
+
+        const insertedRecord = {
+          business_id: BIZ_UUID,
+          event_name: args.p_event_name,
+          session_uuid: args.p_session_uuid,
+          user_agent_category: args.p_user_agent_category,
+        };
+        insertedRows.push(insertedRecord);
+
+        return Promise.resolve({
+          data: [
+            {
+              status: 'inserted',
+              event_id: 'e1111111-1111-4000-8000-111111111111',
+              business_id: BIZ_UUID,
+              deduplication_key: 'dedup_key',
+            },
+          ],
+          error: null,
+        });
+      }
+
+      throw new Error(`Unexpected rpc function: ${fnName}`);
+    }),
     from: vi.fn((table: string) => {
       if (table === 'businesses') {
         return {
@@ -677,6 +765,80 @@ describe('M3-T04: track-event Edge Function Unit Tests (API-PUB-05)', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.code).toBe('ERR_INTERNAL');
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 6b. Abuse Rate Limiting Suite                                            */
+  /* ------------------------------------------------------------------------ */
+
+  it('33. rejects request when rate limiter exceeds allowance with HTTP 429 ERR_RATE_LIMITED', async () => {
+    const mockSupabase = createMockSupabase({
+      rateLimitAllowed: false,
+    });
+    const req = createRequest({
+      publicQrId: VALID_QR_ID,
+      eventName: 'EVENT_QR_PAGE_VIEW',
+      sessionUuid: VALID_SESSION_UUID,
+    });
+
+    const res = await handleTrackEvent(req, {
+      supabaseClient: mockSupabase,
+      expectedApiKey: VALID_API_KEY,
+    });
+
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_RATE_LIMITED');
+    expect(body.error.retryable).toBe(true);
+    expect(res.headers.get('Retry-After')).toBe('60');
+  });
+
+  it('34. returns HTTP 503 ERR_DATABASE_UNAVAILABLE when rate limit service is unavailable', async () => {
+    const mockSupabase = createMockSupabase({
+      rateLimitError: { message: 'Database connection pool exhausted' },
+    });
+    const req = createRequest({
+      publicQrId: VALID_QR_ID,
+      eventName: 'EVENT_QR_PAGE_VIEW',
+      sessionUuid: VALID_SESSION_UUID,
+    });
+
+    const res = await handleTrackEvent(req, {
+      supabaseClient: mockSupabase,
+      expectedApiKey: VALID_API_KEY,
+    });
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_DATABASE_UNAVAILABLE');
+    expect(body.error.retryable).toBe(true);
+  });
+
+  it('35. rejects request with HTTP 400 ERR_INVALID_PAYLOAD when IP ingress header is malformed', async () => {
+    const mockSupabase = createMockSupabase();
+    const req = new Request('http://localhost:54321/functions/v1/track-event', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: VALID_API_KEY,
+        'x-real-ip': 'invalid.ip.format.999',
+      },
+      body: JSON.stringify({
+        publicQrId: VALID_QR_ID,
+        eventName: 'EVENT_QR_PAGE_VIEW',
+        sessionUuid: VALID_SESSION_UUID,
+      }),
+    });
+
+    const res = await handleTrackEvent(req, {
+      supabaseClient: mockSupabase,
+      expectedApiKey: VALID_API_KEY,
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_INVALID_PAYLOAD');
+    expect(body.error.message).toContain('Unable to determine a valid client IP');
   });
 
   /* ------------------------------------------------------------------------ */
