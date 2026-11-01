@@ -288,4 +288,135 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
     expect(screen.getByRole('button', { name: /Search on Google Maps ↗/i })).toBeInTheDocument();
     expect(screen.getByText(/Active QR token parameter: "DEMO123456"/i)).toBeInTheDocument();
   });
+
+  it('renders SCR-CUST-15 (Offline Recovery Card) when navigator is offline on initial mount', () => {
+    const originalOnLine = navigator.onLine;
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+
+    try {
+      render(<CustomerPageShell />);
+
+      expect(screen.getByRole('heading', { name: 'Connection Lost' })).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'Please check your cellular data or Wi-Fi connection and tap below to retry.',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Connection' })).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(navigator, 'onLine', { value: originalOnLine, configurable: true });
+    }
+  });
+
+  it('renders SCR-CUST-15 when fetchPublicBusiness throws ERR_NETWORK_ERROR', async () => {
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockRejectedValue(
+      new publicApi.ApiClientError(
+        'Failed to fetch',
+        0,
+        'ERR_NETWORK_ERROR',
+        undefined,
+        true,
+      ),
+    );
+
+    render(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Connection Lost' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Retry Connection' })).toBeInTheDocument();
+  });
+
+  it('prohibits query parameters like ?step=1 from bypassing business suspension (SCR-CUST-13)', async () => {
+    mockUseSearchParams.mockReturnValue([new URLSearchParams('step=1'), vi.fn()]);
+
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockRejectedValue(
+      new publicApi.ApiClientError(
+        'This business account is currently suspended.',
+        403,
+        'ERR_BUSINESS_SUSPENDED',
+        undefined,
+        false,
+        true,
+      ),
+    );
+
+    render(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Feedback Temporarily Unavailable')).toBeInTheDocument();
+    });
+
+    // Verify survey question card is NOT rendered
+    expect(screen.queryByText(/Question 1 of 3/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start 30-Sec/i)).not.toBeInTheDocument();
+  });
+
+  it('prohibits query parameters from bypassing invalid QR not found (SCR-CUST-12)', async () => {
+    mockUseSearchParams.mockReturnValue([new URLSearchParams('step=1'), vi.fn()]);
+
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockRejectedValue(
+      new publicApi.ApiClientError(
+        'The requested QR code or business was not found.',
+        404,
+        'ERR_QR_NOT_FOUND',
+      ),
+    );
+
+    render(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(screen.getByText('QR Code Not Recognized')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/Question 1 of 3/i)).not.toBeInTheDocument();
+  });
+
+  it('prohibits query parameters from entering survey in direct-only mode (SCR-CUST-14)', async () => {
+    mockUseSearchParams.mockReturnValue([new URLSearchParams('step=1'), vi.fn()]);
+
+    const directOnlyBusiness: PublicBusinessProjection = {
+      ...mockActiveBusiness,
+      isDirectGoogleOnly: true,
+      subscriptionStatus: 'past_due',
+    };
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(directOnlyBusiness);
+
+    render(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Open Google Maps to Review ↗' }),
+      ).toBeInTheDocument();
+    });
+
+    // Survey is strictly bypassed in direct-only mode
+    expect(screen.queryByText(/Question 1 of 3/i)).not.toBeInTheDocument();
+  });
+
+  it('clears previous merchant presentation when switching to another QR route', async () => {
+    const fetchSpy = vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(mockActiveBusiness);
+
+    const { rerender } = render(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Green Salon & Spa')).toBeInTheDocument();
+    });
+
+    // Change QR route parameter to unknown token
+    mockUseParams.mockReturnValue({ qrId: 'unknown999' });
+    fetchSpy.mockRejectedValueOnce(
+      new publicApi.ApiClientError('QR not found', 404, 'ERR_QR_NOT_FOUND'),
+    );
+
+    rerender(<CustomerPageShell />);
+
+    await waitFor(() => {
+      expect(screen.getByText('QR Code Not Recognized')).toBeInTheDocument();
+    });
+
+    // Old merchant name and logo are completely gone
+    expect(screen.queryByText('Green Salon & Spa')).not.toBeInTheDocument();
+    expect(screen.queryByAltText('Green Salon & Spa logo')).not.toBeInTheDocument();
+  });
 });

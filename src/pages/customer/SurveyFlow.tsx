@@ -12,6 +12,7 @@ import { validateQuestionnaire } from '../../lib/utils/survey';
 import { getClientSessionUuid, sanitizeGoogleReviewUrl, formatWhatsAppUrl } from '../../lib/utils/customer';
 import { QuestionCard } from '../../components/customer/QuestionCard';
 import { NoteEditor } from '../../components/customer/NoteEditor';
+import { OfflineConnectionBanner } from './StatusPages';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
@@ -61,8 +62,36 @@ export function SurveyFlow({
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [staleNotice, setStaleNotice] = React.useState<string | null>(null);
   const [submissionResult, setSubmissionResult] = React.useState<SubmitFeedbackSuccessResponse | null>(null);
+  const [isOffline, setIsOffline] = React.useState<boolean>(() => {
+    return typeof navigator !== 'undefined' ? !navigator.onLine : false;
+  });
 
   const isSubmittingRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+    };
+    const handleOffline = () => {
+      setIsOffline(true);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const handleRetryConnection = React.useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      setIsOffline(false);
+    } else {
+      setIsOffline(true);
+    }
+  }, []);
 
   const sessionUuid = React.useMemo(
     () => getClientSessionUuid(business.publicQrId),
@@ -251,6 +280,15 @@ export function SurveyFlow({
       return;
     }
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOffline(true);
+      setStatus('error_submission');
+      setErrorMessage(
+        'Unable to submit while offline. Your answers are safe—please reconnect and try again.',
+      );
+      return;
+    }
+
     isSubmittingRef.current = true;
     setStatus('submitting');
     setErrorMessage(null);
@@ -273,6 +311,15 @@ export function SurveyFlow({
       searchParams.set('step', 'submitted');
       setSearchParams(searchParams);
     } catch (err) {
+      const isNetworkErr =
+        (err instanceof ApiClientError && err.code === 'ERR_NETWORK_ERROR') ||
+        (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        (err instanceof Error && /network|fetch|offline/i.test(err.message));
+
+      if (isNetworkErr) {
+        setIsOffline(true);
+      }
+
       if (err instanceof ApiClientError) {
         // Detect stale question or soft-retired option
         const isStale =
@@ -294,14 +341,20 @@ export function SurveyFlow({
           );
         } else {
           setStatus('error_submission');
-          setErrorMessage(err.message);
+          setErrorMessage(
+            isNetworkErr
+              ? 'Connection lost during submission. Your answers are safely retained—please reconnect and try again.'
+              : err.message,
+          );
         }
       } else {
         setStatus('error_submission');
         setErrorMessage(
-          err instanceof Error
-            ? err.message
-            : 'A network error occurred while submitting. Please check your data connection.',
+          isNetworkErr
+            ? 'Connection lost during submission. Your answers are safely retained—please reconnect and try again.'
+            : err instanceof Error
+              ? err.message
+              : 'A network error occurred while submitting. Please check your data connection.',
         );
       }
     } finally {
@@ -544,19 +597,27 @@ export function SurveyFlow({
   // --------------------------------------------------------------------------
   if (currentStep === 'notes') {
     return (
-      <NoteEditor
-        businessName={business.name}
-        logoUrl={business.logoUrl}
-        note={note}
-        onChangeNote={setNote}
-        onSubmit={() => void handleSubmitFeedback()}
-        onBack={handleBackFromNotes}
-        isSubmitting={status === 'submitting'}
-        submissionError={status === 'error_submission' ? errorMessage : null}
-        targetGoogleUrl={business.googleReviewUrl}
-        activeTokenText={activeTokenText}
-        className={className}
-      />
+      <div className="w-full flex flex-col gap-2">
+        {isOffline && (
+          <OfflineConnectionBanner
+            cachedGoogleUrl={business.googleReviewUrl}
+            onRetry={handleRetryConnection}
+          />
+        )}
+        <NoteEditor
+          businessName={business.name}
+          logoUrl={business.logoUrl}
+          note={note}
+          onChangeNote={setNote}
+          onSubmit={() => void handleSubmitFeedback()}
+          onBack={handleBackFromNotes}
+          isSubmitting={status === 'submitting'}
+          submissionError={status === 'error_submission' ? errorMessage : null}
+          targetGoogleUrl={business.googleReviewUrl}
+          activeTokenText={activeTokenText}
+          className={className}
+        />
+      </div>
     );
   }
 
@@ -585,6 +646,13 @@ export function SurveyFlow({
 
   return (
     <div className="w-full flex flex-col gap-2">
+      {isOffline && (
+        <OfflineConnectionBanner
+          cachedGoogleUrl={business.googleReviewUrl}
+          onRetry={handleRetryConnection}
+        />
+      )}
+
       {/* Informational Stale Questionnaire Notice if applicable */}
       {staleNotice && (
         <div

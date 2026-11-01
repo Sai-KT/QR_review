@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -410,5 +410,98 @@ describe('SurveyFlow Component (M3-T06 / SCR-CUST-02..05)', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/already received for this session/i);
     });
+  });
+
+  it('displays OfflineConnectionBanner when offline event fires mid-survey while preserving state', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockQuestionsData);
+
+    renderSurveyFlow('1');
+
+    await waitFor(() => {
+      expect(screen.getByText('How was your hair service today?')).toBeInTheDocument();
+    });
+
+    // Select Q1 answer
+    await user.click(screen.getByText(/Masterful & Precise/i));
+
+    // Simulate network disconnection
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+
+    // Offline banner must appear immediately
+    await waitFor(() => {
+      expect(screen.getByText('Connection Lost')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Please check your connection\. Your current answers are safely retained\./i),
+      ).toBeInTheDocument();
+    });
+
+    // Verify option is still checked
+    expect(screen.getByRole('radio', { name: /Masterful & Precise/i })).toBeChecked();
+
+    // Advance to Q2 while offline
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+    await waitFor(() => {
+      expect(screen.getByText('How was the hospitality & team ambience?')).toBeInTheDocument();
+    });
+
+    // Simulate reconnection
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Connection Lost')).not.toBeInTheDocument();
+    });
+  });
+
+  it('handles offline submission failure safely without losing note or answers', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockQuestionsData);
+    vi.spyOn(surveyApi, 'submitFeedback').mockRejectedValue(
+      new surveyApi.ApiClientError('Network error', 0, 'ERR_NETWORK_ERROR'),
+    );
+
+    renderSurveyFlow('1');
+
+    await waitFor(() => {
+      expect(screen.getByText('How was your hair service today?')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText(/Masterful & Precise/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('How was the hospitality & team ambience?')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/Warm & Professional/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 3/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Would you recommend Luxe Studio?')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/Definitely Yes/i));
+    await user.click(screen.getByRole('button', { name: /Next, optional note/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Add an Optional Note')).toBeInTheDocument();
+    });
+
+    const noteTextarea = screen.getByRole('textbox', { name: /Personal Note/i });
+    await user.type(noteTextarea, 'Terrific stylist and experience!');
+
+    // Attempt submit while network fails
+    const submitBtn = screen.getByRole('button', { name: /Submit feedback/i });
+    await user.click(submitBtn);
+
+    // Shows connection error
+    await waitFor(() => {
+      expect(screen.getByText('Connection Lost')).toBeInTheDocument();
+    });
+
+    // Verify note is still in textarea
+    expect(noteTextarea).toHaveValue('Terrific stylist and experience!');
   });
 });
