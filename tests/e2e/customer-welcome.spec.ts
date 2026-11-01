@@ -64,8 +64,8 @@ test.describe('M3-T05: Customer Welcome Screen & Direct Google Bypass (SCR-CUST-
     await startCta.click();
     await expect(page).toHaveURL('/q/luxe000001?step=1');
     await expect(
-      page.getByRole('button', { name: /Survey Started \(3 Quick MCQs\)/i }),
-    ).toBeVisible();
+      page.getByText(/Question 1 of 3/i),
+    ).toBeVisible({ timeout: 10000 });
 
     // Direct Google bypass remains accessible independently
     await expect(googleBypassBtn).toBeVisible();

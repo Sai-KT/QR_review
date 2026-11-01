@@ -18,6 +18,7 @@
  *   - Timing side-channel immunity via timingSafeEqual over binary digest buffers
  */
 
+import { Buffer } from 'node:buffer';
 import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 
 export const SUBMISSION_TOKEN_TTL_SECONDS = 600; // 10 minutes maximum lifetime

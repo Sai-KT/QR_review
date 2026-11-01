@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CustomerPageShell } from './CustomerPageShell';
 import * as publicApi from '../../lib/api/public';
+import * as surveyApi from '../../lib/api/survey';
 import type { PublicBusinessProjection } from '../../types/domain';
 
 const mockUseParams = vi.fn();
@@ -30,6 +31,76 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
     subscriptionStatus: 'active',
     isDirectGoogleOnly: false,
     isSuspended: false,
+  };
+
+  const mockSurveyQuestions: surveyApi.SurveyQuestionsDto = {
+    categoryId: 'salon',
+    surveyVersion: 'sv_test1234567890',
+    questions: [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        displayOrder: 1,
+        questionText: 'How was your hair service today?',
+        options: [
+          {
+            id: 'aaaa1111-1111-4111-8111-111111111111',
+            optionText: 'Masterful & Precise',
+            emojiAnchor: '💇',
+            sentiment: 'positive',
+            isNeutralNa: false,
+          },
+          {
+            id: 'aaaa2222-2222-4222-8222-222222222222',
+            optionText: 'Not Applicable',
+            emojiAnchor: '⚪',
+            sentiment: 'neutral',
+            isNeutralNa: true,
+          },
+        ],
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        displayOrder: 2,
+        questionText: 'How was the hospitality & ambience?',
+        options: [
+          {
+            id: 'bbbb1111-1111-4111-8111-111111111111',
+            optionText: 'Welcoming & Relaxing',
+            emojiAnchor: '✨',
+            sentiment: 'positive',
+            isNeutralNa: false,
+          },
+          {
+            id: 'bbbb2222-2222-4222-8222-222222222222',
+            optionText: 'Not Applicable',
+            emojiAnchor: '⚪',
+            sentiment: 'neutral',
+            isNeutralNa: true,
+          },
+        ],
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        displayOrder: 3,
+        questionText: 'Would you recommend this salon?',
+        options: [
+          {
+            id: 'cccc1111-1111-4111-8111-111111111111',
+            optionText: 'Definitely Yes',
+            emojiAnchor: '🌟',
+            sentiment: 'positive',
+            isNeutralNa: false,
+          },
+          {
+            id: 'cccc2222-2222-4222-8222-222222222222',
+            optionText: 'Not Applicable',
+            emojiAnchor: '⚪',
+            sentiment: 'neutral',
+            isNeutralNa: true,
+          },
+        ],
+      },
+    ],
   };
 
   beforeEach(() => {
@@ -69,9 +140,16 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
     expect(screen.getByText(/Active QR token parameter: "DEMO123456"/i)).toBeInTheDocument();
   });
 
-  it('toggles survey start state when Start 30-Sec Review CTA is tapped', async () => {
+  it('transitions to survey flow when Start 30-Sec Review CTA is tapped', async () => {
     const user = userEvent.setup();
     vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(mockActiveBusiness);
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockSurveyQuestions);
+
+    const searchParams = new URLSearchParams();
+    const mockSetSearchParams = vi.fn().mockImplementation((newParams) => {
+      searchParams.set('step', newParams.get('step'));
+    });
+    mockUseSearchParams.mockReturnValue([searchParams, mockSetSearchParams]);
 
     render(<CustomerPageShell />);
 
@@ -82,9 +160,11 @@ describe('CustomerPageShell Component (M3-T01 / SCR-CUST-01..14)', () => {
     const startButton = screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i });
     await user.click(startButton);
 
-    expect(
-      screen.getByRole('button', { name: /Survey Started \(3 Quick MCQs\)/i }),
-    ).toBeInTheDocument();
+    expect(mockSetSearchParams).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByText(/Question 1 of 3/i)).toBeInTheDocument();
+      expect(screen.getByText('How was your hair service today?')).toBeInTheDocument();
+    });
   });
 
   it('renders SCR-CUST-14 (Direct-Only Mode) when subscription is past due', async () => {

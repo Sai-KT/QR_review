@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import { fetchPublicBusiness, ApiClientError } from '../../lib/api/public';
 import type { PublicBusinessProjection } from '../../types/domain';
 import {
@@ -14,6 +14,7 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Skeleton } from '../../components/ui/skeleton';
 import { WelcomePage } from './WelcomePage';
+import { SurveyFlow } from './SurveyFlow';
 
 export type CustomerViewState =
   'loading' | 'active' | 'direct_only' | 'suspended' | 'not_found' | 'error';
@@ -31,6 +32,7 @@ export type CustomerViewState =
  */
 export function CustomerPageShell(): React.JSX.Element | null {
   const { qrId } = useParams<{ qrId: string }>();
+  const [searchParams] = useSearchParams();
 
   const [viewState, setViewState] = React.useState<CustomerViewState>(() =>
     !qrId || !qrId.trim() ? 'not_found' : 'loading',
@@ -319,9 +321,23 @@ export function CustomerPageShell(): React.JSX.Element | null {
     );
   }
 
-  // 6. SCR-CUST-01 / SCR-CUST-09: Active Customer Welcome Experience
+  // 6. Active Customer Experience: Welcome Screen (SCR-CUST-01/09) or 3-MCQ Survey Flow (SCR-CUST-02..05)
   if (!business) {
     return null;
+  }
+
+  const step = searchParams.get('step');
+  const isSurveyActive =
+    step === '1' || step === '2' || step === '3' || step === 'notes' || step === 'submitted';
+
+  if (isSurveyActive) {
+    return (
+      <SurveyFlow
+        business={business}
+        activeTokenText={activeTokenText}
+        onExitSurvey={() => setIsStarted(false)}
+      />
+    );
   }
 
   return (
