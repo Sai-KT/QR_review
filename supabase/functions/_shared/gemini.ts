@@ -124,19 +124,9 @@ export function resolveGeminiApiKey(customKey?: string): string {
   return key;
 }
 
-/**
- * Strips markdown code fences (e.g. ```json ... ```) from raw model output.
- */
-export function stripMarkdownFences(text: string): string {
-  if (!text) return '';
-  const trimmed = text.trim();
-  const fenceRegex = /^```(?:json)?\s*([\s\S]*?)\s*```$/i;
-  const match = fenceRegex.exec(trimmed);
-  if (match && match[1] !== undefined) {
-    return match[1].trim();
-  }
-  return trimmed;
-}
+// Note: Markdown code fences are strictly forbidden by contract.
+// The provider is instructed to return application/json.
+// Markdown-fenced responses must fail closed and be rejected as malformed output.
 
 export interface GenerateReviewDraftOptions {
   systemInstruction: string;
@@ -353,40 +343,74 @@ export async function generateReviewDraft(
     );
   }
 
-  // 7. Extract Text from Candidate or Direct Payload
-  let reviewDraft: string;
-  if (typeof payload?.reviewDraft === 'string') {
-    // Direct response mode (e.g. mock direct mode from /v1beta)
-    reviewDraft = payload.reviewDraft.trim();
-  } else {
-    const rawCandidateText = candidate?.content?.parts?.[0]?.text;
-    if (!rawCandidateText || rawCandidateText.trim().length === 0) {
-      throw new GeminiClientError(
-        'ERR_EMPTY_RESPONSE',
-        'Gemini API returned an empty review draft candidate.',
-        { status: 502, retryable: true },
-      );
-    }
+  // 7. Extract Text Candidate (Zero repair of malformed structures)
+  let rawText: string | undefined;
 
-    // 8. Parse Candidate Text into Schema Object: must match {"reviewDraft": string}
-    const cleanedText = stripMarkdownFences(rawCandidateText);
-    try {
-      const parsedDraft = JSON.parse(cleanedText) as { reviewDraft?: unknown };
-      if (typeof parsedDraft?.reviewDraft === 'string') {
-        reviewDraft = parsedDraft.reviewDraft.trim();
-      } else {
-        throw new Error("Missing or invalid 'reviewDraft' string property in JSON response");
-      }
-    } catch (parseErr) {
+  if (candidate?.content?.parts?.[0]?.text !== undefined) {
+    rawText = candidate.content.parts[0].text;
+  } else if (payload && typeof payload === 'object' && 'reviewDraft' in payload) {
+    // Direct response mode (e.g. mock direct mode from /v1beta)
+    const directKeys = Object.keys(payload);
+    if (directKeys.length !== 1 || directKeys[0] !== 'reviewDraft') {
       throw new GeminiClientError(
         'ERR_MALFORMED_OUTPUT',
-        `Malformed review JSON candidate: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
-        { status: 502, retryable: false, cause: parseErr },
+        `Direct response object contains unauthorized extra fields: [${directKeys.join(', ')}]`,
+        { status: 502, retryable: false },
       );
     }
+    rawText = JSON.stringify(payload);
   }
 
-  if (!reviewDraft) {
+  if (rawText === undefined || typeof rawText !== 'string' || rawText.trim().length === 0) {
+    throw new GeminiClientError(
+      'ERR_EMPTY_RESPONSE',
+      'Gemini API returned an empty review draft candidate.',
+      { status: 502, retryable: true },
+    );
+  }
+
+  // 8. Strict Structured JSON Validation
+  // Must be strict JSON object matching {"reviewDraft": string} exactly.
+  // Markdown code fences, surrounding prose, non-JSON plain text, and unauthorized extra keys fail closed.
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(rawText);
+  } catch (parseErr) {
+    throw new GeminiClientError(
+      'ERR_MALFORMED_OUTPUT',
+      `Malformed review JSON candidate: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+      { status: 502, retryable: false, cause: parseErr },
+    );
+  }
+
+  if (typeof parsedJson !== 'object' || parsedJson === null || Array.isArray(parsedJson)) {
+    throw new GeminiClientError(
+      'ERR_MALFORMED_OUTPUT',
+      'Model output is not a JSON object.',
+      { status: 502, retryable: false },
+    );
+  }
+
+  const keys = Object.keys(parsedJson);
+  if (keys.length !== 1 || keys[0] !== 'reviewDraft') {
+    throw new GeminiClientError(
+      'ERR_MALFORMED_OUTPUT',
+      `Invalid response schema: expected object containing strictly and only 'reviewDraft', received keys: [${keys.join(', ')}]`,
+      { status: 502, retryable: false },
+    );
+  }
+
+  const draftValue = (parsedJson as { reviewDraft?: unknown }).reviewDraft;
+  if (typeof draftValue !== 'string') {
+    throw new GeminiClientError(
+      'ERR_MALFORMED_OUTPUT',
+      "Field 'reviewDraft' must be a string.",
+      { status: 502, retryable: false },
+    );
+  }
+
+  const reviewDraft = draftValue.trim();
+  if (reviewDraft.length === 0) {
     throw new GeminiClientError(
       'ERR_EMPTY_RESPONSE',
       'Review draft string is empty after parsing.',
@@ -394,7 +418,7 @@ export async function generateReviewDraft(
     );
   }
 
-  // 9. Word Count Validation (< 50 words ceiling)
+  // 9. Word Count Validation (< 50 words ceiling: maximum 49 words)
   const wordCount = countWords(reviewDraft);
   if (wordCount > MAX_ALLOWED_WORD_COUNT) {
     throw new GeminiClientError(

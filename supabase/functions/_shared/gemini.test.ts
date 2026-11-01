@@ -3,7 +3,6 @@ import {
   generateReviewDraft,
   resolveGeminiModel,
   resolveGeminiApiKey,
-  stripMarkdownFences,
   GeminiClientError,
   DEFAULT_GEMINI_MODEL,
   BACKUP_GEMINI_MODEL,
@@ -93,27 +92,6 @@ describe('Google Gemini Flash AI Client Interface (M4-T01)', () => {
     });
   });
 
-  describe('stripMarkdownFences', () => {
-    it('removes ```json ... ``` markdown code fences', () => {
-      const input = '```json\n{"reviewDraft": "Great haircut today."}\n```';
-      expect(stripMarkdownFences(input)).toBe('{"reviewDraft": "Great haircut today."}');
-    });
-
-    it('removes ``` ... ``` code fences without language specifier', () => {
-      const input = '```\n{"reviewDraft": "Fresh coffee and calm vibes."}\n```';
-      expect(stripMarkdownFences(input)).toBe('{"reviewDraft": "Fresh coffee and calm vibes."}');
-    });
-
-    it('returns unfenced plain text unchanged', () => {
-      const input = '{"reviewDraft": "Spotless and fast service."}';
-      expect(stripMarkdownFences(input)).toBe(input);
-    });
-
-    it('handles empty strings', () => {
-      expect(stripMarkdownFences('')).toBe('');
-    });
-  });
-
   /* ------------------------------------------------------------------------ */
   /* 2. Offline Mock Transport Tests (Zero External Calls / Zero Paid Spend)  */
   /* ------------------------------------------------------------------------ */
@@ -188,46 +166,11 @@ describe('Google Gemini Flash AI Client Interface (M4-T01)', () => {
       expect(result.model).toBe(DEFAULT_GEMINI_MODEL);
     });
 
-    it('parses output when wrapped in markdown code fences', async () => {
-      const mockTransport: typeof fetch = async () => {
-        const rawFenced =
-          '```json\n{\n  "reviewDraft": "Masterful haircut and clean station. Loved the trimmer fade."\n}\n```';
-
-        const responsePayload = {
-          candidates: [
-            {
-              content: {
-                parts: [{ text: rawFenced }],
-                role: 'model',
-              },
-              finishReason: 'STOP',
-            },
-          ],
-        };
-
-        return new Response(JSON.stringify(responsePayload), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      };
-
-      const result = await generateReviewDraft({
-        ...baseOptions,
-        transportFn: mockTransport,
-      });
-
-      expect(result.reviewDraft).toBe(
-        'Masterful haircut and clean station. Loved the trimmer fade.',
-      );
-      expect(result.wordCount).toBe(9);
-    });
-
-    it('supports direct reviewDraft JSON responses (mock direct mode)', async () => {
+    it('supports direct reviewDraft JSON response with strictly allowed schema', async () => {
       const mockTransport: typeof fetch = async () => {
         return new Response(
           JSON.stringify({
             reviewDraft: 'Quick and courteous coffee service. Loved the artisanal pour-over.',
-            wordCount: 10,
           }),
           {
             status: 200,
@@ -249,7 +192,287 @@ describe('Google Gemini Flash AI Client Interface (M4-T01)', () => {
   });
 
   /* ------------------------------------------------------------------------ */
-  /* 3. Output Length Constraint (< 50 words ceiling)                        */
+  /* 3. Strict Structured JSON Validation (TC-AI-07 / Zero Silent Repair)     */
+  /* ------------------------------------------------------------------------ */
+
+  describe('generateReviewDraft - Strict Structured JSON Validation', () => {
+    const baseOptions: GenerateReviewDraftOptions = {
+      systemInstruction: 'sys',
+      userPrompt: 'prompt',
+    };
+
+    it('accepts a strictly valid JSON object matching {"reviewDraft": string}', async () => {
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        reviewDraft: 'Masterful haircut and clean station. Loved the trimmer fade.',
+                      }),
+                    },
+                  ],
+                },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      const result = await generateReviewDraft({ ...baseOptions, transportFn: mockTransport });
+      expect(result.reviewDraft).toBe(
+        'Masterful haircut and clean station. Loved the trimmer fade.',
+      );
+      expect(result.wordCount).toBe(9);
+    });
+
+    it('rejects markdown-fenced JSON (```json ... ```) with ERR_MALFORMED_OUTPUT', async () => {
+      const fencedText =
+        '```json\n{\n  "reviewDraft": "Masterful haircut and clean station."\n}\n```';
+
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: fencedText }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects plain text responses without JSON structure with ERR_MALFORMED_OUTPUT', async () => {
+      const plainText =
+        'I had a fantastic haircut today at the salon. The station was clean and staff was attentive.';
+
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: plainText }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects quoted plain string responses (not an object) with ERR_MALFORMED_OUTPUT', async () => {
+      const quotedPlainString = JSON.stringify('Just a plain text review string.');
+
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: quotedPlainString }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects embedded JSON surrounded by conversational prose with ERR_MALFORMED_OUTPUT', async () => {
+      const surroundedText =
+        'Here is your review draft: {"reviewDraft": "Great haircut."} Hope that helps!';
+
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: surroundedText }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects JSON containing unauthorized extra fields with ERR_MALFORMED_OUTPUT', async () => {
+      const payloadWithExtra = JSON.stringify({
+        reviewDraft: 'Had a wonderful visit today.',
+        unauthorizedField: 'malicious-data',
+        sentiment: 'positive',
+      });
+
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: payloadWithExtra }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects direct mode response with unauthorized extra fields with ERR_MALFORMED_OUTPUT', async () => {
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            reviewDraft: 'Quick and courteous coffee service.',
+            wordCount: 5,
+            extra: 'forbidden',
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects JSON array outputs with ERR_MALFORMED_OUTPUT', async () => {
+      const arrayText = JSON.stringify([{ reviewDraft: 'Draft inside array.' }]);
+
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: arrayText }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects missing reviewDraft key (empty object) with ERR_MALFORMED_OUTPUT', async () => {
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: '{}' }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects non-string reviewDraft value with ERR_MALFORMED_OUTPUT', async () => {
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: JSON.stringify({ reviewDraft: 12345 }) }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_MALFORMED_OUTPUT',
+      });
+    });
+
+    it('rejects empty reviewDraft string with ERR_EMPTY_RESPONSE', async () => {
+      const mockTransport: typeof fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: { parts: [{ text: JSON.stringify({ reviewDraft: '   ' }) }] },
+                finishReason: 'STOP',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      await expect(
+        generateReviewDraft({ ...baseOptions, transportFn: mockTransport }),
+      ).rejects.toMatchObject({
+        code: 'ERR_EMPTY_RESPONSE',
+      });
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 4. Output Length Constraint (< 50 words ceiling)                        */
   /* ------------------------------------------------------------------------ */
 
   describe('generateReviewDraft - Word Count Ceiling Verification', () => {
@@ -325,7 +548,7 @@ describe('Google Gemini Flash AI Client Interface (M4-T01)', () => {
   });
 
   /* ------------------------------------------------------------------------ */
-  /* 4. Error Handling, Safety Filters & HTTP Status Mapping                 */
+  /* 5. Error Handling, Safety Filters & HTTP Status Mapping                 */
   /* ------------------------------------------------------------------------ */
 
   describe('generateReviewDraft - Error & Safety Handling', () => {
@@ -462,7 +685,7 @@ describe('Google Gemini Flash AI Client Interface (M4-T01)', () => {
       }
     });
 
-    it('throws ERR_EMPTY_RESPONSE when candidates array is empty or text is missing', async () => {
+    it('throws ERR_EMPTY_RESPONSE when candidates array is empty', async () => {
       const mockTransport: typeof fetch = async () => {
         return new Response(JSON.stringify({ candidates: [] }), {
           status: 200,
@@ -509,7 +732,7 @@ describe('Google Gemini Flash AI Client Interface (M4-T01)', () => {
   });
 
   /* ------------------------------------------------------------------------ */
-  /* 5. Timeout & Abort Handling Tests                                       */
+  /* 6. Timeout & Abort Handling Tests                                       */
   /* ------------------------------------------------------------------------ */
 
   describe('generateReviewDraft - Timeout & Abort Controls', () => {
