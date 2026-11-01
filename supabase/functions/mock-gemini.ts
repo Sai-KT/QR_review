@@ -96,14 +96,21 @@ export function resolveFixture(promptText: string, scenarioHeader?: string): Gro
 /**
  * Wrap review payload in official Google Gemini REST API generateContent envelope
  */
-export function buildGeminiResponseEnvelope(payload: ReviewDraftPayload) {
+export function buildGeminiResponseEnvelope(
+  payload: ReviewDraftPayload,
+  options?: { strictReviewDraftOnly?: boolean },
+) {
+  const candidateText = options?.strictReviewDraftOnly
+    ? JSON.stringify({ reviewDraft: payload.reviewDraft })
+    : JSON.stringify(payload);
+
   return {
     candidates: [
       {
         content: {
           parts: [
             {
-              text: JSON.stringify(payload),
+              text: candidateText,
             },
           ],
           role: 'model',
@@ -303,7 +310,15 @@ export function createRequestHandler() {
           res.end(JSON.stringify(fixture.payload));
         } else {
           // Standard Google Gemini REST format with candidates wrapper
-          res.end(JSON.stringify(buildGeminiResponseEnvelope(fixture.payload)));
+          // If caller specifies responseSchema in generationConfig, honor strictly and return only reviewDraft
+          const hasResponseSchema = Boolean(parsedBody?.generationConfig?.responseSchema);
+          res.end(
+            JSON.stringify(
+              buildGeminiResponseEnvelope(fixture.payload, {
+                strictReviewDraftOnly: hasResponseSchema,
+              }),
+            ),
+          );
         }
       } catch (err) {
         res.statusCode = 400;

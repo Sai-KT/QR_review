@@ -534,13 +534,16 @@ export function extractClientIp(
   req: Request,
   options?: { trustCloudflareProxy?: boolean },
 ): string | null {
+  const rawRealIp = req.headers.get('x-real-ip');
+  const rawCfIp = req.headers.get('cf-connecting-ip');
+  const rawForwardedFor = req.headers.get('x-forwarded-for');
+
   const hasIpHeaders =
-    req.headers.has('x-real-ip') ||
-    req.headers.has('x-forwarded-for') ||
-    req.headers.has('cf-connecting-ip');
+    rawRealIp !== null ||
+    rawForwardedFor !== null ||
+    rawCfIp !== null;
 
   // 1. Direct connection IP from ingress gateway (Kong overwrites X-Real-IP with $remote_addr)
-  const rawRealIp = req.headers.get('x-real-ip');
   let directConnectingIp: string | null = null;
   if (rawRealIp) {
     directConnectingIp = cleanAndNormalizeIp(rawRealIp);
@@ -552,7 +555,6 @@ export function extractClientIp(
 
   // 2. Cloudflare Ingress Verification
   const trustCf = options?.trustCloudflareProxy ?? (getEnv('TRUST_CLOUDFLARE_PROXY') === 'true');
-  const rawCfIp = req.headers.get('cf-connecting-ip');
   if (trustCf && rawCfIp && directConnectingIp) {
     if (isCloudflareProxyIp(directConnectingIp)) {
       const normalizedCf = cleanAndNormalizeIp(rawCfIp);
@@ -568,9 +570,8 @@ export function extractClientIp(
   }
 
   // 4. Secondary: X-Forwarded-For (evaluate rightmost IP added by immediate proxy)
-  const xForwardedFor = req.headers.get('x-forwarded-for');
-  if (xForwardedFor) {
-    const parts = xForwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
+  if (rawForwardedFor) {
+    const parts = rawForwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
     for (let i = parts.length - 1; i >= 0; i--) {
       const candidate = parts[i];
       if (candidate) {
@@ -1374,15 +1375,25 @@ export async function handleGenerateReview(
       .update(`${businessId}:EVENT_GENERATION_SUCCESS:${sessionUuid}:${reservationId}`)
       .digest('hex');
 
-    await supabase.from('analytics_events').insert({
+    const { error: analyticsErr } = await supabase.from('analytics_events').insert({
       business_id: businessId,
       event_name: 'EVENT_GENERATION_SUCCESS',
       session_uuid: sessionUuid,
       user_agent_category: 'mobile',
       deduplication_key: dedupKey,
     });
-  } catch {
-    // Non-blocking telemetry ingestion
+
+    if (analyticsErr) {
+      console.error(
+        `[generate-review] Non-blocking analytics insertion error for ${correlationId}:`,
+        analyticsErr.message,
+      );
+    }
+  } catch (telemetryErr) {
+    console.error(
+      `[generate-review] Non-blocking analytics telemetry exception for ${correlationId}:`,
+      telemetryErr,
+    );
   }
 
   // 17. Derive Sentiment from Survey Selections & Return Sanitized Response

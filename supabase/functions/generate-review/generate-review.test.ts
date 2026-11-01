@@ -1031,5 +1031,65 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       const json = await res.json();
       expect(json.error.code).toBe('ERR_UNAUTHORIZED');
     });
+
+    it('safely returns HTTP 200 with draft and committed quota when noncritical analytics insertion fails', async () => {
+      const mockTransport = createMockGeminiTransport({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    reviewDraft: 'Had a masterful and precise service today.',
+                  }),
+                },
+              ],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      });
+
+      const mockSupabase = createMockSupabase();
+      const originalFrom = mockSupabase.from.bind(mockSupabase);
+      mockSupabase.from = (table: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const queryBuilder = (originalFrom as any)(table);
+        if (table === 'analytics_events') {
+          return {
+            ...queryBuilder,
+            insert: async () => ({
+              error: { message: 'Database connection timeout on analytics table' },
+            }),
+          };
+        }
+        return queryBuilder;
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_attempt_telemetry_fail`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: mockTransport,
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.reviewDraft).toBe('Had a masterful and precise service today.');
+      expect(json.wordCount).toBe(7);
+    });
   });
 });
