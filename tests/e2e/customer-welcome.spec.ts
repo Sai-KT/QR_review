@@ -1,47 +1,18 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '@playwright/test';
-import { createClient } from '@supabase/supabase-js';
-import { createHmac } from 'node:crypto';
-
-const targetDbUrl = process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
-const isLocalEnvironment =
-  targetDbUrl.includes('127.0.0.1') || targetDbUrl.includes('localhost');
-
-const supabaseAdmin = createClient(
-  targetDbUrl,
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU',
-);
-
-function computeLocalTestKeyHashes(): string[] {
-  const masterSecret =
-    process.env.RATE_LIMIT_SALT ||
-    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const dailySalt = createHmac('sha256', Buffer.from(masterSecret, 'hex'))
-    .update(`qr_rate_limit_salt:${todayStr}`)
-    .digest('hex');
-
-  // Local loopback and Docker bridge network gateway IPs
-  const localIps = ['127.0.0.1', '172.18.0.1', '172.17.0.1'];
-  return localIps.map((ip) =>
-    createHmac('sha256', Buffer.from(dailySalt, 'hex'))
-      .update(`qr_ip:${ip}`)
-      .digest('hex'),
-  );
-}
+import { performSafeLocalRateLimitReset } from './test-isolation';
 
 test.describe('M3-T05: Customer Welcome Screen & Direct Google Bypass (SCR-CUST-01 & SCR-CUST-09)', () => {
   test.beforeAll(async () => {
-    // Isolated local pre-flight cleanup: only runs on local host (127.0.0.1/localhost)
-    // and targets ONLY the local test runner IP hashes to prevent cross-suite exhaustion.
-    // Does NOT run in beforeEach and never runs against staging or production.
-    if (!isLocalEnvironment) return;
-    try {
-      const hashes = computeLocalTestKeyHashes();
-      await supabaseAdmin.from('rate_limit_events').delete().in('key_hash', hashes);
-    } catch {
-      // Best-effort in offline/standalone mock environments
+    // Strictly fail-closed local test isolation:
+    // 1. Verifies exact local endpoint: http://127.0.0.1:54321 (rejecting all https, remote, and spoofed URLs)
+    // 2. Verifies canonical local demo service role key (iss=supabase-demo)
+    // 3. Targets ONLY the exact hashes for local loopback / Docker bridge runner IPs
+    // 4. Executes strictly once in beforeAll per worker, never touching other tests or remote databases
+    const resetResult = await performSafeLocalRateLimitReset();
+    if (!resetResult.success && resetResult.reason?.includes('Refusing cleanup')) {
+      // In non-local environments, cleanup is safely bypassed
+      console.warn(`[E2E Preflight] ${resetResult.reason}`);
     }
   });
 
