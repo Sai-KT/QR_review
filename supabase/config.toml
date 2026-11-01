@@ -61,3 +61,6 @@ verify_jwt = false
 [functions.track-event]
 verify_jwt = false
 
+[functions.generate-review]
+verify_jwt = false
+
