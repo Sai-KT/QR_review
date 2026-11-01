@@ -291,6 +291,14 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
               account_status: 'active',
             };
 
+      const mockCachedReservation = overrides?.cachedReservation
+        ? {
+            business_id: mockBusinessId,
+            created_at: new Date().toISOString(),
+            ...overrides.cachedReservation,
+          }
+        : null;
+
       const mockSubscriptionData =
         overrides?.subscription !== undefined
           ? overrides.subscription
@@ -298,25 +306,27 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
 
       return {
         from: (table: string) => {
-          return {
-            select: () => ({
-              eq: () => ({
-                maybeSingle: async () => {
-                  if (table === 'survey_responses') {
-                    return { data: mockResponseData, error: null };
-                  }
-                  if (table === 'businesses') {
-                    return { data: mockBusinessData, error: null };
-                  }
-                  if (table === 'subscriptions') {
-                    return { data: mockSubscriptionData, error: null };
-                  }
-                  if (table === 'quota_reservations') {
-                    return { data: overrides?.cachedReservation ?? null, error: null };
-                  }
-                  return { data: null, error: null };
-                },
-              }),
+          const createQueryBuilder = () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const builder: any = {
+              eq: () => builder,
+              order: () => builder,
+              limit: () => builder,
+              maybeSingle: async () => {
+                if (table === 'survey_responses') {
+                  return { data: mockResponseData, error: null };
+                }
+                if (table === 'businesses') {
+                  return { data: mockBusinessData, error: null };
+                }
+                if (table === 'subscriptions') {
+                  return { data: mockSubscriptionData, error: null };
+                }
+                if (table === 'quota_reservations') {
+                  return { data: mockCachedReservation, error: null };
+                }
+                return { data: null, error: null };
+              },
               in: async () => {
                 if (table === 'survey_options') {
                   return {
@@ -330,7 +340,12 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
                 }
                 return { data: [], error: null };
               },
-            }),
+            };
+            return builder;
+          };
+
+          return {
+            select: () => createQueryBuilder(),
             insert: async () => ({ error: null }),
           };
         },
@@ -1090,6 +1105,205 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       const json = await res.json();
       expect(json.reviewDraft).toBe('Had a masterful and precise service today.');
       expect(json.wordCount).toBe(7);
+    });
+
+    it('rejects with HTTP 429 ERR_MAX_ATTEMPTS_EXCEEDED when survey response dispatch ceiling is reached', async () => {
+      const mockSupabase = createMockSupabase({
+        reserveQuotaError: {
+          message: 'ERR_MAX_ATTEMPTS_EXCEEDED: maximum generation attempts reached',
+        },
+      });
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_attempt_4`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(429);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_MAX_ATTEMPTS_EXCEEDED');
+    });
+
+    it('rejects with HTTP 409 ERR_RESERVATION_TERMINATED when reservation was previously terminated', async () => {
+      const mockSupabase = createMockSupabase({
+        reserveQuotaError: {
+          message: 'ERR_RESERVATION_TERMINATED: prior reservation was released',
+        },
+      });
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_attempt_term`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_RESERVATION_TERMINATED');
+    });
+
+    it('rejects with HTTP 409 ERR_RESERVATION_EXPIRED when in-flight reservation exceeded 60s TTL', async () => {
+      const mockSupabase = createMockSupabase({
+        reserveQuotaError: {
+          message: 'ERR_RESERVATION_EXPIRED: reservation has expired',
+        },
+      });
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_attempt_expired`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_RESERVATION_EXPIRED');
+    });
+
+    it('produces deterministic identical payload hashes regardless of affirmed facts array permutation', async () => {
+      let capturedPayloadHash1: string | null = null;
+      let capturedPayloadHash2: string | null = null;
+
+      const standardSelectedOptions = [
+        { questionId: mockQuestionIds[0], optionId: 'opt1' },
+        { questionId: mockQuestionIds[1], optionId: 'opt2' },
+        { questionId: mockQuestionIds[2], optionId: 'opt3' },
+      ];
+
+      const mockSupabase1 = createMockSupabase({
+        surveyResponse: {
+          id: mockResponseId,
+          business_id: mockBusinessId,
+          category_id: 'salon',
+          session_uuid: mockSessionUuid,
+          selected_options: standardSelectedOptions,
+          affirmed_facts_snapshot: ['Fact B', 'Fact A', 'Fact C'],
+          optional_note: 'Note',
+          generation_attempts: 0,
+          is_generated: false,
+          created_at: new Date().toISOString(),
+        },
+      });
+      mockSupabase1.rpc = async (fn: string, args: Record<string, unknown>) => {
+        if (fn === 'check_rate_limit') return { data: true, error: null };
+        if (fn === 'reserve_generation_quota') {
+          capturedPayloadHash1 = (args['p_payload_hash'] as string) ?? null;
+          return { data: 'res-1', error: null };
+        }
+        return { data: null, error: null };
+      };
+
+      const mockSupabase2 = createMockSupabase({
+        surveyResponse: {
+          id: mockResponseId,
+          business_id: mockBusinessId,
+          category_id: 'salon',
+          session_uuid: mockSessionUuid,
+          selected_options: standardSelectedOptions,
+          affirmed_facts_snapshot: ['Fact C', 'Fact B', 'Fact A'], // Permuted order!
+          optional_note: 'Note',
+          generation_attempts: 0,
+          is_generated: false,
+          created_at: new Date().toISOString(),
+        },
+      });
+      mockSupabase2.rpc = async (fn: string, args: Record<string, unknown>) => {
+        if (fn === 'check_rate_limit') return { data: true, error: null };
+        if (fn === 'reserve_generation_quota') {
+          capturedPayloadHash2 = (args['p_payload_hash'] as string) ?? null;
+          return { data: 'res-2', error: null };
+        }
+        return { data: null, error: null };
+      };
+
+      const mockTransport = createMockGeminiTransport({
+        candidates: [{ content: { parts: [{ text: JSON.stringify({ reviewDraft: 'Draft' }) }] } }],
+      });
+
+      const req1 = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_perm1',
+        }),
+      });
+
+      const req2 = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: 'key_perm2',
+        }),
+      });
+
+      await handleGenerateReview(req1, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase1,
+        geminiTransportFn: mockTransport,
+      });
+
+      await handleGenerateReview(req2, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase2,
+        geminiTransportFn: mockTransport,
+      });
+
+      expect(capturedPayloadHash1).not.toBeNull();
+      expect(capturedPayloadHash2).not.toBeNull();
+      // Hashes must be strictly equal regardless of input fact order
+      expect(capturedPayloadHash1).toBe(capturedPayloadHash2);
     });
   });
 });

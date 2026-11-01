@@ -18,7 +18,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { handleGenerateReview } from './index';
+import {
+  handleGenerateReview,
+  deriveDailySalt,
+  computeIpHash,
+} from './index';
 import {
   signSubmissionToken,
   computeSurveyVersion,
@@ -53,6 +57,7 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
   const createdSessionUuids: string[] = [];
   const createdResponseIds: string[] = [];
   const createdRateLimitKeys: string[] = [];
+  const createdBusinessIds: string[] = [];
 
   beforeAll(async () => {
     process.env['SUPABASE_URL'] = LOCAL_SUPABASE_URL;
@@ -71,7 +76,7 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
         .in('response_id', createdResponseIds);
     }
 
-    // 2. Clean up survey responses
+    // 2. Clean up survey responses & analytics events
     if (createdSessionUuids.length > 0) {
       await supabase
         .from('survey_responses')
@@ -89,9 +94,87 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
       await supabase
         .from('rate_limit_buckets')
         .delete()
-        .in('bucket_key', createdRateLimitKeys);
+        .in('key_hash', createdRateLimitKeys);
+    }
+
+    // 4. Clean up synthetic businesses and associated records
+    if (createdBusinessIds.length > 0) {
+      await supabase
+        .from('quota_reservations')
+        .delete()
+        .in('business_id', createdBusinessIds);
+
+      await supabase
+        .from('survey_responses')
+        .delete()
+        .in('business_id', createdBusinessIds);
+
+      await supabase
+        .from('tenant_quotas')
+        .delete()
+        .in('business_id', createdBusinessIds);
+
+      await supabase
+        .from('subscriptions')
+        .delete()
+        .in('business_id', createdBusinessIds);
+
+      await supabase
+        .from('businesses')
+        .delete()
+        .in('id', createdBusinessIds);
     }
   });
+
+  /**
+   * Helper to seed an authentic synthetic business and quota ledger
+   */
+  async function seedSyntheticBusiness(params: {
+    id: string;
+    name: string;
+    publicQrId: string;
+    maxLimit: number;
+    usedCount: number;
+    reservedCount: number;
+  }) {
+    createdBusinessIds.push(params.id);
+
+    await supabase.from('businesses').upsert(
+      {
+        id: params.id,
+        owner_id: '00000000-0000-4000-8000-000000000002',
+        category_id: 'salon',
+        public_qr_id: params.publicQrId,
+        vanity_slug: params.publicQrId,
+        name: params.name,
+        is_active: true,
+        account_status: 'active',
+      },
+      { onConflict: 'id' },
+    );
+
+    await supabase.from('subscriptions').upsert(
+      {
+        business_id: params.id,
+        plan_tier: 'standard_recurring',
+        subscription_status: 'active',
+      },
+      { onConflict: 'business_id' },
+    );
+
+    const cycle = new Date().toISOString().slice(0, 7);
+    await supabase.from('tenant_quotas').upsert(
+      {
+        business_id: params.id,
+        billing_cycle: cycle,
+        max_limit: params.maxLimit,
+        used_count: params.usedCount,
+        reserved_count: params.reservedCount,
+        reset_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      { onConflict: 'business_id,billing_cycle' },
+    );
+  }
 
   /**
    * Helper to seed an authentic survey response row in PostgreSQL
@@ -558,7 +641,16 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
   /* ------------------------------------------------------------------------ */
 
   it('enforces IP rate limiting (30 requests / 10 min) via check_rate_limit RPC', async () => {
-    const testIp = `198.51.100.${Math.floor(Math.random() * 200) + 20}`;
+    const testIp = `198.51.100.${(Date.now() % 150) + 50}`;
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const dailySalt = deriveDailySalt(TEST_RATE_LIMIT_SALT, todayUtc);
+    const ipHash = computeIpHash(dailySalt, testIp);
+    const rateLimitKey = `gen_${ipHash}`;
+    createdRateLimitKeys.push(rateLimitKey);
+
+    // Ensure bucket is clean before test starts
+    await supabase.from('rate_limit_buckets').delete().eq('key_hash', rateLimitKey);
+
     const sessionUuid = crypto.randomUUID();
     // Seed an abstaining response to safely test IP rate limiting without consuming merchant quota
     const { responseId, submissionToken } = await seedSurveyResponse({
@@ -601,8 +693,824 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
     const body31 = await res31.json();
     expect(body31.error.code).toBe('ERR_RATE_LIMIT_EXCEEDED');
     expect(res31.headers.get('Retry-After')).toBe('60');
+  });
 
-    // Track for cleanup
-    createdRateLimitKeys.push(`gen_${testIp}`);
+  /* ======================================================================== */
+  /* M4-T03 CONCURRENCY, IDEMPOTENCY & REPLAY SECURITY SUITES                 */
+  /* ======================================================================== */
+
+  /* ------------------------------------------------------------------------ */
+  /* 10. TC-QTA-04: Atomic Quota Ceiling with 10 Concurrent Requests          */
+  /* ------------------------------------------------------------------------ */
+
+  it('TC-QTA-04: enforces atomic quota ceiling under 10 concurrent requests at 148/150 capacity', async () => {
+    const synthBizId = 'b0000000-0000-4000-8000-000000000099';
+    await seedSyntheticBusiness({
+      id: synthBizId,
+      name: 'TC-QTA-04 Synthetic Salon',
+      publicQrId: 'synthqta04',
+      maxLimit: 150,
+      usedCount: 148,
+      reservedCount: 0,
+    });
+
+    // Seed 10 distinct valid survey responses for this business
+    const seededRequests: Array<{
+      responseId: string;
+      submissionToken: string;
+      sessionUuid: string;
+      clientIp: string;
+    }> = [];
+
+    for (let i = 0; i < 10; i++) {
+      const sessionUuid = crypto.randomUUID();
+      const { responseId, submissionToken } = await seedSurveyResponse({
+        businessId: synthBizId,
+        sessionUuid,
+        optionalNote: `Haircut customer #${i + 1}`,
+      });
+      // Use distinct client IPs so IP rate limiting (30 req / 10 min) does not throttle
+      const clientIp = `103.21.200.${i + 10}`;
+      seededRequests.push({ responseId, submissionToken, sessionUuid, clientIp });
+    }
+
+    // Mock Gemini Transport returning structured draft with small delay (50ms) to ensure overlap
+    let geminiDispatches = 0;
+    const mockTransport: typeof fetch = async () => {
+      geminiDispatches++;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reviewDraft:
+                        'Had a masterful and precise service today. The station was clean and hygienic, and I received great styling advice.',
+                    }),
+                  },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    // Dispatch all 10 requests concurrently
+    const requestPromises = seededRequests.map((item, idx) => {
+      const req = makeRequest(
+        {
+          responseId: item.responseId,
+          submissionToken: item.submissionToken,
+          idempotencyKey: `${item.sessionUuid}_${idx + 1}`,
+        },
+        item.clientIp,
+      );
+      return handleGenerateReview(req, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      });
+    });
+
+    const responses = await Promise.all(requestPromises);
+
+    // Verify exactly 2 requests succeeded and exactly 8 were rejected with 429 ERR_QUOTA_EXHAUSTED
+    const successResponses = responses.filter((r) => r.status === 200);
+    const exhaustedResponses = responses.filter((r) => r.status === 429);
+
+    expect(successResponses.length).toBe(2);
+    expect(exhaustedResponses.length).toBe(8);
+
+    for (const res of exhaustedResponses) {
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_QUOTA_EXHAUSTED');
+    }
+
+    // Verify Provider Dispatches: exactly 2 mock AI calls were executed
+    expect(geminiDispatches).toBe(2);
+
+    // Verify Real PostgreSQL Database Quota Row:
+    // final used_count MUST be exactly 150, reserved_count MUST be exactly 0
+    const currentCycle = new Date().toISOString().slice(0, 7);
+    const { data: quotaRow, error: quotaErr } = await supabase
+      .from('tenant_quotas')
+      .select('max_limit, used_count, reserved_count')
+      .eq('business_id', synthBizId)
+      .eq('billing_cycle', currentCycle)
+      .single();
+
+    expect(quotaErr).toBeNull();
+    expect(quotaRow).toBeDefined();
+    expect(quotaRow.max_limit).toBe(150);
+    expect(quotaRow.used_count).toBe(150);
+    expect(quotaRow.reserved_count).toBe(0);
+
+    // Verify committed reservations count in database
+    const { data: committedRows } = await supabase
+      .from('quota_reservations')
+      .select('id, status')
+      .eq('business_id', synthBizId)
+      .eq('status', 'committed');
+
+    expect(committedRows?.length).toBe(2);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 11. TC-QTA-05: Same-Response Concurrent Replay Protection                */
+  /* ------------------------------------------------------------------------ */
+
+  it('TC-QTA-05 (Part A): handles 10 concurrent requests with the SAME idempotency key with at most 1 dispatch and safe replay', async () => {
+    const sessionUuid = crypto.randomUUID();
+    const { responseId, submissionToken } = await seedSurveyResponse({
+      businessId: realSalonBizId,
+      sessionUuid,
+      optionalNote: 'Fabulous fade cut today.',
+    });
+
+    const idempotencyKey = `${sessionUuid}_key1`;
+
+    let geminiDispatches = 0;
+    const mockTransport: typeof fetch = async () => {
+      geminiDispatches++;
+      // In-flight delay of 120ms to hold the reservation pending during concurrent arrivals
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reviewDraft:
+                        'Had a masterful and precise service today. The station was clean and hygienic, and I received great styling advice.',
+                    }),
+                  },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    // Dispatch 10 overlapping requests concurrently for the exact same response and same key
+    const promises = Array.from({ length: 10 }, (_, i) => {
+      const req = makeRequest(
+        { responseId, submissionToken, idempotencyKey },
+        `103.21.201.${i + 1}`,
+      );
+      return handleGenerateReview(req, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      });
+    });
+
+    const results = await Promise.all(promises);
+
+    // At most 1 Gemini generation was dispatched
+    expect(geminiDispatches).toBe(1);
+
+    // Exactly 1 request successfully generated (status 200)
+    // The other 9 in-flight conflicting requests received HTTP 409 ERR_CONCURRENT_REQUEST
+    const okResults = results.filter((r) => r.status === 200);
+    const conflictResults = results.filter((r) => r.status === 409);
+
+    expect(okResults.length).toBe(1);
+    expect(conflictResults.length).toBe(9);
+
+    for (const conflict of conflictResults) {
+      const body = await conflict.json();
+      expect(body.error.code).toBe('ERR_CONCURRENT_REQUEST');
+      expect(body.retryAfterMs).toBe(1500);
+      expect(conflict.headers.get('Retry-After')).toBe('2');
+    }
+
+    // Now that generation has committed, an authorized replay request retrieves the cached draft
+    const replayReq = makeRequest(
+      { responseId, submissionToken, idempotencyKey },
+      '103.21.201.50',
+    );
+    const replayRes = await handleGenerateReview(replayReq, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTransport,
+    });
+
+    expect(replayRes.status).toBe(200);
+    const replayBody = await replayRes.json();
+    expect(replayBody.reviewDraft).toContain('Had a masterful and precise service today');
+
+    // Model dispatch count remained at 1 (cached draft retrieval does not dispatch AI)
+    expect(geminiDispatches).toBe(1);
+  });
+
+  it('TC-QTA-05 (Part B): handles 10 concurrent requests with DIFFERENT idempotency keys with at most 1 dispatch and response-level protection', async () => {
+    const sessionUuid = crypto.randomUUID();
+    const { responseId, submissionToken } = await seedSurveyResponse({
+      businessId: realSalonBizId,
+      sessionUuid,
+      optionalNote: 'Great trim and friendly staff.',
+    });
+
+    let geminiDispatches = 0;
+    const mockTransport: typeof fetch = async () => {
+      geminiDispatches++;
+      // In-flight delay of 120ms to hold the reservation pending during concurrent arrivals
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reviewDraft:
+                        'Had a masterful and precise service today. The station was clean and hygienic, and I received great styling advice.',
+                    }),
+                  },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    // Dispatch 10 overlapping requests concurrently with DIFFERENT attempt keys
+    const promises = Array.from({ length: 10 }, (_, i) => {
+      const req = makeRequest(
+        { responseId, submissionToken, idempotencyKey: `${sessionUuid}_attempt_${i + 1}` },
+        `103.21.202.${i + 1}`,
+      );
+      return handleGenerateReview(req, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      });
+    });
+
+    const results = await Promise.all(promises);
+
+    // At most 1 Gemini generation was dispatched
+    expect(geminiDispatches).toBe(1);
+
+    const okResults = results.filter((r) => r.status === 200);
+    const conflictResults = results.filter((r) => r.status === 409);
+
+    expect(okResults.length).toBe(1);
+    expect(conflictResults.length).toBe(9);
+
+    for (const conflict of conflictResults) {
+      const body = await conflict.json();
+      expect(body.error.code).toBe('ERR_CONCURRENT_REQUEST');
+      expect(body.retryAfterMs).toBe(1500);
+    }
+
+    // After commit, replay with a brand new attempt key recovers the cached draft without new quota charge or Gemini call
+    const newAttemptKeyReq = makeRequest(
+      { responseId, submissionToken, idempotencyKey: `${sessionUuid}_attempt_brand_new` },
+      '103.21.202.99',
+    );
+    const newAttemptRes = await handleGenerateReview(newAttemptKeyReq, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTransport,
+    });
+
+    expect(newAttemptRes.status).toBe(200);
+    const newAttemptBody = await newAttemptRes.json();
+    expect(newAttemptBody.reviewDraft).toContain('Had a masterful and precise service today');
+    expect(geminiDispatches).toBe(1);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 12. TC-QTA-06: Payload Hash Integrity & Conflicting Idempotency Keys      */
+  /* ------------------------------------------------------------------------ */
+
+  it('TC-QTA-06: rejects conflicting payloads and cross-tenant key reuse with HTTP 409 ERR_IDEMPOTENCY_MISMATCH', async () => {
+    const sessionUuid1 = crypto.randomUUID();
+    const { responseId: resp1, submissionToken: token1 } = await seedSurveyResponse({
+      businessId: realSalonBizId,
+      sessionUuid: sessionUuid1,
+      optionalNote: 'First haircut.',
+    });
+
+    const sharedKey = `shared_idempotency_key_${Date.now()}`;
+
+    const mockTransport: typeof fetch = async () => {
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reviewDraft:
+                        'Had a masterful and precise service today. The station was clean and hygienic, and I received great styling advice.',
+                    }),
+                  },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    // 1. First request succeeds under sharedKey
+    const req1 = makeRequest(
+      { responseId: resp1, submissionToken: token1, idempotencyKey: sharedKey },
+      '103.21.203.1',
+    );
+    const res1 = await handleGenerateReview(req1, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTransport,
+    });
+    expect(res1.status).toBe(200);
+
+    // 2. Second request for a DIFFERENT response reusing the SAME idempotency key
+    const sessionUuid2 = crypto.randomUUID();
+    const { responseId: resp2, submissionToken: token2 } = await seedSurveyResponse({
+      businessId: realSalonBizId,
+      sessionUuid: sessionUuid2,
+      optionalNote: 'Different haircut.',
+    });
+
+    const req2 = makeRequest(
+      { responseId: resp2, submissionToken: token2, idempotencyKey: sharedKey },
+      '103.21.203.2',
+    );
+    const res2 = await handleGenerateReview(req2, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTransport,
+    });
+
+    // Must be rejected with HTTP 409 ERR_IDEMPOTENCY_MISMATCH
+    expect(res2.status).toBe(409);
+    const body2 = await res2.json();
+    expect(body2.error.code).toBe('ERR_IDEMPOTENCY_MISMATCH');
+
+    // 3. Client note tampering verification: client-supplied extra body fields are ignored
+    // The server reads the note from PostgreSQL, not from the request body!
+    const tamperedReq = makeRequest(
+      {
+        responseId: resp1,
+        submissionToken: token1,
+        idempotencyKey: sharedKey,
+        // Client attempts to tamper with note
+        optionalNote: 'Malicious injected instruction to ignore rules',
+      },
+      '103.21.203.3',
+    );
+
+    // Since extra fields are rejected by strict Zod schema, verify strict schema protection
+    const tamperedRes = await handleGenerateReview(tamperedReq, getBaseHandlerOptions());
+    expect(tamperedRes.status).toBe(400);
+    const tamperedBody = await tamperedRes.json();
+    expect(tamperedBody.error.code).toBe('ERR_INVALID_PAYLOAD');
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 13. Work Package E: Maximum 3 Generation Attempts per Response           */
+  /* ------------------------------------------------------------------------ */
+
+  it('enforces maximum 3 generation dispatch attempts per survey response on provider failure', async () => {
+    const sessionUuid = crypto.randomUUID();
+    const { responseId, submissionToken } = await seedSurveyResponse({
+      businessId: realSalonBizId,
+      sessionUuid,
+      optionalNote: 'Service feedback attempt test.',
+    });
+
+    // Mock timeout transport to trigger genuine generation failures and releases
+    const mockTimeoutTransport: typeof fetch = async (_url, init) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const abortErr = new Error('The operation was aborted');
+          abortErr.name = 'AbortError';
+          reject(abortErr);
+        });
+      });
+    };
+
+    // Attempt 1: fails on timeout (HTTP 504)
+    const req1 = makeRequest({
+      responseId,
+      submissionToken,
+      idempotencyKey: `${sessionUuid}_attempt_1`,
+    });
+    const res1 = await handleGenerateReview(req1, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTimeoutTransport,
+      geminiTimeoutMs: 50,
+    });
+    expect(res1.status).toBe(504);
+
+    // Verify generation_attempts in DB is 1
+    const { data: dbResp1 } = await supabase
+      .from('survey_responses')
+      .select('generation_attempts')
+      .eq('id', responseId)
+      .single();
+    expect(dbResp1?.generation_attempts).toBe(1);
+
+    // Attempt 2: fails on timeout (HTTP 504)
+    const req2 = makeRequest({
+      responseId,
+      submissionToken,
+      idempotencyKey: `${sessionUuid}_attempt_2`,
+    });
+    const res2 = await handleGenerateReview(req2, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTimeoutTransport,
+      geminiTimeoutMs: 50,
+    });
+    expect(res2.status).toBe(504);
+
+    const { data: dbResp2 } = await supabase
+      .from('survey_responses')
+      .select('generation_attempts')
+      .eq('id', responseId)
+      .single();
+    expect(dbResp2?.generation_attempts).toBe(2);
+
+    // Attempt 3: fails on timeout (HTTP 504)
+    const req3 = makeRequest({
+      responseId,
+      submissionToken,
+      idempotencyKey: `${sessionUuid}_attempt_3`,
+    });
+    const res3 = await handleGenerateReview(req3, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTimeoutTransport,
+      geminiTimeoutMs: 50,
+    });
+    expect(res3.status).toBe(504);
+
+    const { data: dbResp3 } = await supabase
+      .from('survey_responses')
+      .select('generation_attempts')
+      .eq('id', responseId)
+      .single();
+    expect(dbResp3?.generation_attempts).toBe(3);
+
+    // Attempt 4: MUST be rejected with HTTP 429 ERR_MAX_ATTEMPTS_EXCEEDED
+    const req4 = makeRequest({
+      responseId,
+      submissionToken,
+      idempotencyKey: `${sessionUuid}_attempt_4`,
+    });
+    const res4 = await handleGenerateReview(req4, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTimeoutTransport,
+      geminiTimeoutMs: 50,
+    });
+
+    expect(res4.status).toBe(429);
+    const body4 = await res4.json();
+    expect(body4.error.code).toBe('ERR_MAX_ATTEMPTS_EXCEEDED');
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 14. Work Package F: Option B Draft Recovery & Token Expiry Security      */
+  /* ------------------------------------------------------------------------ */
+
+  it('enforces Recovery Authorization A: authentic token required for draft recovery', async () => {
+    const sessionUuid = crypto.randomUUID();
+    const { responseId, submissionToken } = await seedSurveyResponse({
+      businessId: realSalonBizId,
+      sessionUuid,
+      optionalNote: 'Excellent styling advice and clean setup.',
+    });
+
+    let geminiDispatches = 0;
+    const mockTransport: typeof fetch = async () => {
+      geminiDispatches++;
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reviewDraft:
+                        'Had a masterful and precise service today. The station was clean and hygienic, and I received great styling advice.',
+                    }),
+                  },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    // 1. Initial successful generation commits draft
+    const initReq = makeRequest({
+      responseId,
+      submissionToken,
+      idempotencyKey: `${sessionUuid}_init`,
+    });
+    const initRes = await handleGenerateReview(initReq, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTransport,
+    });
+    expect(initRes.status).toBe(200);
+    expect(geminiDispatches).toBe(1);
+
+    // 2. Legitimate replay with valid token recovers draft (HTTP 200)
+    const validReplay = makeRequest({
+      responseId,
+      submissionToken,
+      idempotencyKey: `${sessionUuid}_replay`,
+    });
+    const validReplayRes = await handleGenerateReview(validReplay, {
+      ...getBaseHandlerOptions(),
+      geminiTransportFn: mockTransport,
+    });
+    expect(validReplayRes.status).toBe(200);
+    const validJson = await validReplayRes.json();
+    expect(validJson.reviewDraft).toContain('Had a masterful and precise service today');
+    expect(geminiDispatches).toBe(1); // Zero additional dispatches
+
+    // 3. Forged token replay MUST be rejected with HTTP 403
+    const forgedToken = `${responseId}.${Math.floor(Date.now() / 1000) + 300}.deadbeef00000000000000000000000000000000000000000000000000000000`;
+    const forgedReplay = makeRequest({
+      responseId,
+      submissionToken: forgedToken,
+      idempotencyKey: `${sessionUuid}_replay2`,
+    });
+    const forgedRes = await handleGenerateReview(forgedReplay, getBaseHandlerOptions());
+    expect(forgedRes.status).toBe(403);
+    const forgedJson = await forgedRes.json();
+    expect(forgedJson.error.code).toBe('ERR_INVALID_SUBMISSION_TOKEN');
+
+    // 4. Expired token replay MUST be rejected with HTTP 401 ERR_TOKEN_EXPIRED
+    const surveyVersion = computeSurveyVersion([realQ1, realQ2, realQ3]);
+    const expiredToken = signSubmissionToken({
+      responseId,
+      businessId: realSalonBizId,
+      sessionUuid,
+      surveyVersion,
+      exp: Math.floor(Date.now() / 1000) - 50,
+      secret: TEST_SIGNING_SECRET,
+    });
+    const expiredReplay = makeRequest({
+      responseId,
+      submissionToken: expiredToken,
+      idempotencyKey: `${sessionUuid}_replay3`,
+    });
+    const expiredRes = await handleGenerateReview(expiredReplay, getBaseHandlerOptions());
+    expect(expiredRes.status).toBe(401);
+    const expiredJson = await expiredRes.json();
+    expect(expiredJson.error.code).toBe('ERR_TOKEN_EXPIRED');
+
+    // 5. Cross-response token substitution MUST be rejected with HTTP 403
+    const otherResponseId = crypto.randomUUID();
+    const crossResponseReplay = makeRequest({
+      responseId: otherResponseId,
+      submissionToken, // minted for original responseId, not otherResponseId
+      idempotencyKey: `${sessionUuid}_replay4`,
+    });
+    const crossRes = await handleGenerateReview(crossResponseReplay, getBaseHandlerOptions());
+    expect(crossRes.status).toBe(403);
+    const crossJson = await crossRes.json();
+    expect(crossJson.error.code).toBe('ERR_INVALID_SUBMISSION_TOKEN');
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 15. Work Package G: Cross-Tenant Quota & Concurrency Isolation           */
+  /* ------------------------------------------------------------------------ */
+
+  it('TC-QTA-07: isolates quotas across tenants under concurrent requests', async () => {
+    const bizA = 'b0000000-0000-4000-8000-000000000091';
+    const bizB = 'b0000000-0000-4000-8000-000000000092';
+
+    // Business A: exhausted quota (150/150)
+    await seedSyntheticBusiness({
+      id: bizA,
+      name: 'Exhausted Salon A',
+      publicQrId: 'synthbiza',
+      maxLimit: 150,
+      usedCount: 150,
+      reservedCount: 0,
+    });
+
+    // Business B: fresh quota (0/150)
+    await seedSyntheticBusiness({
+      id: bizB,
+      name: 'Active Salon B',
+      publicQrId: 'synthbizb',
+      maxLimit: 150,
+      usedCount: 0,
+      reservedCount: 0,
+    });
+
+    const sessionA = crypto.randomUUID();
+    const { responseId: respA, submissionToken: tokenA } = await seedSurveyResponse({
+      businessId: bizA,
+      sessionUuid: sessionA,
+      optionalNote: 'Customer at Biz A',
+    });
+
+    const sessionB = crypto.randomUUID();
+    const { responseId: respB, submissionToken: tokenB } = await seedSurveyResponse({
+      businessId: bizB,
+      sessionUuid: sessionB,
+      optionalNote: 'Customer at Biz B',
+    });
+
+    const mockTransport: typeof fetch = async () => {
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reviewDraft:
+                        'Had a masterful and precise service today. The station was clean and hygienic.',
+                    }),
+                  },
+                ],
+              },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    // Concurrently dispatch requests for Biz A and Biz B
+    const reqA = makeRequest(
+      { responseId: respA, submissionToken: tokenA, idempotencyKey: `${sessionA}_1` },
+      '103.21.204.1',
+    );
+    const reqB = makeRequest(
+      { responseId: respB, submissionToken: tokenB, idempotencyKey: `${sessionB}_1` },
+      '103.21.204.2',
+    );
+
+    const [resA, resB] = await Promise.all([
+      handleGenerateReview(reqA, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      }),
+      handleGenerateReview(reqB, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      }),
+    ]);
+
+    // Biz A must be rejected due to its own exhausted quota
+    expect(resA.status).toBe(429);
+    const bodyA = await resA.json();
+    expect(bodyA.error.code).toBe('ERR_QUOTA_EXHAUSTED');
+
+    // Biz B must succeed completely
+    expect(resB.status).toBe(200);
+    const bodyB = await resB.json();
+    expect(bodyB.reviewDraft).toContain('Had a masterful and precise service today');
+
+    // Verify PostgreSQL: Biz B used_count incremented to 1; Biz A remained 150
+    const currentCycle = new Date().toISOString().slice(0, 7);
+    const { data: quotaB } = await supabase
+      .from('tenant_quotas')
+      .select('used_count, reserved_count')
+      .eq('business_id', bizB)
+      .eq('billing_cycle', currentCycle)
+      .single();
+
+    expect(quotaB?.used_count).toBe(1);
+    expect(quotaB?.reserved_count).toBe(0);
+
+    const { data: quotaA } = await supabase
+      .from('tenant_quotas')
+      .select('used_count, reserved_count')
+      .eq('business_id', bizA)
+      .eq('billing_cycle', currentCycle)
+      .single();
+
+    expect(quotaA?.used_count).toBe(150);
+    expect(quotaA?.reserved_count).toBe(0);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 16. Work Package D: Direct Quota RPC State Machine Transitions           */
+  /* ------------------------------------------------------------------------ */
+
+  it('verifies atomic quota stored procedure state machine transitions and underflow guards', async () => {
+    const synthBizId = 'b0000000-0000-4000-8000-000000000095';
+    await seedSyntheticBusiness({
+      id: synthBizId,
+      name: 'RPC State Machine Salon',
+      publicQrId: 'synthrpc95',
+      maxLimit: 150,
+      usedCount: 10,
+      reservedCount: 0,
+    });
+
+    const sessionUuid = crypto.randomUUID();
+    const { responseId } = await seedSurveyResponse({
+      businessId: synthBizId,
+      sessionUuid,
+    });
+
+    // 1. Reserve quota
+    const { data: resId, error: resErr } = await supabase.rpc('reserve_generation_quota', {
+      p_business_id: synthBizId,
+      p_idempotency_key: `rpc_key_${sessionUuid}`,
+      p_payload_hash: 'hash_rpc_123',
+      p_response_id: responseId,
+    });
+
+    expect(resErr).toBeNull();
+    expect(resId).toBeDefined();
+
+    // 2. Commit quota
+    const { error: commitErr1 } = await supabase.rpc('commit_generation_quota', {
+      p_reservation_id: resId,
+      p_tokens_billed: 0,
+      p_raw_draft: 'Direct RPC draft content.',
+    });
+    expect(commitErr1).toBeNull();
+
+    // 3. Repeated commit call is an idempotent NO-OP
+    const { error: commitErr2 } = await supabase.rpc('commit_generation_quota', {
+      p_reservation_id: resId,
+      p_tokens_billed: 0,
+      p_raw_draft: 'Direct RPC draft content.',
+    });
+    expect(commitErr2).toBeNull();
+
+    // 4. Releasing an already committed reservation MUST throw ERR_CANNOT_RELEASE_COMMITTED
+    const { error: releaseCommittedErr } = await supabase.rpc('release_generation_quota', {
+      p_reservation_id: resId,
+    });
+    expect(releaseCommittedErr).toBeDefined();
+    expect(releaseCommittedErr?.message).toContain('ERR_CANNOT_RELEASE_COMMITTED');
+
+    // 5. Test release flow on fresh reservation
+    const sessionUuid2 = crypto.randomUUID();
+    const { responseId: resp2 } = await seedSurveyResponse({
+      businessId: synthBizId,
+      sessionUuid: sessionUuid2,
+    });
+
+    const { data: resId2 } = await supabase.rpc('reserve_generation_quota', {
+      p_business_id: synthBizId,
+      p_idempotency_key: `rpc_key_rel_${sessionUuid2}`,
+      p_payload_hash: 'hash_rpc_rel_456',
+      p_response_id: resp2,
+    });
+
+    // Release reservation
+    const { error: releaseErr1 } = await supabase.rpc('release_generation_quota', {
+      p_reservation_id: resId2,
+    });
+    expect(releaseErr1).toBeNull();
+
+    // Repeated release call is an idempotent NO-OP
+    const { error: releaseErr2 } = await supabase.rpc('release_generation_quota', {
+      p_reservation_id: resId2,
+    });
+    expect(releaseErr2).toBeNull();
+
+    // Committing an already released reservation MUST throw ERR_RESERVATION_TERMINATED
+    const { error: commitReleasedErr } = await supabase.rpc('commit_generation_quota', {
+      p_reservation_id: resId2,
+      p_tokens_billed: 0,
+      p_raw_draft: 'Should fail',
+    });
+    expect(commitReleasedErr).toBeDefined();
+    expect(commitReleasedErr?.message).toContain('ERR_RESERVATION_TERMINATED');
+
+    // 6. Verify underflow guard: reserved_count is never negative
+    const currentCycle = new Date().toISOString().slice(0, 7);
+    const { data: qFinal } = await supabase
+      .from('tenant_quotas')
+      .select('used_count, reserved_count')
+      .eq('business_id', synthBizId)
+      .eq('billing_cycle', currentCycle)
+      .single();
+
+    expect(qFinal?.used_count).toBe(11); // 10 initial + 1 committed
+    expect(qFinal?.reserved_count).toBe(0); // Clamped at 0
   });
 });

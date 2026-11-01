@@ -1152,10 +1152,82 @@ export async function handleGenerateReview(
     });
   }
 
+  // 10b. Authoritative Cached Draft Recovery (M0-12 Option B + Recovery Authorization A)
+  // Check if a generated draft proposal was already committed for this response.
+  // If so, retrieve it safely under the original valid submission token without new quota reservation or dispatch.
+  const { data: existingCommittedReservation } = await supabase
+    .from('quota_reservations')
+    .select('id, business_id, status, raw_draft, created_at')
+    .eq('response_id', responseId)
+    .eq('status', 'committed')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingCommittedReservation) {
+    // Tenant boundary verification
+    if (existingCommittedReservation.business_id !== businessId) {
+      return buildErrorResponse(
+        403,
+        'ERR_TENANT_MISMATCH',
+        'Reservation belongs to a different merchant tenant.',
+        correlationId,
+      );
+    }
+
+    // Retention ceiling verification: 60 minutes from creation
+    const createdAtMs = new Date(existingCommittedReservation.created_at).getTime();
+    const isWithin60mRetention = Date.now() - createdAtMs <= 60 * 60 * 1000;
+
+    if (!isWithin60mRetention) {
+      return buildErrorResponse(
+        409,
+        'ERR_ALREADY_COMMITTED',
+        'Draft recovery window has expired. Cannot regenerate.',
+        correlationId,
+      );
+    }
+
+    if (
+      existingCommittedReservation.raw_draft &&
+      existingCommittedReservation.raw_draft.trim().length > 0
+    ) {
+      const cachedDraft = existingCommittedReservation.raw_draft.trim();
+      const wordCount = countWords(cachedDraft);
+      const sentiment = await resolveSurveySentiment(supabase, selectedOptions);
+
+      const cachedResponse: GenerateReviewSuccessResponse = {
+        reviewDraft: cachedDraft,
+        wordCount,
+        sentiment,
+      };
+
+      return new Response(JSON.stringify(cachedResponse), {
+        status: 200,
+        headers: {
+          ...CORS_HEADERS,
+          ...NO_CACHE_HEADERS,
+          ...SECURITY_HEADERS,
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-Request-Id': correlationId,
+        },
+      });
+    }
+
+    // Committed reservation exists but raw_draft is empty or missing
+    return buildErrorResponse(
+      409,
+      'ERR_ALREADY_COMMITTED',
+      'Draft already generated for this response. Replay draft is unavailable.',
+      correlationId,
+    );
+  }
+
   // 11. Two-Phase Quota Reservation (reserve_generation_quota)
-  // Compute deterministic payload fingerprint
+  // Compute deterministic payload fingerprint (sorting affirmed facts for canonical ordering)
+  const sortedFacts = [...affirmedFacts].sort();
   const payloadHash = createHash('sha256')
-    .update(`${responseId}:${affirmedFacts.join(',')}:${rawNote ?? ''}`)
+    .update(`${responseId}:${sortedFacts.join('|')}:${(rawNote ?? '').trim()}`)
     .digest('hex');
 
   const { data: reservationId, error: reserveErr } = await supabase.rpc(
@@ -1189,7 +1261,11 @@ export async function handleGenerateReview(
       );
     }
 
-    if (errMsg.includes('ERR_CONCURRENT_REQUEST')) {
+    if (
+      errMsg.includes('ERR_CONCURRENT_REQUEST') ||
+      errMsg.includes('quota_reservations_pending_response_uq') ||
+      errMsg.includes('quota_reservations_idempotency_uq')
+    ) {
       return buildErrorResponse(
         409,
         'ERR_CONCURRENT_REQUEST',
@@ -1201,7 +1277,10 @@ export async function handleGenerateReview(
       );
     }
 
-    if (errMsg.includes('ERR_IDEMPOTENCY_MISMATCH') || errMsg.includes('ERR_IDEMPOTENCY_CONFLICT')) {
+    if (
+      errMsg.includes('ERR_IDEMPOTENCY_MISMATCH') ||
+      errMsg.includes('ERR_IDEMPOTENCY_CONFLICT')
+    ) {
       return buildErrorResponse(
         409,
         'ERR_IDEMPOTENCY_MISMATCH',
@@ -1214,8 +1293,28 @@ export async function handleGenerateReview(
       return buildErrorResponse(
         409,
         'ERR_ALREADY_COMMITTED',
-        'Draft already generated for this attempt sequence. Use a new attempt key to retry.',
+        'Draft already generated for this response. Replay draft is unavailable.',
         correlationId,
+      );
+    }
+
+    if (errMsg.includes('ERR_RESERVATION_TERMINATED')) {
+      return buildErrorResponse(
+        409,
+        'ERR_RESERVATION_TERMINATED',
+        'Prior reservation for this attempt key was terminated. Please retry with a new attempt key.',
+        correlationId,
+        true,
+      );
+    }
+
+    if (errMsg.includes('ERR_RESERVATION_EXPIRED')) {
+      return buildErrorResponse(
+        409,
+        'ERR_RESERVATION_EXPIRED',
+        'Prior reservation has expired. Please retry with a new attempt key.',
+        correlationId,
+        true,
       );
     }
 
