@@ -9,8 +9,21 @@ import {
   CardFooter,
 } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
+import { Button } from '../../components/ui/button';
 import { WelcomePage } from './WelcomePage';
-import { SurveyFlow } from './SurveyFlow';
+import { SurveyFlow, type FeedbackSubmissionData } from './SurveyFlow';
+import { GenerationShimmer } from '../../components/customer/GenerationShimmer';
+import { ReviewEditorPage } from './ReviewEditorPage';
+import { HandoffPage, type ClipboardUiState } from './HandoffPage';
+import {
+  GenerationFallbacks,
+  type GenerationFallbackMode,
+  classifyGenerationError,
+} from './GenerationFallbacks';
+import { generateReview } from '../../lib/api/review';
+import { copyReviewDraftWithTelemetry } from '../../lib/clipboard';
+import { trackEvent } from '../../lib/api/analytics';
+import { getClientSessionUuid } from '../../lib/utils/customer';
 import {
   InvalidQrCard,
   SuspendedBusinessCard,
@@ -30,6 +43,14 @@ export type CustomerViewState =
   | 'rate_limited'
   | 'error';
 
+export type CustomerJourneyPhase =
+  | 'welcome'
+  | 'survey'
+  | 'generating'
+  | 'editor'
+  | 'handoff'
+  | 'fallback';
+
 /**
  * CustomerPageShell
  *
@@ -37,6 +58,11 @@ export type CustomerViewState =
  * Integrates with get-public-business Edge Function (API-PUB-01) to dynamically
  * resolve merchant branding and route between:
  *   - SCR-CUST-01: Active Welcome Screen (3-MCQ flow + Direct Google bypass)
+ *   - SCR-CUST-02..05: 3-MCQ Mobile Survey Flow + Authenticity Confirmation
+ *   - SCR-CUST-06: AI Review Generation Loading Shimmer
+ *   - SCR-CUST-07: Grounded Review Draft Editor with In-Place Customer Editing
+ *   - SCR-CUST-08: Resilient Clipboard Copy & Google Maps Handoff
+ *   - SCR-CUST-10..11: Timeout Retry, Quota Exhaustion, and Abstention Fallbacks
  *   - SCR-CUST-14: Direct-Only Mode (Lapsed subscription)
  *   - SCR-CUST-13: Suspended Business Notice (403)
  *   - SCR-CUST-12: QR Not Recognized (404)
@@ -48,7 +74,7 @@ export function CustomerPageShell(): React.JSX.Element | null {
 }
 
 function CustomerPageShellInner({ qrId }: { qrId?: string }): React.JSX.Element | null {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [viewState, setViewState] = React.useState<CustomerViewState>(() => {
     if (!qrId || !qrId.trim()) return 'not_found';
@@ -59,6 +85,33 @@ function CustomerPageShellInner({ qrId }: { qrId?: string }): React.JSX.Element 
   const [business, setBusiness] = React.useState<PublicBusinessProjection | null>(null);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [isStarted, setIsStarted] = React.useState(false);
+
+  // Customer Journey State Machine (Post-M4 Integration Gate C)
+  const [journeyPhase, setJourneyPhase] = React.useState<CustomerJourneyPhase>(() => {
+    const step = searchParams.get('step');
+    if (step === '1' || step === '2' || step === '3' || step === 'notes' || step === 'submitted') {
+      return 'survey';
+    }
+    return 'welcome';
+  });
+
+  const [submissionData, setSubmissionData] = React.useState<FeedbackSubmissionData | null>(null);
+  const [reviewDraft, setReviewDraft] = React.useState<string | null>(null);
+  const [copiedDraft, setCopiedDraft] = React.useState<string | null>(null);
+  const [initialClipboardState, setInitialClipboardState] = React.useState<ClipboardUiState>('idle');
+  const [fallbackMode, setFallbackMode] = React.useState<GenerationFallbackMode>('generic_error');
+  const [generationError, setGenerationError] = React.useState<unknown>(null);
+  const [retryCount, setRetryCount] = React.useState<number>(0);
+  const [isRegenerating, setIsRegenerating] = React.useState<boolean>(false);
+
+  // In-flight concurrency and stale-response guards
+  const generationRequestId = React.useRef<number>(0);
+  const idempotencySeq = React.useRef<number>(1);
+  const isGeneratingRef = React.useRef<boolean>(false);
+
+  const sessionUuid = React.useMemo(() => {
+    return business ? getClientSessionUuid(business.publicQrId) : '';
+  }, [business]);
 
   const applyBusinessData = React.useCallback((data: PublicBusinessProjection) => {
     setBusiness(data);
@@ -187,6 +240,184 @@ function CustomerPageShellInner({ qrId }: { qrId?: string }): React.JSX.Element 
     };
   }, [qrId, applyBusinessData, applyError]);
 
+  // --------------------------------------------------------------------------
+  // Generation Pipeline Dispatcher
+  // --------------------------------------------------------------------------
+  const executeGeneration = React.useCallback(
+    async (submission: FeedbackSubmissionData) => {
+      if (!business) return;
+
+      // Gate B Enforcement: Feedback must be authenticity confirmed
+      if (!submission.authenticityConfirmed) {
+        setFallbackMode('generic_error');
+        setJourneyPhase('fallback');
+        return;
+      }
+
+      // Guard against rapid duplicate dispatches
+      if (isGeneratingRef.current) return;
+      isGeneratingRef.current = true;
+
+      // Increment request counter to discard stale async results
+      generationRequestId.current += 1;
+      const currentReqId = generationRequestId.current;
+
+      setJourneyPhase('generating');
+      setGenerationError(null);
+
+      // Client-owned telemetry: emit EVENT_GENERATION_REQUESTED non-blockingly
+      trackEvent({
+        publicQrId: business.publicQrId,
+        eventName: 'EVENT_GENERATION_REQUESTED',
+        sessionUuid: submission.sessionUuid,
+      }).catch(() => {
+        // Telemetry failure is non-blocking
+      });
+
+      const key = `${submission.sessionUuid}_${idempotencySeq.current++}`;
+
+      try {
+        const response = await generateReview({
+          responseId: submission.responseId,
+          submissionToken: submission.submissionToken,
+          idempotencyKey: key,
+          publicQrId: business.publicQrId,
+          sessionUuid: submission.sessionUuid,
+        });
+
+        // Stale response guard
+        if (generationRequestId.current !== currentReqId) {
+          return;
+        }
+
+        if (response.abstained || response.reason === 'INSUFFICIENT_FACTS') {
+          setFallbackMode('abstained');
+          setJourneyPhase('fallback');
+        } else if (response.reviewDraft && response.reviewDraft.trim().length > 0) {
+          setReviewDraft(response.reviewDraft);
+          setJourneyPhase('editor');
+        } else {
+          setFallbackMode('generic_error');
+          setJourneyPhase('fallback');
+        }
+      } catch (err) {
+        // Stale response guard
+        if (generationRequestId.current !== currentReqId) {
+          return;
+        }
+
+        const mode = classifyGenerationError(err);
+        setFallbackMode(mode);
+        setGenerationError(err);
+        setJourneyPhase('fallback');
+      } finally {
+        isGeneratingRef.current = false;
+      }
+    },
+    [business],
+  );
+
+  const handleProceedToAiDraft = React.useCallback(
+    (submission: FeedbackSubmissionData) => {
+      setSubmissionData(submission);
+      void executeGeneration(submission);
+    },
+    [executeGeneration],
+  );
+
+  // --------------------------------------------------------------------------
+  // Regeneration Handler (Review Editor)
+  // --------------------------------------------------------------------------
+  const handleRegenerate = React.useCallback(async () => {
+    if (retryCount >= 1 || isRegenerating || !submissionData || !business) {
+      return;
+    }
+
+    setIsRegenerating(true);
+    generationRequestId.current += 1;
+    const currentReqId = generationRequestId.current;
+    const regenKey = `${submissionData.sessionUuid}_regen_${idempotencySeq.current++}`;
+
+    try {
+      const response = await generateReview({
+        responseId: submissionData.responseId,
+        submissionToken: submissionData.submissionToken,
+        idempotencyKey: regenKey,
+        publicQrId: business.publicQrId,
+        sessionUuid: submissionData.sessionUuid,
+      });
+
+      if (generationRequestId.current === currentReqId) {
+        if (response.reviewDraft && response.reviewDraft.trim().length > 0) {
+          setReviewDraft(response.reviewDraft);
+        }
+        setRetryCount((prev) => prev + 1);
+      }
+    } catch {
+      if (generationRequestId.current === currentReqId) {
+        setRetryCount((prev) => prev + 1);
+        // Existing customer draft is preserved on failed regeneration
+      }
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [retryCount, isRegenerating, submissionData, business]);
+
+  // --------------------------------------------------------------------------
+  // Direct User-Activation Clipboard Handoff (Review Editor -> Handoff)
+  // --------------------------------------------------------------------------
+  const handleAcceptAndCopy = React.useCallback(
+    async (finalDraft: string) => {
+      if (!business) return;
+
+      // CRITICAL: Must execute clipboard write synchronously within direct user gesture
+      const result = await copyReviewDraftWithTelemetry(finalDraft, {
+        publicQrId: business.publicQrId,
+        sessionUuid,
+      });
+
+      setCopiedDraft(finalDraft);
+      setInitialClipboardState(result.success ? 'success' : 'fallback');
+      setJourneyPhase('handoff');
+    },
+    [business, sessionUuid],
+  );
+
+  // --------------------------------------------------------------------------
+  // Navigation & Fallback Action Handlers
+  // --------------------------------------------------------------------------
+  const handleDirectGoogleBypass = React.useCallback(() => {
+    if (!business) return;
+    trackEvent({
+      publicQrId: business.publicQrId,
+      eventName: 'EVENT_GOOGLE_BYPASS_CLICK',
+      sessionUuid,
+    }).catch(() => {});
+  }, [business, sessionUuid]);
+
+  const handleTimeoutRetry = React.useCallback(async () => {
+    if (retryCount >= 1 || !submissionData) return;
+    setRetryCount((prev) => prev + 1);
+    await executeGeneration(submissionData);
+  }, [retryCount, submissionData, executeGeneration]);
+
+  const handleComposeManually = React.useCallback(() => {
+    setReviewDraft('');
+    setJourneyPhase('editor');
+  }, []);
+
+  const handleBackToSurvey = React.useCallback(() => {
+    searchParams.set('step', 'notes');
+    setSearchParams(searchParams);
+    setJourneyPhase('survey');
+  }, [searchParams, setSearchParams]);
+
+  const handleBackFromEditor = React.useCallback(() => {
+    searchParams.set('step', 'notes');
+    setSearchParams(searchParams);
+    setJourneyPhase('survey');
+  }, [searchParams, setSearchParams]);
+
   const activeTokenText = `Active QR token parameter: "${qrId ?? 'unspecified'}"`;
 
   // 1. Loading State (Shimmer Skeleton)
@@ -275,30 +506,120 @@ function CustomerPageShellInner({ qrId }: { qrId?: string }): React.JSX.Element 
     );
   }
 
-  // 8. Active Customer Experience: Welcome Screen (SCR-CUST-01/09) or 3-MCQ Survey Flow (SCR-CUST-02..05)
+  // 8. Active Customer Experience
   if (!business) {
     return null;
   }
 
+  // 8a. AI Generation Loading Shimmer (SCR-CUST-06)
+  if (journeyPhase === 'generating') {
+    return (
+      <div className="w-full flex flex-col gap-2">
+        <GenerationShimmer
+          businessName={business.name}
+          logoUrl={business.logoUrl}
+          targetGoogleUrl={business.googleReviewUrl}
+          onDirectGoogleClick={handleDirectGoogleBypass}
+        />
+        {/* Universal Anti-Gating: Immediate Direct Google Access throughout Loading */}
+        <div className="text-center pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 min-h-[44px]"
+            onClick={() => {
+              handleDirectGoogleBypass();
+              const cleanUrl = business.googleReviewUrl?.trim();
+              window.open(cleanUrl || 'https://www.google.com/maps', '_blank', 'noopener,noreferrer');
+            }}
+          >
+            Review on Google Maps ↗
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // 8b. Grounded Review Draft Editor (SCR-CUST-07)
+  if (journeyPhase === 'editor') {
+    return (
+      <ReviewEditorPage
+        business={business}
+        initialDraft={reviewDraft}
+        canRegenerate={retryCount < 1}
+        isLoading={isRegenerating}
+        onRegenerate={handleRegenerate}
+        onAcceptAndCopy={handleAcceptAndCopy}
+        onDirectGoogleClick={handleDirectGoogleBypass}
+        onBack={handleBackFromEditor}
+      />
+    );
+  }
+
+  // 8c. Clipboard Copy Confirmation & Google Handoff (SCR-CUST-08)
+  if (journeyPhase === 'handoff') {
+    return (
+      <HandoffPage
+        business={business}
+        draft={copiedDraft}
+        initialClipboardState={initialClipboardState}
+        onBack={() => setJourneyPhase('editor')}
+      />
+    );
+  }
+
+  // 8d. Generation Fallbacks (SCR-CUST-10, SCR-CUST-11, Abstention, Rate Limits)
+  if (journeyPhase === 'fallback') {
+    return (
+      <GenerationFallbacks
+        business={business}
+        mode={fallbackMode}
+        error={generationError}
+        canRetry={retryCount < 1}
+        onRetry={handleTimeoutRetry}
+        onDirectGoogleClick={handleDirectGoogleBypass}
+        onComposeManually={handleComposeManually}
+        onBackToSurvey={handleBackToSurvey}
+      />
+    );
+  }
+
+  // 8e. 3-MCQ Survey Flow (SCR-CUST-02..05)
   const step = searchParams.get('step');
   const isSurveyActive =
-    step === '1' || step === '2' || step === '3' || step === 'notes' || step === 'submitted';
+    journeyPhase === 'survey' ||
+    step === '1' ||
+    step === '2' ||
+    step === '3' ||
+    step === 'notes' ||
+    step === 'submitted';
 
   if (isSurveyActive) {
     return (
       <SurveyFlow
         business={business}
         activeTokenText={activeTokenText}
-        onExitSurvey={() => setIsStarted(false)}
+        onExitSurvey={() => {
+          searchParams.delete('step');
+          setSearchParams(searchParams);
+          setIsStarted(false);
+          setJourneyPhase('welcome');
+        }}
+        onProceedToAiDraft={handleProceedToAiDraft}
       />
     );
   }
 
+  // 8f. Active Welcome Screen (SCR-CUST-01 / SCR-CUST-09)
   return (
     <WelcomePage
       business={business}
       isStarted={isStarted}
-      onStartReview={() => setIsStarted(true)}
+      onStartReview={() => {
+        setIsStarted(true);
+        setJourneyPhase('survey');
+      }}
       activeTokenText={activeTokenText}
     />
   );

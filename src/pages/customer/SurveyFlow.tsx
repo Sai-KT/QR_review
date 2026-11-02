@@ -17,10 +17,18 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 
+export interface FeedbackSubmissionData {
+  responseId: string;
+  submissionToken: string;
+  authenticityConfirmed: boolean;
+  sessionUuid: string;
+}
+
 export interface SurveyFlowProps {
   business: PublicBusinessProjection;
   activeTokenText?: string;
   onExitSurvey?: () => void;
+  onProceedToAiDraft?: (submission: FeedbackSubmissionData) => void;
   className?: string;
 }
 
@@ -49,6 +57,7 @@ export function SurveyFlow({
   business,
   activeTokenText,
   onExitSurvey,
+  onProceedToAiDraft,
   className,
 }: SurveyFlowProps): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -546,28 +555,98 @@ export function SurveyFlow({
           data-response-id={submissionResult?.responseId}
           data-survey-version={surveyVersion}
         >
-          {/* Informational AI Roadmap Notice (No fake drafts / Truthful copy) */}
-          <div className="rounded-lg bg-surface-subtle border border-border-subtle p-3.5 text-xs text-muted-foreground text-left leading-relaxed">
-            <p className="font-medium text-foreground mb-1">✦ What happens next?</p>
-            <p>
-              Your feedback is saved privately for the merchant. AI-assisted review drafting will be
-              available in the upcoming release. In the meantime, you can leave an authentic review
-              directly on Google Maps below.
-            </p>
-          </div>
+          {/* Conditional Journey Fork: AI Assistance (Authenticity Confirmed) vs Direct Only (Unconfirmed) */}
+          {onProceedToAiDraft && submissionResult && authenticityConfirmed ? (
+            <>
+              <div className="rounded-lg bg-surface-subtle border border-border-subtle p-3.5 text-xs text-muted-foreground text-left leading-relaxed">
+                <p className="font-medium text-foreground mb-1">✦ AI Review Assistance Available</p>
+                <p>
+                  Based on your affirmed experience, our AI assistant can help draft a concise, authentic review for Google Maps. You will be able to edit every word before copying.
+                </p>
+              </div>
 
-          {/* Universal Anti-Gating Direct Google Action */}
-          <Button
-            type="button"
-            variant="accent"
-            size="touch"
-            className="w-full font-semibold text-base min-h-[48px]"
-            onClick={() => {
-              window.open(destinationGoogleUrl, '_blank', 'noopener,noreferrer');
-            }}
-          >
-            {hasConfiguredGoogle ? 'Review Directly on Google Maps ↗' : 'Search on Google Maps ↗'}
-          </Button>
+              {/* Primary CTA: Intentional Customer AI Generation Trigger */}
+              <Button
+                type="button"
+                variant="accent"
+                size="touch"
+                className="w-full font-semibold text-base min-h-[48px]"
+                data-testid="proceed-to-ai-draft-button"
+                onClick={() => {
+                  onProceedToAiDraft({
+                    responseId: submissionResult.responseId,
+                    submissionToken: submissionResult.submissionToken,
+                    authenticityConfirmed: true,
+                    sessionUuid,
+                  });
+                }}
+              >
+                Draft My Review with AI ↗
+              </Button>
+
+              {/* Universal Anti-Gating Direct Google Action */}
+              <Button
+                type="button"
+                variant="outline"
+                size="touch"
+                className="w-full font-semibold min-h-[44px]"
+                data-testid="submitted-direct-google-button"
+                onClick={() => {
+                  window.open(destinationGoogleUrl, '_blank', 'noopener,noreferrer');
+                }}
+              >
+                {hasConfiguredGoogle ? 'Review Directly on Google Maps ↗' : 'Search on Google Maps ↗'}
+              </Button>
+            </>
+          ) : !authenticityConfirmed ? (
+            <>
+              <div className="rounded-lg bg-surface-subtle border border-border-subtle p-3.5 text-xs text-muted-foreground text-left leading-relaxed">
+                <p className="font-medium text-foreground mb-1">✦ What happens next?</p>
+                <p>
+                  Your feedback is saved privately for the merchant. Because visit authenticity was not confirmed, AI-assisted review drafting is unavailable. You can still leave an authentic review directly on Google Maps below.
+                </p>
+              </div>
+
+              {/* Universal Anti-Gating Direct Google Action */}
+              <Button
+                type="button"
+                variant="accent"
+                size="touch"
+                className="w-full font-semibold text-base min-h-[48px]"
+                data-testid="submitted-direct-google-button"
+                onClick={() => {
+                  window.open(destinationGoogleUrl, '_blank', 'noopener,noreferrer');
+                }}
+              >
+                {hasConfiguredGoogle ? 'Review Directly on Google Maps ↗' : 'Search on Google Maps ↗'}
+              </Button>
+            </>
+          ) : (
+            <>
+              {/* Informational AI Roadmap Notice (No fake drafts / Truthful copy) */}
+              <div className="rounded-lg bg-surface-subtle border border-border-subtle p-3.5 text-xs text-muted-foreground text-left leading-relaxed">
+                <p className="font-medium text-foreground mb-1">✦ What happens next?</p>
+                <p>
+                  Your feedback is saved privately for the merchant. AI-assisted review drafting will be
+                  available in the upcoming release. In the meantime, you can leave an authentic review
+                  directly on Google Maps below.
+                </p>
+              </div>
+
+              {/* Universal Anti-Gating Direct Google Action */}
+              <Button
+                type="button"
+                variant="accent"
+                size="touch"
+                className="w-full font-semibold text-base min-h-[48px]"
+                onClick={() => {
+                  window.open(destinationGoogleUrl, '_blank', 'noopener,noreferrer');
+                }}
+              >
+                {hasConfiguredGoogle ? 'Review Directly on Google Maps ↗' : 'Search on Google Maps ↗'}
+              </Button>
+            </>
+          )}
 
           {/* Optional WhatsApp Manager Contact Link */}
           {whatsAppUrl && (
