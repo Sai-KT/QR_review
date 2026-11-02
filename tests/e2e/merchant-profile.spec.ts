@@ -34,12 +34,7 @@ test.describe('M5-T03: Merchant Business Profile & Settings', () => {
   // Execute sequentially to prevent database state collision across parallel test workers
   test.describe.configure({ mode: 'serial' });
 
-  test.beforeEach(async ({ context }) => {
-    await context.clearCookies();
-  });
-
-  test.afterEach(async () => {
-    // Teardown: Restore Business 1 to clean baseline state
+  const restoreFixtures = async () => {
     await supabaseAdmin
       .from('businesses')
       .update({
@@ -48,6 +43,32 @@ test.describe('M5-T03: Merchant Business Profile & Settings', () => {
         whatsapp_number: '9876543210',
       })
       .eq('id', BUSINESS_1_ID);
+
+    await supabaseAdmin
+      .from('businesses')
+      .update({
+        name: 'The Daily Roast Cafe',
+        vanity_slug: 'daily-roast',
+        whatsapp_number: '9876543220',
+      })
+      .eq('id', BUSINESS_2_ID);
+  };
+
+  test.beforeAll(async () => {
+    await restoreFixtures();
+  });
+
+  test.afterAll(async () => {
+    await restoreFixtures();
+  });
+
+  test.beforeEach(async ({ context }) => {
+    await context.clearCookies();
+  });
+
+  test.afterEach(async () => {
+    // Teardown: Restore Business 1 to clean baseline state
+    await restoreFixtures();
   });
 
   test('TC-OWN-05: Authenticated merchant updates profile fields and synchronizes UI state', async ({
@@ -314,5 +335,80 @@ test.describe('M5-T03: Merchant Business Profile & Settings', () => {
       .analyze();
 
     expect(accessibilityScanResults.violations).toEqual([]);
+  });
+
+  test('Tenant Account Switching: Discards unsaved edits and prevents cross-tenant state leakage', async ({
+    page,
+  }) => {
+    // 1. Sign in as Merchant Luxe
+    await page.goto('/login');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+
+    // 2. Visit Profile and enter unsaved edits
+    await page.goto('/dashboard/profile');
+    const nameInput = page.getByTestId('business-name-input');
+    await nameInput.fill('Unsaved Edit for Luxe');
+
+    // 3. Sign out
+    const desktopSignOut = page.locator('[data-testid="merchant-sign-out-btn"]:visible');
+    if (await desktopSignOut.isVisible()) {
+      await desktopSignOut.click();
+    } else {
+      await page.getByTestId('merchant-mobile-menu-toggle').click();
+      await page.getByTestId('merchant-mobile-sign-out-btn').click();
+    }
+    await expect(page).toHaveURL(/\/login/);
+
+    // 4. Sign in as Merchant Daily
+    await page.getByLabel(/Email Address/i).fill('merchant.daily@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+
+    // 5. Visit Profile Settings as Merchant Daily
+    await page.goto('/dashboard/profile');
+    await expect(
+      page.getByRole('heading', { name: /Business Profile & Brand Settings/i }),
+    ).toBeVisible();
+
+    // 6. Verify zero leakage of Merchant Luxe data or unsaved edits
+    await expect(page.getByTestId('business-name-input')).toHaveValue('The Daily Roast Cafe');
+    await expect(page.getByTestId('vanity-slug-input')).toHaveValue('daily-roast');
+    await expect(page.getByTestId('public-qr-id-display')).toContainText('daily00001');
+    await expect(page.getByText(/Cafe & Quick Service/i)).toBeVisible();
+    await expect(page.locator('text=Unsaved Edit for Luxe')).not.toBeVisible();
+  });
+
+  test('Failed Submission: Keeps unsaved inputs intact and reports errors safely without success banner', async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+
+    await page.goto('/dashboard/profile');
+
+    // 1. Enter invalid vanity slug (trailing hyphen violates slug regex)
+    const slugInput = page.getByTestId('vanity-slug-input');
+    const saveBtn = page.getByTestId('profile-save-btn');
+    await slugInput.fill('invalid-slug-');
+    await expect(saveBtn).toBeEnabled();
+
+    // 2. Submit form
+    await saveBtn.click();
+
+    // 3. Verify validation error displayed, success alert NOT displayed
+    await expect(
+      page.getByText(/Vanity slug may only contain lowercase letters/i),
+    ).toBeVisible();
+    await expect(page.getByTestId('profile-success-alert')).not.toBeVisible();
+
+    // 4. Verify unsaved input is still in the field
+    await expect(slugInput).toHaveValue('invalid-slug-');
   });
 });

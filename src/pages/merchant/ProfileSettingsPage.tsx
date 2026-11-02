@@ -62,20 +62,7 @@ function ProfileSettingsForm({
   const [submitting, setSubmitting] = React.useState<boolean>(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = React.useState<string | null>(null);
-
-  // Synchronize state during render when business identity or timestamp changes
-  const [prevBusiness, setPrevBusiness] = React.useState<Business>(business);
-  if (
-    business.id !== prevBusiness.id ||
-    (business.updatedAt !== prevBusiness.updatedAt && !submitting)
-  ) {
-    setPrevBusiness(business);
-    setName(business.name ?? '');
-    setVanitySlug(business.vanitySlug ?? '');
-    setWhatsappNumber(business.whatsappNumber ?? '');
-    setValidationErrors({});
-    setSubmitError(null);
-  }
+  const [externalUpdateNotice, setExternalUpdateNotice] = React.useState<boolean>(false);
 
   // Compute dirty state
   const isDirty = React.useMemo(() => {
@@ -93,6 +80,22 @@ function ProfileSettingsForm({
       currentWhatsapp !== savedWhatsapp
     );
   }, [business, name, vanitySlug, whatsappNumber]);
+
+  // Synchronize state during render when business identity or timestamp changes
+  const [prevBusiness, setPrevBusiness] = React.useState<Business>(business);
+  if (business !== prevBusiness) {
+    setPrevBusiness(business);
+    if (!isDirty) {
+      setName(business.name ?? '');
+      setVanitySlug(business.vanitySlug ?? '');
+      setWhatsappNumber(business.whatsappNumber ?? '');
+      setValidationErrors({});
+      setSubmitError(null);
+      setExternalUpdateNotice(false);
+    } else if (!submitting) {
+      setExternalUpdateNotice(true);
+    }
+  }
 
   // Client-side field validations
   const validate = (): boolean => {
@@ -156,6 +159,7 @@ function ProfileSettingsForm({
         setSubmitError(result.error.message);
       } else {
         setSubmitSuccess('Business profile updated successfully.');
+        setExternalUpdateNotice(false);
         await refreshBusiness();
       }
     } catch (err) {
@@ -174,6 +178,7 @@ function ProfileSettingsForm({
     setValidationErrors({});
     setSubmitError(null);
     setSubmitSuccess(null);
+    setExternalUpdateNotice(false);
   };
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.qrreview.in';
@@ -254,6 +259,30 @@ function ProfileSettingsForm({
           </svg>
           <div className="text-sm font-medium text-state-danger break-words min-w-0">
             {submitError}
+          </div>
+        </div>
+      )}
+
+      {externalUpdateNotice && (
+        <div
+          role="status"
+          data-testid="profile-external-update-notice"
+          className="rounded-lg border border-state-warning/30 bg-state-warning-bg p-4 flex items-start gap-3 min-w-0"
+        >
+          <svg
+            className="h-5 w-5 text-state-warning shrink-0 mt-0.5"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              fillRule="evenodd"
+              d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <div className="text-sm font-medium text-state-warning break-words min-w-0">
+            The business record was refreshed from the server. Your unsaved changes have been preserved. Click Save Changes to keep your edits or Discard Changes to view server values.
           </div>
         </div>
       )}
@@ -683,6 +712,7 @@ export function ProfileSettingsPage(): React.JSX.Element {
 
   return (
     <ProfileSettingsForm
+      key={business.id}
       business={business}
       refreshBusiness={refreshBusiness}
     />

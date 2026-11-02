@@ -230,5 +230,72 @@ describe('ProfileSettingsPage (SCR-OWN-04)', () => {
       screen.getByText(/This vanity slug is already taken. Please choose another./i),
     ).toBeInTheDocument();
   });
+
+  it('preserves unsaved changes and displays notice when background refresh occurs', async () => {
+    const { rerender } = render(<ProfileSettingsPage />);
+
+    const nameInput = screen.getByTestId('business-name-input');
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'Unsaved Custom Name');
+
+    // Simulate background refresh of business record with updated timestamp
+    const refreshedBusiness: Business = {
+      ...MOCK_BUSINESS,
+      updatedAt: '2026-10-01T10:15:00Z',
+    };
+
+    vi.mocked(useMerchantAuth).mockReturnValue({
+      business: refreshedBusiness,
+      loading: false,
+      error: null,
+      session: null,
+      user: null,
+      signOut: vi.fn(),
+      refreshBusiness: mockRefreshBusiness,
+    });
+
+    rerender(<ProfileSettingsPage />);
+
+    // User's unsaved changes MUST be preserved
+    expect(screen.getByTestId('business-name-input')).toHaveValue('Unsaved Custom Name');
+    // Notice banner should inform user of background refresh
+    expect(screen.getByTestId('profile-external-update-notice')).toBeInTheDocument();
+  });
+
+  it('completely resets form and avoids cross-tenant state leakage on tenant switch', async () => {
+    const { rerender } = render(<ProfileSettingsPage />);
+
+    const nameInput = screen.getByTestId('business-name-input');
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'Unsaved Tenant 1 Name');
+
+    // Switch to Tenant 2
+    const tenant2Business: Business = {
+      ...MOCK_BUSINESS,
+      id: 'b0000000-0000-4000-8000-000000000002',
+      name: 'The Daily Roast Cafe',
+      vanitySlug: 'daily-roast',
+      categoryId: 'cafe',
+      publicQrId: 'daily00001',
+    };
+
+    vi.mocked(useMerchantAuth).mockReturnValue({
+      business: tenant2Business,
+      loading: false,
+      error: null,
+      session: null,
+      user: null,
+      signOut: vi.fn(),
+      refreshBusiness: mockRefreshBusiness,
+    });
+
+    rerender(<ProfileSettingsPage />);
+
+    // Must NOT leak Tenant 1's unsaved input
+    expect(screen.getByTestId('business-name-input')).toHaveValue('The Daily Roast Cafe');
+    expect(screen.getByTestId('vanity-slug-input')).toHaveValue('daily-roast');
+    expect(screen.getByTestId('public-qr-id-display')).toHaveTextContent('daily00001');
+    expect(screen.queryByTestId('profile-external-update-notice')).not.toBeInTheDocument();
+  });
 });
 
