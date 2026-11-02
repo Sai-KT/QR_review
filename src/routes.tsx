@@ -50,8 +50,8 @@ const MerchantPages = {
     })),
   ),
   Profile: React.lazy(() =>
-    import('./pages/merchant/MerchantPageShells.tsx').then((m) => ({
-      default: m.MerchantProfilePage,
+    import('./pages/merchant/ProfileSettingsPage.tsx').then((m) => ({
+      default: m.ProfileSettingsPage,
     })),
   ),
   Destination: React.lazy(() =>

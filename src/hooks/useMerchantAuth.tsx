@@ -74,7 +74,6 @@ export function MerchantAuthProvider({ children }: MerchantAuthProviderProps): R
 
   const refreshBusiness = React.useCallback(async () => {
     if (!activeUserIdRef.current) return;
-    setLoading(true);
     await loadBusiness(activeUserIdRef.current);
   }, [loadBusiness]);
 

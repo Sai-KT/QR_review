@@ -288,8 +288,8 @@ function PortalLayoutContent({ children, className }: PortalLayoutProps): React.
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isMobileMenuOpen]);
 
-  // 1. Loading State
-  if (loading) {
+  // 1. Loading State (initial auth & tenant resolution)
+  if (loading && !business) {
     return (
       <div
         className="min-h-screen flex flex-col items-center justify-center p-6 bg-surface-subtle text-foreground font-sans antialiased"
