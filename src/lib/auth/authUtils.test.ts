@@ -103,6 +103,43 @@ describe('M5-T01: Authentication Utilities & Validation (authUtils)', () => {
       expect(getSafeRedirectUrl('data:text/html,<script>alert(1)</script>')).toBe('/dashboard');
       expect(getSafeRedirectUrl('/dashboard:attack')).toBe('/dashboard');
     });
+
+    it('Check B: strictly excludes administrative routes (/admin, /admin/*)', () => {
+      expect(getSafeRedirectUrl('/admin')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/admin/login')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/admin/overview')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/admin?role=superadmin')).toBe('/dashboard');
+    });
+
+    it('Check B: strictly rejects path traversal attempts targeting /admin or root', () => {
+      expect(getSafeRedirectUrl('/dashboard/../admin')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/dashboard/..')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/dashboard/%2e%2e/admin')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/dashboard/%2e/admin')).toBe('/dashboard');
+    });
+
+    it('Check B: rejects non-subpath dashboard mimics (/dashboard-evil, /dashboard.attacker.com)', () => {
+      expect(getSafeRedirectUrl('/dashboard-evil')).toBe('/dashboard');
+      expect(getSafeRedirectUrl('/dashboard.attacker.com')).toBe('/dashboard');
+    });
+
+    it('Check A: strips sensitive callback token fragments from return paths', () => {
+      const fragmentWithTokens =
+        '/dashboard#access_token=eyJhbGciOi...&refresh_token=secret_refresh&type=recovery';
+      expect(getSafeRedirectUrl(fragmentWithTokens)).toBe('/dashboard');
+
+      const subpathWithTokens =
+        '/dashboard/analytics#access_token=eyJhbGciOi...&token_type=bearer';
+      expect(getSafeRedirectUrl(subpathWithTokens)).toBe('/dashboard/analytics');
+    });
+
+    it('Check A: strips sensitive query parameters while preserving approved UI params', () => {
+      const urlWithSecretParams =
+        '/dashboard/analytics?period=30d&code=oauth_code_123&token=secret_token&auth=active#trend';
+      expect(getSafeRedirectUrl(urlWithSecretParams)).toBe(
+        '/dashboard/analytics?period=30d#trend',
+      );
+    });
   });
 
   describe('getAuthErrorMessage', () => {

@@ -115,6 +115,91 @@ describe('PortalLayout (SCR-OWN-03 / M5-T02)', () => {
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
   });
 
+  it('Check A: strips token-containing URL fragments and never transfers them into redirect_to', () => {
+    vi.mocked(useMerchantAuthModule.useMerchantAuth).mockReturnValue({
+      session: null,
+      user: null,
+      business: null,
+      loading: false,
+      error: null,
+      signOut: mockSignOut,
+      refreshBusiness: mockRefreshBusiness,
+    });
+
+    function LoginWatcher() {
+      const [searchParams] = useSearchParams();
+      return (
+        <div>
+          <span data-testid="login-redirect-param">{searchParams.get('redirect_to') ?? 'NONE'}</span>
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          '/dashboard#access_token=sensitive_jwt_token_12345&refresh_token=secret_refresh_67890&type=recovery',
+        ]}
+      >
+        <Routes>
+          <Route path="/login" element={<LoginWatcher />} />
+          <Route
+            path="/dashboard/*"
+            element={
+              <PortalLayout>
+                <div>Protected Content</div>
+              </PortalLayout>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // Tokens must NOT be in the redirect_to parameter
+    const redirectParam = screen.getByTestId('login-redirect-param').textContent;
+    expect(redirectParam).toBe('NONE');
+    expect(redirectParam).not.toContain('access_token');
+    expect(redirectParam).not.toContain('refresh_token');
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+  });
+
+  it('Check B: prevents path traversal and rejects administrative destinations', () => {
+    vi.mocked(useMerchantAuthModule.useMerchantAuth).mockReturnValue({
+      session: null,
+      user: null,
+      business: null,
+      loading: false,
+      error: null,
+      signOut: mockSignOut,
+      refreshBusiness: mockRefreshBusiness,
+    });
+
+    function LoginWatcher() {
+      const [searchParams] = useSearchParams();
+      return <div data-testid="login-redirect-param">{searchParams.get('redirect_to') ?? 'NONE'}</div>;
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard/../admin']}>
+        <Routes>
+          <Route path="/login" element={<LoginWatcher />} />
+          <Route
+            path="/dashboard/*"
+            element={
+              <PortalLayout>
+                <div>Protected Content</div>
+              </PortalLayout>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const redirectParam = screen.getByTestId('login-redirect-param').textContent;
+    expect(redirectParam).toBe('NONE');
+    expect(redirectParam).not.toContain('admin');
+  });
+
   it('renders error state when business profile fails to load', () => {
     vi.mocked(useMerchantAuthModule.useMerchantAuth).mockReturnValue({
       session: { user: { id: 'user-1' } } as unknown as Session,

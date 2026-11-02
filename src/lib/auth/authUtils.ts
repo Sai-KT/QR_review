@@ -84,9 +84,30 @@ export function validatePasswordConfirmation(
 }
 
 /**
- * Sanitizes and validates a redirect destination to prevent Open Redirect vulnerabilities.
- * Strictly permits only relative, first-party application paths.
- * Rejects protocol-relative URLs (//attacker.com), javascript: URLs, and external domains.
+ * Approved non-sensitive query parameter keys for merchant dashboard views.
+ */
+export const SAFE_MERCHANT_QUERY_PARAMS = new Set([
+  'period',
+  'tab',
+  'filter',
+  'page',
+  'sort',
+  'view',
+  'range',
+  'status',
+]);
+
+/**
+ * Safe UI fragment identifier regex (alphanumeric anchor IDs, strictly no key-value pairs or tokens).
+ */
+export const SAFE_HASH_REGEX = /^#[a-zA-Z0-9_-]{1,32}$/;
+
+/**
+ * Sanitizes and validates a redirect destination to prevent Open Redirect,
+ * token-leakage, path traversal, and administrative route bypass vulnerabilities.
+ * Strictly permits only relative, first-party merchant application paths.
+ * Rejects protocol-relative URLs (//attacker.com), javascript: URLs, external domains,
+ * administrative routes (/admin), and strips sensitive tokens from query and hash.
  */
 export function getSafeRedirectUrl(
   candidateUrl: string | null | undefined,
@@ -108,12 +129,61 @@ export function getSafeRedirectUrl(
     return fallback;
   }
 
-  // Permitted prefixes for merchant redirection
-  if (trimmed.startsWith('/dashboard') || trimmed === '/') {
-    return trimmed;
+  // Strict path traversal defense on the route path component
+  const rawPath = trimmed.split(/[?#]/)[0] ?? '';
+  if (
+    rawPath.includes('..') ||
+    rawPath.toLowerCase().includes('%2e%2e') ||
+    rawPath.toLowerCase().includes('%2e')
+  ) {
+    return fallback;
   }
 
-  return fallback;
+  try {
+    const parsed = new URL(trimmed, 'https://local-auth-guard.test');
+    const path = parsed.pathname;
+
+    // Explicitly exclude administrative routes
+    if (path === '/admin' || path.startsWith('/admin/')) {
+      return fallback;
+    }
+
+    // Permitted paths for merchant redirection:
+    // Strictly /dashboard, /dashboard/*, or root /
+    const isPermittedPath =
+      path === '/dashboard' || path.startsWith('/dashboard/') || path === '/';
+
+    if (!isPermittedPath) {
+      return fallback;
+    }
+
+    // Filter query parameters to strictly non-sensitive, approved keys
+    const safeParams = new URLSearchParams();
+    parsed.searchParams.forEach((val, key) => {
+      const k = key.toLowerCase();
+      if (
+        SAFE_MERCHANT_QUERY_PARAMS.has(k) &&
+        !/token|secret|key|code|auth|session|pass|credential/i.test(val)
+      ) {
+        safeParams.set(key, val);
+      }
+    });
+
+    // Filter hash: only permit safe alphanumeric UI anchors, never token key-value pairs
+    let safeHash = '';
+    if (
+      parsed.hash &&
+      SAFE_HASH_REGEX.test(parsed.hash) &&
+      !/token|secret|key|code|auth|session|pass/i.test(parsed.hash)
+    ) {
+      safeHash = parsed.hash;
+    }
+
+    const q = safeParams.toString();
+    return `${path}${q ? `?${q}` : ''}${safeHash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 /**

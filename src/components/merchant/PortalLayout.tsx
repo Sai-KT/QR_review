@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { MerchantAuthProvider, useMerchantAuth } from '../../hooks/useMerchantAuth';
+import { getSafeRedirectUrl } from '../../lib/auth/authUtils';
 
 export interface PortalLayoutProps {
   children?: React.ReactNode;
@@ -311,9 +312,10 @@ function PortalLayoutContent({ children, className }: PortalLayoutProps): React.
 
   // 2. Unauthenticated Guard Redirect
   if (!session) {
-    const returnPath = `${location.pathname}${location.search}${location.hash}`;
-    const search = returnPath && returnPath !== '/'
-      ? `?redirect_to=${encodeURIComponent(returnPath)}`
+    const rawTarget = `${location.pathname}${location.search}${location.hash}`;
+    const safeReturn = getSafeRedirectUrl(rawTarget);
+    const search = safeReturn && safeReturn !== '/dashboard'
+      ? `?redirect_to=${encodeURIComponent(safeReturn)}`
       : '';
     return <Navigate to={`/login${search}`} replace state={{ from: location.pathname }} />;
   }

@@ -76,6 +76,53 @@ test.describe('M5-T02: Merchant Portal Navigation Shell & Auth Guard', () => {
     await expect(page.getByRole('heading', { name: /Merchant Dashboard Overview/i })).toBeVisible();
   });
 
+  test('Scenario 2d: Check A - Token fragment in protected URL is never copied into /login query parameters', async ({
+    page,
+  }) => {
+    // 1. Visit /dashboard with mock token fragment while unauthenticated
+    await page.goto(
+      '/dashboard#access_token=sensitive_jwt_token_12345&refresh_token=secret_refresh_67890&type=recovery',
+    );
+
+    // 2. Must redirect to /login WITHOUT tokens in the query string
+    await expect(page).toHaveURL(/\/login$/);
+    const currentUrl = page.url();
+    expect(currentUrl).not.toContain('access_token');
+    expect(currentUrl).not.toContain('refresh_token');
+
+    // 3. Visit /dashboard/analytics with token fragment while unauthenticated
+    await page.goto(
+      '/dashboard/analytics#access_token=sensitive_jwt_token_12345&refresh_token=secret_refresh_67890',
+    );
+
+    // 4. Must redirect to /login with clean redirect_to parameter preserving route but omitting token
+    await expect(page).toHaveURL(/\/login\?redirect_to=%2Fdashboard%2Fanalytics$/);
+    const subpathUrl = page.url();
+    expect(subpathUrl).not.toContain('access_token');
+    expect(subpathUrl).not.toContain('refresh_token');
+  });
+
+  test('Scenario 2e: Check B - Path traversal and /admin targets are strictly excluded from post-login redirect', async ({
+    page,
+  }) => {
+    // 1. Attempt login with path traversal targeting administrative console
+    await page.goto('/login?redirect_to=/dashboard/../admin');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+
+    // Must safely fallback to /dashboard, NOT /admin
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole('heading', { name: /Merchant Dashboard Overview/i })).toBeVisible();
+
+    // 2. Attempt login with direct /admin target
+    await page.goto('/login?redirect_to=/admin');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+  });
+
   test('Scenario 3: TC-OWN-04 - Authenticated merchant sees authorized business name and status in sidebar', async ({
     page,
   }) => {
