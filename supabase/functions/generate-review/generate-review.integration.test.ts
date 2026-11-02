@@ -65,6 +65,19 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
     supabase = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    const currentCycle = new Date().toISOString().slice(0, 7);
+    await supabase.from('tenant_quotas').upsert(
+      {
+        business_id: realSalonBizId,
+        billing_cycle: currentCycle,
+        max_limit: 150,
+        used_count: 12,
+        reserved_count: 0,
+        reset_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      { onConflict: 'business_id,billing_cycle' },
+    );
   });
 
   afterAll(async () => {
@@ -185,6 +198,7 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
     affirmedFacts?: string[];
     optionalNote?: string | null;
     selectedOptions?: Array<{ questionId: string; optionId: string }>;
+    authenticityConfirmed?: boolean;
   }): Promise<{ responseId: string; submissionToken: string }> {
     const selectedOptions = params.selectedOptions ?? [
       { questionId: realQ1, optionId: realOpt1 },
@@ -197,6 +211,7 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
       'Great styling advice',
     ];
     const optionalNote = params.optionalNote !== undefined ? params.optionalNote : 'Loved the haircut!';
+    const authenticityConfirmed = params.authenticityConfirmed !== undefined ? params.authenticityConfirmed : true;
 
     const { data, error } = await supabase
       .from('survey_responses')
@@ -207,6 +222,7 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
         selected_options: selectedOptions,
         affirmed_facts_snapshot: affirmedFacts,
         optional_note: optionalNote,
+        authenticity_confirmed: authenticityConfirmed,
       })
       .select('id')
       .single();
@@ -1796,6 +1812,138 @@ describe('generate-review Real PostgreSQL Integration Suite (M4-T02 / API-PUB-03
       ).toString().trim();
 
       expect(recentRuns).toBe('succeeded');
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* M0-16 Design B: Customer Authenticity Confirmation Enforcement           */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Post-M4 Integration Gate B: Authenticity Confirmation Database Enforcement', () => {
+    it('rejects unconfirmed survey response (authenticity_confirmed: false) with HTTP 403 ERR_AUTHENTICITY_UNCONFIRMED', async () => {
+      const sessionUuid = crypto.randomUUID();
+      const { responseId, submissionToken } = await seedSurveyResponse({
+        businessId: realSalonBizId,
+        sessionUuid,
+        optionalNote: 'Declined AI attestation checkbox',
+        authenticityConfirmed: false,
+      });
+
+      let transportCalled = false;
+      const mockTransport: typeof fetch = async () => {
+        transportCalled = true;
+        return new Response(JSON.stringify({}));
+      };
+
+      const idempotencyKey = `unconfirmed_${Date.now()}`;
+      const req = makeRequest({
+        responseId,
+        submissionToken,
+        idempotencyKey,
+        sessionUuid,
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      });
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_AUTHENTICITY_UNCONFIRMED');
+      expect(body.error.message).toContain('authenticity confirmation');
+      expect(transportCalled).toBe(false);
+
+      // Verify PostgreSQL: generation_attempts is untouched (0)
+      const { data: dbRow } = await supabase
+        .from('survey_responses')
+        .select('generation_attempts, is_generated')
+        .eq('id', responseId)
+        .single();
+      expect(dbRow?.generation_attempts).toBe(0);
+      expect(dbRow?.is_generated).toBe(false);
+
+      // Verify PostgreSQL: zero quota reserved for this response
+      const { data: resRow } = await supabase
+        .from('quota_reservations')
+        .select('id')
+        .eq('response_id', responseId);
+      expect(resRow?.length).toBe(0);
+    });
+
+    it('rejects draft recovery attempt when survey response authenticity is unconfirmed', async () => {
+      const sessionUuid = crypto.randomUUID();
+      const { responseId, submissionToken } = await seedSurveyResponse({
+        businessId: realSalonBizId,
+        sessionUuid,
+        authenticityConfirmed: false,
+      });
+
+      const req = makeRequest({
+        responseId,
+        submissionToken,
+        idempotencyKey: `recovery_unconfirmed_${Date.now()}`,
+        sessionUuid,
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...getBaseHandlerOptions(),
+      });
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_AUTHENTICITY_UNCONFIRMED');
+    });
+
+    it('allows generation pipeline to proceed when authenticity_confirmed is true', async () => {
+      const sessionUuid = crypto.randomUUID();
+      const { responseId, submissionToken } = await seedSurveyResponse({
+        businessId: realSalonBizId,
+        sessionUuid,
+        authenticityConfirmed: true,
+      });
+
+      let transportCalled = false;
+      const mockTransport: typeof fetch = async () => {
+        transportCalled = true;
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                finishReason: 'STOP',
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        reviewDraft:
+                          'Had a masterful and precise service today. Clean and hygienic station with great styling advice. Loved the haircut!',
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+      };
+
+      const idempotencyKey = `confirmed_${Date.now()}`;
+      const req = makeRequest({
+        responseId,
+        submissionToken,
+        idempotencyKey,
+        sessionUuid,
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...getBaseHandlerOptions(),
+        geminiTransportFn: mockTransport,
+      });
+
+      expect(res.status).toBe(200);
+      expect(transportCalled).toBe(true);
+      const body = await res.json();
+      expect(body.reviewDraft).toContain('masterful and precise service');
     });
   });
 });

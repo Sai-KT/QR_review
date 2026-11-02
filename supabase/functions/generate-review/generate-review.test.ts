@@ -278,6 +278,7 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
               generation_attempts: 0,
               is_generated: false,
               created_at: new Date().toISOString(),
+              authenticity_confirmed: true,
             };
 
       const mockBusinessData =
@@ -637,6 +638,7 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
           generation_attempts: 0,
           is_generated: false,
           created_at: new Date().toISOString(),
+          authenticity_confirmed: true,
         },
       });
 
@@ -667,6 +669,168 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
       expect(json.abstained).toBe(true);
       expect(json.reason).toBe('INSUFFICIENT_FACTS');
       expect(json.reviewDraft).toBeNull();
+    });
+
+    it('rejects unconfirmed survey response with HTTP 403 ERR_AUTHENTICITY_UNCONFIRMED (M0-16 Design B)', async () => {
+      let quotaReserved = false;
+      let geminiCalled = false;
+
+      const mockSupabase = createMockSupabase({
+        surveyResponse: {
+          id: mockResponseId,
+          business_id: mockBusinessId,
+          category_id: 'salon',
+          session_uuid: mockSessionUuid,
+          selected_options: [
+            { questionId: mockQuestionIds[0], optionId: 'opt1' },
+            { questionId: mockQuestionIds[1], optionId: 'opt2' },
+            { questionId: mockQuestionIds[2], optionId: 'opt3' },
+          ],
+          affirmed_facts_snapshot: ['Masterful & Precise'],
+          optional_note: 'Loved the service',
+          generation_attempts: 0,
+          is_generated: false,
+          created_at: new Date().toISOString(),
+          authenticity_confirmed: false, // Customer did not self-attest
+        },
+      });
+
+      mockSupabase.rpc = async (fn: string) => {
+        if (fn === 'reserve_generation_quota') {
+          quotaReserved = true;
+          return { data: 'res-quota-1', error: null };
+        }
+        return { data: true, error: null };
+      };
+
+      const mockTransport: typeof fetch = async () => {
+        geminiCalled = true;
+        return new Response(JSON.stringify({}));
+      };
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+        geminiTransportFn: mockTransport,
+      });
+
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_AUTHENTICITY_UNCONFIRMED');
+      expect(json.error.message).toContain('authenticity confirmation');
+      expect(quotaReserved).toBe(false);
+      expect(geminiCalled).toBe(false);
+    });
+
+    it('rejects response with null or undefined authenticity_confirmed (fail-closed)', async () => {
+      const mockSupabase = createMockSupabase({
+        surveyResponse: {
+          id: mockResponseId,
+          business_id: mockBusinessId,
+          category_id: 'salon',
+          session_uuid: mockSessionUuid,
+          selected_options: [
+            { questionId: mockQuestionIds[0], optionId: 'opt1' },
+            { questionId: mockQuestionIds[1], optionId: 'opt2' },
+            { questionId: mockQuestionIds[2], optionId: 'opt3' },
+          ],
+          affirmed_facts_snapshot: ['Masterful & Precise'],
+          optional_note: 'Loved the service',
+          generation_attempts: 0,
+          is_generated: false,
+          created_at: new Date().toISOString(),
+          // authenticity_confirmed is omitted / undefined
+        },
+      });
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_1`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_AUTHENTICITY_UNCONFIRMED');
+    });
+
+    it('prevents cached draft recovery when survey is unconfirmed (fail-closed draft recovery)', async () => {
+      const mockSupabase = createMockSupabase({
+        surveyResponse: {
+          id: mockResponseId,
+          business_id: mockBusinessId,
+          category_id: 'salon',
+          session_uuid: mockSessionUuid,
+          selected_options: [
+            { questionId: mockQuestionIds[0], optionId: 'opt1' },
+            { questionId: mockQuestionIds[1], optionId: 'opt2' },
+            { questionId: mockQuestionIds[2], optionId: 'opt3' },
+          ],
+          affirmed_facts_snapshot: ['Masterful & Precise'],
+          optional_note: 'Loved the service',
+          generation_attempts: 1,
+          is_generated: true,
+          created_at: new Date().toISOString(),
+          authenticity_confirmed: false,
+        },
+        cachedReservation: {
+          id: 'res-cached-1',
+          status: 'committed',
+          raw_draft: 'Unconfirmed cached draft content',
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      const req = new Request('http://localhost/generate-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: mockValidApiKey,
+          'x-real-ip': '103.21.244.15',
+        },
+        body: JSON.stringify({
+          responseId: mockResponseId,
+          submissionToken: validSubmissionToken,
+          idempotencyKey: `${mockSessionUuid}_recovery`,
+        }),
+      });
+
+      const res = await handleGenerateReview(req, {
+        ...defaultOptions,
+        supabaseClient: mockSupabase,
+      });
+
+      // Must be rejected with 403 before draft recovery can happen!
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error.code).toBe('ERR_AUTHENTICITY_UNCONFIRMED');
     });
 
     it('handles quota exhaustion (150 ceiling) with HTTP 429 ERR_QUOTA_EXHAUSTED (TC-API-06)', async () => {
@@ -1222,6 +1386,7 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
           generation_attempts: 0,
           is_generated: false,
           created_at: new Date().toISOString(),
+          authenticity_confirmed: true,
         },
       });
       mockSupabase1.rpc = async (fn: string, args: Record<string, unknown>) => {
@@ -1245,6 +1410,7 @@ describe('Edge Function: generate-review (API-PUB-03 / M4-T02 Unit Suite)', () =
           generation_attempts: 0,
           is_generated: false,
           created_at: new Date().toISOString(),
+          authenticity_confirmed: true,
         },
       });
       mockSupabase2.rpc = async (fn: string, args: Record<string, unknown>) => {

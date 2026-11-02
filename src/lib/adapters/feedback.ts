@@ -159,6 +159,7 @@ export function toFeedbackDto(row: SurveyResponseRow): CustomerFeedback {
     sessionUuid: row.session_uuid,
     purgedAt: row.purged_at,
     createdAt: row.created_at,
+    authenticityConfirmed: Boolean(row.authenticity_confirmed),
   };
 }
 
@@ -177,6 +178,7 @@ export function toFeedbackSubmissionPayload(submission: CustomerFeedbackSubmissi
   session_uuid: string;
   selected_options: Json;
   optional_note: string | null;
+  authenticity_confirmed: boolean;
 } {
   const sanitizedNote = submission.optionalNote
     ? submission.optionalNote.trim().slice(0, 150)
@@ -188,5 +190,6 @@ export function toFeedbackSubmissionPayload(submission: CustomerFeedbackSubmissi
     session_uuid: submission.sessionUuid,
     selected_options: submission.responses as unknown as Json,
     optional_note: sanitizedNote,
+    authenticity_confirmed: Boolean(submission.authenticityConfirmed),
   };
 }

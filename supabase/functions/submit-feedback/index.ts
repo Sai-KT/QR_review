@@ -121,6 +121,10 @@ export const SubmitFeedbackPayloadSchema = z.object({
     .array(ResponseItemSchema)
     .length(3, { message: 'responses must contain exactly three question answers' }),
   optionalNote: z.string().nullable().optional(),
+  authenticityConfirmed: z
+    .boolean({ message: 'authenticityConfirmed must be a boolean' })
+    .optional()
+    .default(false),
 });
 
 export type SubmitFeedbackPayload = z.infer<typeof SubmitFeedbackPayloadSchema>;
@@ -212,6 +216,7 @@ interface ExistingSurveyResponse {
   id: string;
   selected_options: Array<{ questionId: string; optionId: string }>;
   optional_note: string | null;
+  authenticity_confirmed?: boolean;
   created_at: string;
 }
 
@@ -272,7 +277,7 @@ export async function handleFeedbackSubmission(
     return buildErrorResponse(400, 'ERR_INVALID_PAYLOAD', message);
   }
 
-  const { publicQrId, sessionUuid, responses } = parseResult.data;
+  const { publicQrId, sessionUuid, responses, authenticityConfirmed } = parseResult.data;
   const rawOptionalNote = parseResult.data.optionalNote ?? null;
 
   // 5. Note Length Boundary Check (HTTP 422 on > 150 characters per ROADMAP M3-T03)
@@ -484,7 +489,7 @@ export async function handleFeedbackSubmission(
   // Pre-check if response already exists for this (business_id, session_uuid)
   const { data: existingResponse, error: existingError } = await supabase
     .from('survey_responses')
-    .select('id, selected_options, optional_note, created_at')
+    .select('id, selected_options, optional_note, created_at, authenticity_confirmed')
     .eq('business_id', businessId)
     .eq('session_uuid', sessionUuid)
     .maybeSingle<ExistingSurveyResponse>();
@@ -528,12 +533,15 @@ export async function handleFeedbackSubmission(
     }
 
     const notesMatch = existingNote === normalizedNote;
+    const existingAuthenticity = Boolean(existingResponse.authenticity_confirmed);
+    const submittedAuthenticity = Boolean(authenticityConfirmed);
+    const authenticityMatches = existingAuthenticity === submittedAuthenticity;
 
-    if (!setsMatch || !notesMatch) {
+    if (!setsMatch || !notesMatch || !authenticityMatches) {
       return buildErrorResponse(
         409,
         'ERR_IDEMPOTENCY_CONFLICT',
-        'A survey submission already exists for this session with different responses or note.',
+        'A survey submission already exists for this session with different responses, note, or authenticity confirmation.',
       );
     }
 
@@ -561,6 +569,7 @@ export async function handleFeedbackSubmission(
       affirmed_facts_snapshot: affirmedFactsSnapshot,
       optional_note: normalizedNote,
       session_uuid: sessionUuid,
+      authenticity_confirmed: Boolean(authenticityConfirmed),
     };
 
     const { data: insertedData, error: insertError } = await supabase
@@ -574,7 +583,7 @@ export async function handleFeedbackSubmission(
       if (insertError.code === '23505') {
         const { data: raceRow, error: raceError } = await supabase
           .from('survey_responses')
-          .select('id, selected_options, optional_note, created_at')
+          .select('id, selected_options, optional_note, created_at, authenticity_confirmed')
           .eq('business_id', businessId)
           .eq('session_uuid', sessionUuid)
           .single<ExistingSurveyResponse>();
@@ -585,6 +594,32 @@ export async function handleFeedbackSubmission(
             'ERR_DATABASE_ERROR',
             'Failed to resolve concurrent submission race.',
             true,
+          );
+        }
+
+        // Verify raceRow payload matches current submission
+        const raceExistingMap = new Map<string, string>();
+        for (const item of raceRow.selected_options) {
+          raceExistingMap.set(item.questionId, item.optionId);
+        }
+        let raceSetsMatch = raceRow.selected_options.length === responses.length;
+        if (raceSetsMatch) {
+          for (const item of responses) {
+            if (raceExistingMap.get(item.questionId) !== item.optionId) {
+              raceSetsMatch = false;
+              break;
+            }
+          }
+        }
+        const raceExistingNote = raceRow.optional_note === null ? null : raceRow.optional_note.trim();
+        const raceNotesMatch = raceExistingNote === normalizedNote;
+        const raceAuthenticityMatches = Boolean(raceRow.authenticity_confirmed) === Boolean(authenticityConfirmed);
+
+        if (!raceSetsMatch || !raceNotesMatch || !raceAuthenticityMatches) {
+          return buildErrorResponse(
+            409,
+            'ERR_IDEMPOTENCY_CONFLICT',
+            'A survey submission already exists for this session with different responses, note, or authenticity confirmation.',
           );
         }
 

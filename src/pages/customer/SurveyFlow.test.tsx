@@ -304,6 +304,7 @@ describe('SurveyFlow Component (M3-T06 / SCR-CUST-02..05)', () => {
         { questionId: '33333333-3333-4333-8333-333333333333', optionId: 'opt-q3-pos' },
       ],
       optionalNote: 'Loved the haircut by Priya!',
+      authenticityConfirmed: false,
     });
 
     // Success Confirmation
@@ -314,6 +315,69 @@ describe('SurveyFlow Component (M3-T06 / SCR-CUST-02..05)', () => {
 
     // Universal Anti-Gating Direct Google Action
     expect(screen.getByRole('button', { name: /Review Directly on Google Maps ↗/i })).toBeInTheDocument();
+  });
+
+  it('submits feedback with authenticityConfirmed: true when patron checks the self-attestation checkbox', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockQuestionsData);
+    const submitSpy = vi.spyOn(surveyApi, 'submitFeedback').mockResolvedValue({
+      status: 'recorded',
+      responseId: 'resp-uuid-12345',
+      submissionToken: 'sub_valid_token_xyz',
+    });
+
+    renderSurveyFlow('1');
+
+    // Q1
+    await waitFor(() => {
+      expect(screen.getByText('How was your hair service today?')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/Masterful & Precise/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+
+    // Q2
+    await waitFor(() => {
+      expect(screen.getByText('How was the hospitality & team ambience?')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/Warm & Professional/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 3/i }));
+
+    // Q3
+    await waitFor(() => {
+      expect(screen.getByText('Would you recommend Luxe Studio?')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/Definitely Yes/i));
+    await user.click(screen.getByRole('button', { name: /Next, optional note/i }));
+
+    // Note Editor
+    await waitFor(() => {
+      expect(screen.getByText('Add an Optional Note')).toBeInTheDocument();
+    });
+
+    // Check the self-attestation checkbox
+    const checkbox = screen.getByRole('checkbox', {
+      name: /This feedback reflects my genuine, personal experience at this business\./i,
+    });
+    expect(checkbox).not.toBeChecked();
+    await user.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    // Submit
+    const submitBtn = screen.getByRole('button', { name: /Submit feedback/i });
+    await user.click(submitBtn);
+
+    // Verify API call payload has authenticityConfirmed: true
+    expect(submitSpy).toHaveBeenCalledWith({
+      publicQrId: 'luxe000001',
+      sessionUuid: expect.any(String),
+      responses: [
+        { questionId: '11111111-1111-4111-8111-111111111111', optionId: 'opt-q1-pos' },
+        { questionId: '22222222-2222-4222-8222-222222222222', optionId: 'opt-q2-pos' },
+        { questionId: '33333333-3333-4333-8333-333333333333', optionId: 'opt-q3-pos' },
+      ],
+      optionalNote: null,
+      authenticityConfirmed: true,
+    });
   });
 
   it('detects stale question error and provides Refresh Questions recovery', async () => {

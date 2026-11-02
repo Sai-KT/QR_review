@@ -18,6 +18,8 @@ export interface NoteEditorProps {
   onDirectGoogleClick?: () => void;
   activeTokenText?: string;
   className?: string;
+  authenticityConfirmed?: boolean;
+  onChangeAuthenticityConfirmed?: (confirmed: boolean) => void;
 }
 
 /**
@@ -44,6 +46,8 @@ export function NoteEditor({
   onDirectGoogleClick,
   activeTokenText,
   className,
+  authenticityConfirmed = false,
+  onChangeAuthenticityConfirmed,
 }: NoteEditorProps): React.JSX.Element {
   const [failedLogo, setFailedLogo] = React.useState(false);
 
@@ -173,6 +177,26 @@ export function NoteEditor({
             🔒 <strong className="text-foreground">Privacy Notice:</strong> Notes are stored
             pseudonymously under our 30-day retention policy. We never sell your personal data.
           </p>
+        </div>
+
+        {/* Authenticity Confirmation Self-Attestation (Founder Decision M0-16 Design B) */}
+        <div className="rounded-lg bg-surface-subtle border border-border-subtle p-3.5">
+          <label
+            htmlFor="authenticity-confirmation-checkbox"
+            className="flex items-start gap-3 cursor-pointer select-none text-xs text-foreground leading-snug"
+          >
+            <input
+              type="checkbox"
+              id="authenticity-confirmation-checkbox"
+              checked={authenticityConfirmed}
+              onChange={(e) => onChangeAuthenticityConfirmed?.(e.target.checked)}
+              disabled={isSubmitting}
+              className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-background cursor-pointer accent-primary shrink-0"
+            />
+            <span className="text-xs text-foreground font-normal">
+              This feedback reflects my genuine, personal experience at this business.
+            </span>
+          </label>
         </div>
 
         {/* Submission Error Banner */}

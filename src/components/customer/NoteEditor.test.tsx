@@ -229,4 +229,160 @@ describe('NoteEditor Component (M3-T06 / SCR-CUST-05)', () => {
       'noopener,noreferrer',
     );
   });
+
+  describe('Customer Authenticity Confirmation (Founder Decision M0-16 Design B / Gate B)', () => {
+    it('renders self-attestation checkbox with exact approved copy, unchecked by default', () => {
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note=""
+          onChangeNote={vi.fn()}
+          onSubmit={vi.fn()}
+          onBack={vi.fn()}
+        />,
+      );
+
+      const checkbox = screen.getByRole('checkbox', {
+        name: /This feedback reflects my genuine, personal experience at this business\./i,
+      });
+      expect(checkbox).toBeInTheDocument();
+      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toHaveAttribute('id', 'authenticity-confirmation-checkbox');
+    });
+
+    it('toggles checkbox and triggers onChangeAuthenticityConfirmed callback on click', async () => {
+      const user = userEvent.setup();
+      const authSpy = vi.fn();
+
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note=""
+          onChangeNote={vi.fn()}
+          onSubmit={vi.fn()}
+          onBack={vi.fn()}
+          authenticityConfirmed={false}
+          onChangeAuthenticityConfirmed={authSpy}
+        />,
+      );
+
+      const checkbox = screen.getByRole('checkbox', {
+        name: /This feedback reflects my genuine, personal experience at this business\./i,
+      });
+      await user.click(checkbox);
+      expect(authSpy).toHaveBeenCalledWith(true);
+    });
+
+    it('toggles checkbox via keyboard Space press', async () => {
+      const user = userEvent.setup();
+      const authSpy = vi.fn();
+
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note=""
+          onChangeNote={vi.fn()}
+          onSubmit={vi.fn()}
+          onBack={vi.fn()}
+          authenticityConfirmed={false}
+          onChangeAuthenticityConfirmed={authSpy}
+        />,
+      );
+
+      const checkbox = screen.getByRole('checkbox', {
+        name: /This feedback reflects my genuine, personal experience at this business\./i,
+      });
+      checkbox.focus();
+      expect(checkbox).toHaveFocus();
+      await user.keyboard(' ');
+      expect(authSpy).toHaveBeenCalledWith(true);
+    });
+
+    it('reflects controlled checked state when authenticityConfirmed is true', () => {
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note=""
+          onChangeNote={vi.fn()}
+          onSubmit={vi.fn()}
+          onBack={vi.fn()}
+          authenticityConfirmed={true}
+          onChangeAuthenticityConfirmed={vi.fn()}
+        />,
+      );
+
+      const checkbox = screen.getByRole('checkbox', {
+        name: /This feedback reflects my genuine, personal experience at this business\./i,
+      });
+      expect(checkbox).toBeChecked();
+    });
+
+    it('disables checkbox when isSubmitting is true', () => {
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note=""
+          onChangeNote={vi.fn()}
+          onSubmit={vi.fn()}
+          onBack={vi.fn()}
+          isSubmitting={true}
+        />,
+      );
+
+      const checkbox = screen.getByRole('checkbox', {
+        name: /This feedback reflects my genuine, personal experience at this business\./i,
+      });
+      expect(checkbox).toBeDisabled();
+    });
+
+    it('anti-gating invariant: submission remains fully functional when checkbox is left unchecked', async () => {
+      const user = userEvent.setup();
+      const submitSpy = vi.fn();
+
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note="Feedback without AI self-attestation"
+          onChangeNote={vi.fn()}
+          onSubmit={submitSpy}
+          onBack={vi.fn()}
+          authenticityConfirmed={false}
+        />,
+      );
+
+      const submitBtn = screen.getByRole('button', { name: /Submit feedback/i });
+      expect(submitBtn).toBeEnabled();
+      await user.click(submitBtn);
+      expect(submitSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('anti-gating invariant: direct Google Maps review remains accessible when checkbox is unchecked', async () => {
+      const user = userEvent.setup();
+      const googleSpy = vi.fn();
+      const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+      render(
+        <NoteEditor
+          businessName="Luxe Salon"
+          note=""
+          onChangeNote={vi.fn()}
+          onSubmit={vi.fn()}
+          onBack={vi.fn()}
+          authenticityConfirmed={false}
+          targetGoogleUrl="https://search.google.com/local/writereview?placeid=test"
+          onDirectGoogleClick={googleSpy}
+        />,
+      );
+
+      const googleBtn = screen.getByRole('button', { name: /Review Directly on Google Maps ↗/i });
+      expect(googleBtn).toBeEnabled();
+      await user.click(googleBtn);
+      expect(googleSpy).toHaveBeenCalledTimes(1);
+      expect(windowOpenSpy).toHaveBeenCalledWith(
+        'https://search.google.com/local/writereview?placeid=test',
+        '_blank',
+        'noopener,noreferrer',
+      );
+    });
+  });
 });

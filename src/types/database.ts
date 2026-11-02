@@ -228,6 +228,7 @@ export interface Database {
           created_at: string;
           is_generated: boolean;
           generation_attempts: number;
+          authenticity_confirmed: boolean;
         };
         Insert: {
           id?: string;
@@ -241,6 +242,7 @@ export interface Database {
           created_at?: string;
           is_generated?: boolean;
           generation_attempts?: number;
+          authenticity_confirmed?: boolean;
         };
         Update: {
           id?: string;
@@ -254,6 +256,7 @@ export interface Database {
           created_at?: string;
           is_generated?: boolean;
           generation_attempts?: number;
+          authenticity_confirmed?: boolean;
         };
         Relationships: [
           {

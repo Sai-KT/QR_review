@@ -59,6 +59,7 @@ export function SurveyFlow({
   const [surveyVersion, setSurveyVersion] = React.useState<string>('');
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [note, setNote] = React.useState<string>('');
+  const [authenticityConfirmed, setAuthenticityConfirmed] = React.useState<boolean>(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [staleNotice, setStaleNotice] = React.useState<string | null>(null);
   const [submissionResult, setSubmissionResult] = React.useState<SubmitFeedbackSuccessResponse | null>(null);
@@ -304,6 +305,7 @@ export function SurveyFlow({
         sessionUuid,
         responses,
         optionalNote: note.trim() || null,
+        authenticityConfirmed,
       });
 
       setSubmissionResult(result);
@@ -609,6 +611,8 @@ export function SurveyFlow({
           logoUrl={business.logoUrl}
           note={note}
           onChangeNote={setNote}
+          authenticityConfirmed={authenticityConfirmed}
+          onChangeAuthenticityConfirmed={setAuthenticityConfirmed}
           onSubmit={() => void handleSubmitFeedback()}
           onBack={handleBackFromNotes}
           isSubmitting={status === 'submitting'}

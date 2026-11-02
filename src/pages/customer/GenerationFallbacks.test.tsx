@@ -359,7 +359,7 @@ describe('GenerationFallbacks Component Suite (M4-T08 / SCR-CUST-10 & SCR-CUST-1
   /* -------------------------------------------------------------------------- */
   describe('Direct Google Review Navigation & Telemetry', () => {
     it('opens verified Google review URL in a new tab with security attributes', () => {
-      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({ status: 'recorded' });
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({ status: 'accepted' });
       const onDirectGoogleMock = vi.fn();
 
       render(
@@ -434,7 +434,7 @@ describe('GenerationFallbacks Component Suite (M4-T08 / SCR-CUST-10 & SCR-CUST-1
     });
 
     it('prevents duplicate telemetry dispatches on rapid double clicks of Google button', () => {
-      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({ status: 'recorded' });
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({ status: 'accepted' });
 
       render(<GenerationTimeoutCard business={mockBusiness} />);
 

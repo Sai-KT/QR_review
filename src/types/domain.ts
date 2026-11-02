@@ -144,6 +144,7 @@ export interface CustomerFeedbackSubmission {
   sessionUuid: string;
   responses: SelectedSurveyOption[];
   optionalNote: string | null;
+  authenticityConfirmed?: boolean;
 }
 
 export interface CustomerFeedbackSubmissionResult {
@@ -161,6 +162,7 @@ export interface SubmitFeedbackRequest {
   sessionUuid: string;
   responses: SelectedSurveyOption[];
   optionalNote?: string | null;
+  authenticityConfirmed?: boolean;
 }
 
 /**
@@ -186,6 +188,7 @@ export interface CustomerFeedback {
   sessionUuid: string;
   purgedAt: string | null;
   createdAt: string;
+  authenticityConfirmed?: boolean;
 }
 
 /* -------------------------------------------------------------------------- */

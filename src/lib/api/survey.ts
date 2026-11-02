@@ -169,6 +169,7 @@ export interface SubmitFeedbackPayload {
   sessionUuid: string;
   responses: FeedbackAnswerItem[];
   optionalNote?: string | null;
+  authenticityConfirmed?: boolean;
 }
 
 export interface SubmitFeedbackSuccessResponse {

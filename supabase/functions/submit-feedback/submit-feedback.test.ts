@@ -90,9 +90,11 @@ interface MockDbConfig {
     id: string;
     selected_options: Array<{ questionId: string; optionId: string }>;
     optional_note: string | null;
+    authenticity_confirmed?: boolean;
     created_at: string;
   } | null;
   insertError?: { code: string; message: string } | null;
+  onInsert?: (payload: unknown) => void;
 }
 
 function createMockSupabaseClient(config: MockDbConfig = {}) {
@@ -174,7 +176,8 @@ function createMockSupabaseClient(config: MockDbConfig = {}) {
               })),
             })),
           })),
-          insert: vi.fn(() => {
+          insert: vi.fn((payload: unknown) => {
+            config.onInsert?.(payload);
             if (config.insertError) {
               return {
                 select: vi.fn(() => ({
@@ -572,6 +575,161 @@ describe('submit-feedback Edge Function (API-PUB-04 / M3-T03)', () => {
 
     expect(verification.valid).toBe(true);
     expect(verification.responseId).toBe(body.responseId);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* 8. Customer Authenticity Confirmation (Founder Decision M0-16 / Gate B) */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Customer Authenticity Confirmation (M0-16 Design B)', () => {
+    it('persists authenticity_confirmed: true when submitted with affirmative attestation', async () => {
+      let capturedPayload: Record<string, unknown> | null = null;
+      const client = createMockSupabaseClient({
+        onInsert: (payload) => {
+          capturedPayload = payload as Record<string, unknown>;
+        },
+      });
+
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: true,
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(201);
+      expect(capturedPayload).not.toBeNull();
+      expect(capturedPayload?.['authenticity_confirmed']).toBe(true);
+    });
+
+    it('persists authenticity_confirmed: false when submitted with false', async () => {
+      let capturedPayload: Record<string, unknown> | null = null;
+      const client = createMockSupabaseClient({
+        onInsert: (payload) => {
+          capturedPayload = payload as Record<string, unknown>;
+        },
+      });
+
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: false,
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(201);
+      expect(capturedPayload).not.toBeNull();
+      expect(capturedPayload?.['authenticity_confirmed']).toBe(false);
+    });
+
+    it('defaults authenticity_confirmed to false when omitted (backward compatibility)', async () => {
+      let capturedPayload: Record<string, unknown> | null = null;
+      const client = createMockSupabaseClient({
+        onInsert: (payload) => {
+          capturedPayload = payload as Record<string, unknown>;
+        },
+      });
+
+      const req = buildTestRequest(validPayload);
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(201);
+      expect(capturedPayload).not.toBeNull();
+      expect(capturedPayload?.['authenticity_confirmed']).toBe(false);
+    });
+
+    it('rejects loose string coercion ("true") with HTTP 400 ERR_INVALID_PAYLOAD', async () => {
+      const client = createMockSupabaseClient();
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: 'true',
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_INVALID_PAYLOAD');
+      expect(body.error.message).toContain('authenticityConfirmed');
+    });
+
+    it('rejects loose string coercion ("false") with HTTP 400 ERR_INVALID_PAYLOAD', async () => {
+      const client = createMockSupabaseClient();
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: 'false',
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_INVALID_PAYLOAD');
+      expect(body.error.message).toContain('authenticityConfirmed');
+    });
+
+    it('rejects replay attempting to upgrade authenticity from false to true with HTTP 409', async () => {
+      const client = createMockSupabaseClient({
+        existingResponse: {
+          id: 'existing-resp-uuid-1234',
+          selected_options: validPayload.responses,
+          optional_note: 'Loved the trimmer fade!',
+          authenticity_confirmed: false,
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: true,
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_IDEMPOTENCY_CONFLICT');
+    });
+
+    it('rejects replay attempting to downgrade authenticity from true to false with HTTP 409', async () => {
+      const client = createMockSupabaseClient({
+        existingResponse: {
+          id: 'existing-resp-uuid-1234',
+          selected_options: validPayload.responses,
+          optional_note: 'Loved the trimmer fade!',
+          authenticity_confirmed: true,
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: false,
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.code).toBe('ERR_IDEMPOTENCY_CONFLICT');
+    });
+
+    it('allows identical replay with matching authenticity confirmation', async () => {
+      const client = createMockSupabaseClient({
+        existingResponse: {
+          id: 'existing-resp-uuid-1234',
+          selected_options: validPayload.responses,
+          optional_note: 'Loved the trimmer fade!',
+          authenticity_confirmed: true,
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      const req = buildTestRequest({
+        ...validPayload,
+        authenticityConfirmed: true,
+      });
+      const res = await handleFeedbackSubmission(req, client, mockSigningSecret);
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.status).toBe('recorded');
+      expect(body.responseId).toBe('existing-resp-uuid-1234');
+    });
   });
 });
 

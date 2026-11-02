@@ -862,7 +862,7 @@ export async function handleGenerateReview(
   const { data: responseData, error: responseErr } = await supabase
     .from('survey_responses')
     .select(
-      'id, business_id, category_id, session_uuid, selected_options, affirmed_facts_snapshot, optional_note, generation_attempts, is_generated, created_at',
+      'id, business_id, category_id, session_uuid, selected_options, affirmed_facts_snapshot, optional_note, generation_attempts, is_generated, created_at, authenticity_confirmed',
     )
     .eq('id', responseId)
     .maybeSingle();
@@ -983,6 +983,20 @@ export async function handleGenerateReview(
       403,
       'ERR_RESPONSE_MISMATCH',
       'Submission token was minted for a different survey response.',
+      correlationId,
+      false,
+    );
+  }
+
+  // 7b. Customer Authenticity Confirmation Gate (Founder Decision M0-16 Design B)
+  // Fail-closed verification: AI review generation requires recorded affirmative customer self-attestation.
+  // Surveys lacking recorded affirmative confirmation (FALSE, NULL, or missing) are rejected with HTTP 403.
+  // This gate executes BEFORE draft recovery, rate limiting, and quota reservation.
+  if (responseData.authenticity_confirmed !== true) {
+    return buildErrorResponse(
+      403,
+      'ERR_AUTHENTICITY_UNCONFIRMED',
+      'AI review generation requires recorded customer authenticity confirmation.',
       correlationId,
       false,
     );
