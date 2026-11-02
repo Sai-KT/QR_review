@@ -265,7 +265,54 @@ async function runVerification() {
       'Generated draft matches FIX-AI-NEG-CAFE grounded draft',
     );
     assert(negCafeDraft.sentiment === 'negative', 'Cafe sentiment is negative');
-    assert(negCafeDraft.wordCount < 60, 'Cafe critical draft word count < 60');
+    assert(
+      negCafeDraft.wordCount <= 49,
+      `Cafe critical draft word count respects <= 49 words ceiling (actual: ${negCafeDraft.wordCount})`,
+    );
+
+    // Section 5 Mandatory Grounding Tests:
+    const cafeDraftText = negCafeDraft.reviewDraft.toLowerCase();
+    assert(
+      cafeDraftText.includes('cold') && cafeDraftText.includes('counter service'),
+      'Preserves explicitly affirmed cold beverage and slow counter service facts',
+    );
+    assert(
+      !cafeDraftText.includes('delayed'),
+      'Disjunctive "Cold or delayed" disambiguated by note to cold only (no "delayed" claim)',
+    );
+    assert(
+      !cafeDraftText.includes('crowded') && !cafeDraftText.includes('noisy'),
+      'Disjunctive "Too crowded or noisy" not converted into ungrounded conjunction',
+    );
+    assert(
+      !cafeDraftText.includes('seating area'),
+      'Unconfirmed specific "seating area" location detail omitted',
+    );
+    assert(
+      !cafeDraftText.includes('appointment') && !cafeDraftText.includes('price') && !cafeDraftText.includes('pricing'),
+      'No appointment times or pricing fabricated in cafe draft',
+    );
+    assert(
+      !cafeDraftText.includes('warm and attentive') && !cafeDraftText.includes('5 star') && !cafeDraftText.includes('wonderful'),
+      'No false praise or star ratings inserted into critical cafe draft',
+    );
+
+    // Test Section 5 Point 10: Critical cafe prompt with different answer selections does not receive unsupported facts
+    const unmappedCafeRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: 'The Daily Roast Cafe: Too crowded or noisy space. Order was stale.' }],
+          },
+        ],
+      }),
+    });
+    assert(
+      unmappedCafeRes.status === 422,
+      'Critical cafe prompt with different selections fails conservatively with HTTP 422 (avoids fabricating facts)',
+    );
 
     // Test header-based scenario selection: x-mock-scenario
     const scenarioRes = await fetch(primaryModelUrl, {

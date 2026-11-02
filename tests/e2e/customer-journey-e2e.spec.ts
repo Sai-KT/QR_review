@@ -314,17 +314,23 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
     await expect(draftTextarea).toBeVisible();
 
     const negativeDraft = await draftTextarea.inputValue();
-    // 1. Verify word count strictly adheres to <60 words budget (FIX-AI-NEG-CAFE is 25 words)
+    // 1. Verify word count strictly respects the 49-word ceiling (FIX-AI-NEG-CAFE is 13 words)
     const wordCount = negativeDraft.trim().split(/\s+/).length;
-    expect(wordCount).toBeLessThan(60);
+    expect(wordCount).toBeLessThanOrEqual(49);
 
     // 2. Fact Grounding: verify customer-affirmed critical facts are faithfully represented
     const lower = negativeDraft.toLowerCase();
-    expect(lower).toMatch(/cold|delayed/i);
-    expect(lower).toMatch(/counter service|longer than expected|took too long/i);
-    expect(lower).toMatch(/crowded|noisy/i);
+    expect(lower).toMatch(/cold/i);
+    expect(lower).toMatch(/counter service/i);
+    expect(lower).toMatch(/took too long/i);
 
-    // 3. Negative Grounding: verify unsupported facts / hallucinations are strictly absent
+    // 3. Disjunctive & Negative Grounding: verify unsupported facts / hallucinations are strictly absent
+    // Disjunctive MCQ "Cold or delayed" disambiguated by note to cold only (no "delayed" claim)
+    expect(lower).not.toMatch(/delayed/i);
+    // Disjunctive MCQ "Too crowded or noisy" not merged into ungrounded conjunction
+    expect(lower).not.toMatch(/crowded|noisy/i);
+    // Unconfirmed location specifics omitted (no "seating area" invention)
+    expect(lower).not.toMatch(/seating area/i);
     // No fabricated praise, star ratings, or perfection claims
     expect(lower).not.toMatch(/5 stars|five star|perfection|loved everything|warm and attentive/i);
     // No invented appointment details or wait durations not submitted
@@ -798,6 +804,36 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
     page,
   }) => {
     // Zero page.route mocking! Tests real Edge Function against synthetic exhausted merchant (150/150)
+    const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
+      auth: { persistSession: false },
+    });
+    // Ensure synthetic exhausted merchant fixture is active
+    await client.from('businesses').upsert({
+      id: SYNTHETIC_EXHAUSTED_BIZ_ID,
+      owner_id: '00000000-0000-4000-8000-000000000002',
+      category_id: 'salon',
+      public_qr_id: SYNTHETIC_EXHAUSTED_QR_ID,
+      vanity_slug: SYNTHETIC_EXHAUSTED_QR_ID,
+      name: 'Quota Exhausted Salon',
+      google_review_url: 'https://g.page/r/quota-exhausted/review',
+      account_status: 'active',
+      is_active: true,
+    });
+    await client.from('subscriptions').upsert({
+      business_id: SYNTHETIC_EXHAUSTED_BIZ_ID,
+      plan_tier: 'standard_recurring',
+      subscription_status: 'active',
+    });
+    const cycle = new Date().toISOString().slice(0, 7);
+    await client.from('tenant_quotas').upsert({
+      business_id: SYNTHETIC_EXHAUSTED_BIZ_ID,
+      billing_cycle: cycle,
+      max_limit: 150,
+      used_count: 150,
+      reserved_count: 0,
+      reset_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
     await page.goto('/q/quotaex001');
     await expect(page.getByRole('heading', { name: 'Quota Exhausted Salon' })).toBeVisible({ timeout: 10000 });
     await page.getByRole('button', { name: /Start 30-Sec(ond)? Review/i }).click();
@@ -834,9 +870,6 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
     await expect(page.getByRole('button', { name: /Retry/i })).not.toBeVisible();
 
     // Assert in PostgreSQL that quota counts were untouched
-    const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
-      auth: { persistSession: false },
-    });
     const { data: quotaRow } = await client
       .from('tenant_quotas')
       .select('used_count, reserved_count')

@@ -62,8 +62,8 @@ export const GROUNDED_FIXTURES: Record<string, GroundedFixture> = {
     category: 'critical_cafe',
     payload: {
       reviewDraft:
-        'My beverage was cold and delayed, and counter service took longer than expected. The seating area was also quite crowded and noisy during my visit.',
-      wordCount: 25,
+        'My beverage was cold, and counter service took too long during my visit.',
+      wordCount: 13,
       sentiment: 'negative',
     },
   },
@@ -72,7 +72,7 @@ export const GROUNDED_FIXTURES: Record<string, GroundedFixture> = {
 /**
  * Determine fixture from prompt text and headers
  */
-export function resolveFixture(promptText: string, scenarioHeader?: string): GroundedFixture {
+export function resolveFixture(promptText: string, scenarioHeader?: string): GroundedFixture | null {
   if (scenarioHeader) {
     const key = scenarioHeader.toUpperCase();
     if (GROUNDED_FIXTURES[key]) return GROUNDED_FIXTURES[key]!;
@@ -86,27 +86,59 @@ export function resolveFixture(promptText: string, scenarioHeader?: string): Gro
 
   const lower = promptText.toLowerCase();
 
-  // Grounded Negative Cafe Feedback: Matches critical cafe survey selections and note
-  if (
-    lower.includes('fix-ai-neg-cafe') ||
-    ((lower.includes('cafe') || lower.includes('roast') || lower.includes('beverage')) &&
-      (lower.includes('service took too long') ||
-        lower.includes('beverage was cold') ||
-        lower.includes('slow counter') ||
-        lower.includes('too crowded')))
-  ) {
+  // Explicit test scenario override
+  if (lower.includes('fix-ai-neg-cafe')) {
     return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
   }
 
-  if (
-    lower.includes('fix-ai-neg') ||
+  // 1. Grounded Negative Cafe Feedback:
+  // Requires:
+  // a) Cafe context (cafe, roast, daily roast)
+  // b) Affirmed cold beverage (note or selection explicitly disambiguating to cold)
+  // c) Affirmed slow counter service / long service delay
+  const isCafe = lower.includes('daily roast') || lower.includes('roast') || lower.includes('cafe');
+  const hasColdBeverage =
+    lower.includes('beverage was cold') ||
+    (lower.includes('beverage') && lower.includes('cold'));
+  const hasSlowCounterService =
     lower.includes('service took too long') ||
+    lower.includes('slow counter') ||
+    (lower.includes('counter') && lower.includes('slow'));
+
+  if (isCafe && hasColdBeverage && hasSlowCounterService) {
+    return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
+  }
+
+  // Critical cafe prompt with DIFFERENT selections (e.g. only crowding, different complaints):
+  // Must NOT falsely return FIX-AI-NEG-CAFE (asserting cold beverage) or FIX-AI-POS (false praise).
+  // Fails conservatively to prevent fabricating unconfirmed facts.
+  const hasUnrelatedCafeCriticisms =
+    isCafe &&
+    (lower.includes('too crowded') ||
+      lower.includes('noisy space') ||
+      lower.includes('order mix-up') ||
+      lower.includes('stale') ||
+      lower.includes('disappointed') ||
+      lower.includes('bad'));
+
+  if (hasUnrelatedCafeCriticisms && !(hasColdBeverage && hasSlowCounterService)) {
+    return null;
+  }
+
+  // 2. Critical Salon Feedback:
+  // Requires explicit salon context with appointment delay or pricing complaint
+  const isSalon = lower.includes('salon') || lower.includes('luxe') || lower.includes('hair') || lower.includes('beauty');
+  const hasSalonCriticalFacts =
+    lower.includes('fix-ai-neg') ||
     lower.includes('waited 45 mins') ||
-    lower.includes('pricing was higher than expected')
-  ) {
+    lower.includes('appointment time') ||
+    (isSalon && (lower.includes('pricing was higher') || (lower.includes('service took too long') && lower.includes('appointment'))));
+
+  if (hasSalonCriticalFacts) {
     return GROUNDED_FIXTURES['FIX-AI-NEG']!;
   }
 
+  // 3. Neutral Feedback
   if (
     lower.includes('fix-ai-neu') ||
     lower.includes('standard / satisfactory') ||
@@ -115,6 +147,7 @@ export function resolveFixture(promptText: string, scenarioHeader?: string): Gro
     return GROUNDED_FIXTURES['FIX-AI-NEU']!;
   }
 
+  // 4. Default Positive Feedback
   return GROUNDED_FIXTURES['FIX-AI-POS']!;
 }
 
@@ -343,6 +376,21 @@ export function createRequestHandler() {
           ? String(req.headers['x-mock-scenario'])
           : undefined;
         const fixture = resolveFixture(promptText, scenarioHeader);
+
+        if (!fixture) {
+          res.statusCode = 422;
+          res.end(
+            JSON.stringify({
+              error: {
+                code: 422,
+                message:
+                  'Mock Gemini Grounding: Prompt contains ungrounded or conflicting critical facts that cannot be mapped to a deterministic fixture safely.',
+                status: 'UNPROCESSABLE_ENTITY',
+              },
+            }),
+          );
+          return;
+        }
 
         res.statusCode = 200;
 
