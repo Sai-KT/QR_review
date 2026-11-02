@@ -147,8 +147,11 @@ describe('HandoffPage Component (SCR-CUST-08 / M4-T07)', () => {
 
     it('transitions to success state when Try Automatic Copy Again succeeds', async () => {
       const user = userEvent.setup();
-      const copySpy = vi.spyOn(clipboardModule, 'copyTextToClipboard').mockResolvedValue({
-        success: true,
+      const writeTextSpy = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: writeTextSpy },
+        configurable: true,
+        writable: true,
       });
       const handleCopySuccess = vi.fn();
 
@@ -164,7 +167,7 @@ describe('HandoffPage Component (SCR-CUST-08 / M4-T07)', () => {
       const retryBtn = screen.getByTestId('retry-copy-button');
       await user.click(retryBtn);
 
-      expect(copySpy).toHaveBeenCalledWith(sampleApprovedDraft);
+      expect(writeTextSpy).toHaveBeenCalledWith(sampleApprovedDraft);
       expect(handleCopySuccess).toHaveBeenCalledTimes(1);
 
       // Transitions to success banner
@@ -294,7 +297,7 @@ describe('HandoffPage Component (SCR-CUST-08 / M4-T07)', () => {
   /* 5. Telemetry & Analytics Safety (API-PUB-05)                               */
   /* -------------------------------------------------------------------------- */
   describe('Analytics & Telemetry Safety', () => {
-    it('dispatches EVENT_GOOGLE_REDIRECT_CLICK on Google Maps click without logging draft text', async () => {
+    it('dispatches EVENT_GOOGLE_REDIRECT_CLICK on assisted Google Maps click without logging draft text', async () => {
       const user = userEvent.setup();
       const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({
         status: 'accepted',
@@ -324,6 +327,131 @@ describe('HandoffPage Component (SCR-CUST-08 / M4-T07)', () => {
       expect(JSON.stringify(payloadArg)).not.toContain('Loved the haircut');
     });
 
+    it('dispatches EVENT_GOOGLE_BYPASS_CLICK when clicking direct Google link in no-draft state', async () => {
+      const user = userEvent.setup();
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({
+        status: 'accepted',
+      });
+      const handleBypassClick = vi.fn();
+
+      render(
+        <HandoffPage
+          business={mockBusiness}
+          draft={null}
+          onDirectGoogleBypassClick={handleBypassClick}
+        />,
+      );
+
+      const directBtn = screen.getByTestId('handoff-direct-google-button');
+      await user.click(directBtn);
+
+      expect(handleBypassClick).toHaveBeenCalledTimes(1);
+      expect(trackEventSpy).toHaveBeenCalledTimes(1);
+      expect(trackEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          publicQrId: mockBusiness.publicQrId,
+          eventName: 'EVENT_GOOGLE_BYPASS_CLICK',
+        }),
+      );
+    });
+
+    it('dispatches EVENT_GOOGLE_BYPASS_CLICK when patron clicks direct bypass link on active review screen', async () => {
+      const user = userEvent.setup();
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({
+        status: 'accepted',
+      });
+      const handleBypassClick = vi.fn();
+
+      render(
+        <HandoffPage
+          business={mockBusiness}
+          draft={sampleApprovedDraft}
+          onDirectGoogleBypassClick={handleBypassClick}
+        />,
+      );
+
+      const bypassLink = screen.getByTestId('handoff-direct-bypass-link');
+      await user.click(bypassLink);
+
+      expect(handleBypassClick).toHaveBeenCalledTimes(1);
+      expect(trackEventSpy).toHaveBeenCalledTimes(1);
+      expect(trackEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          publicQrId: mockBusiness.publicQrId,
+          eventName: 'EVENT_GOOGLE_BYPASS_CLICK',
+        }),
+      );
+    });
+
+    it('dispatches EVENT_COPY_ATTEMPTED and EVENT_COPY_SUCCESS when re-copying review text', async () => {
+      const user = userEvent.setup();
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({
+        status: 'accepted',
+      });
+      vi.spyOn(clipboardModule, 'copyTextToClipboard').mockResolvedValue({
+        success: true,
+      });
+
+      render(
+        <HandoffPage
+          business={mockBusiness}
+          draft={sampleApprovedDraft}
+        />,
+      );
+
+      const recopyBtn = screen.getByTestId('recopy-review-button');
+      await user.click(recopyBtn);
+
+      expect(trackEventSpy).toHaveBeenCalledTimes(2);
+      expect(trackEventSpy).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          publicQrId: mockBusiness.publicQrId,
+          eventName: 'EVENT_COPY_ATTEMPTED',
+        }),
+      );
+      expect(trackEventSpy).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          publicQrId: mockBusiness.publicQrId,
+          eventName: 'EVENT_COPY_SUCCESS',
+        }),
+      );
+    });
+
+    it('dispatches EVENT_COPY_ATTEMPTED but NEVER EVENT_COPY_SUCCESS when re-copy fails', async () => {
+      const user = userEvent.setup();
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({
+        status: 'accepted',
+      });
+      const notAllowedErr = new Error('Permission denied');
+      notAllowedErr.name = 'NotAllowedError';
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockRejectedValue(notAllowedErr) },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <HandoffPage
+          business={mockBusiness}
+          draft={sampleApprovedDraft}
+        />,
+      );
+
+      const recopyBtn = screen.getByTestId('recopy-review-button');
+      await user.click(recopyBtn);
+
+      // Only EVENT_COPY_ATTEMPTED must be emitted; NEVER EVENT_COPY_SUCCESS!
+      expect(trackEventSpy).toHaveBeenCalledTimes(1);
+      expect(trackEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          publicQrId: mockBusiness.publicQrId,
+          eventName: 'EVENT_COPY_ATTEMPTED',
+        }),
+      );
+    });
+
     it('does not prevent window navigation when analytics fails or throws', async () => {
       const user = userEvent.setup();
       const windowOpenSpy = vi.spyOn(window, 'open');
@@ -345,6 +473,26 @@ describe('HandoffPage Component (SCR-CUST-08 / M4-T07)', () => {
         '_blank',
         'noopener,noreferrer',
       );
+    });
+
+    it('guards against duplicate analytics events on rapid double-clicks', async () => {
+      const trackEventSpy = vi.spyOn(analyticsModule, 'trackEvent').mockResolvedValue({
+        status: 'accepted',
+      });
+
+      render(
+        <HandoffPage
+          business={mockBusiness}
+          draft={sampleApprovedDraft}
+        />,
+      );
+
+      const openBtn = screen.getByTestId('open-google-maps-button');
+      // Rapid double clicks
+      fireEvent.click(openBtn);
+      fireEvent.click(openBtn);
+
+      expect(trackEventSpy).toHaveBeenCalledTimes(1);
     });
   });
 

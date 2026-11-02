@@ -16,7 +16,7 @@ import {
   formatWhatsAppUrl,
   getClientSessionUuid,
 } from '../../lib/utils/customer';
-import { copyTextToClipboard } from '../../lib/clipboard';
+import { copyReviewDraftWithTelemetry } from '../../lib/clipboard';
 import { trackEvent } from '../../lib/api/analytics';
 
 export type ClipboardUiState = 'success' | 'fallback' | 'idle';
@@ -28,8 +28,10 @@ export interface HandoffPageProps {
   draft?: string | null;
   /** Initial clipboard UI state (defaults to 'success' if draft is present) */
   initialClipboardState?: ClipboardUiState;
-  /** Callback when Google redirect button is clicked */
+  /** Callback when Google redirect button is clicked (assisted handoff) */
   onGoogleRedirectClick?: () => void;
+  /** Callback when customer explicitly bypasses review draft and navigates directly to Google */
+  onDirectGoogleBypassClick?: () => void;
   /** Callback when re-copy succeeds */
   onCopySuccess?: () => void;
   /** Callback when customer taps back to edit draft */
@@ -45,6 +47,11 @@ export interface HandoffPageProps {
  * - FR-CUST-007: Resilient clipboard copy confirmation & verified external Google handoff
  * - Core Invariant #6: Two-click handoff policy (explicit customer-directed Google launch; zero automatic redirect)
  * - Core Invariant #7: Universal anti-gating (accessible to all patrons regardless of sentiment)
+ * - Canonical Telemetry Taxonomy:
+ *     - EVENT_COPY_ATTEMPTED: When customer initiates a clipboard write
+ *     - EVENT_COPY_SUCCESS: Strictly when clipboard Promise resolves successfully
+ *     - EVENT_GOOGLE_REDIRECT_CLICK: When customer opens Google Maps to post copied review (assisted)
+ *     - EVENT_GOOGLE_BYPASS_CLICK: When customer navigates to Google directly without review draft
  * - Defensive Clipboard Recovery: Accessible manual-copy textarea fallback when Clipboard API is denied/unsupported
  */
 export function HandoffPage({
@@ -52,6 +59,7 @@ export function HandoffPage({
   draft,
   initialClipboardState,
   onGoogleRedirectClick,
+  onDirectGoogleBypassClick,
   onCopySuccess,
   onBack,
   className,
@@ -70,6 +78,7 @@ export function HandoffPage({
 
   // In-flight guard to avoid duplicate analytics dispatches on rapid double clicks
   const isRedirectingRef = React.useRef<boolean>(false);
+  const isBypassingRef = React.useRef<boolean>(false);
 
   const cleanGoogleUrl = sanitizeGoogleReviewUrl(business.googleReviewUrl);
   const destinationGoogleUrl = cleanGoogleUrl || 'https://www.google.com/maps';
@@ -82,14 +91,17 @@ export function HandoffPage({
     [business.publicQrId],
   );
 
-  // 1. Explicit Re-Copy Handler
+  // 1. Explicit Re-Copy Handler with Telemetry (EVENT_COPY_ATTEMPTED & EVENT_COPY_SUCCESS)
   const handleCopyAgain = async () => {
     if (!draft || isCopying) return;
 
     setIsCopying(true);
     setCopyFeedbackNotice(null);
 
-    const result = await copyTextToClipboard(draft);
+    const result = await copyReviewDraftWithTelemetry(draft, {
+      publicQrId: business.publicQrId,
+      sessionUuid,
+    });
 
     if (result.success) {
       setClipboardState('success');
@@ -103,7 +115,7 @@ export function HandoffPage({
     setIsCopying(false);
   };
 
-  // 2. Customer-Initiated Google Maps Launch (Second Click in Two-Click Handoff)
+  // 2. Assisted Google Maps Launch (Second Click in Two-Click Handoff: EVENT_GOOGLE_REDIRECT_CLICK)
   const handleLaunchGoogleMaps = () => {
     // Immediate synchronous window opening to avoid browser popup blockers
     window.open(destinationGoogleUrl, '_blank', 'noopener,noreferrer');
@@ -117,6 +129,24 @@ export function HandoffPage({
       trackEvent({
         publicQrId: business.publicQrId,
         eventName: 'EVENT_GOOGLE_REDIRECT_CLICK',
+        sessionUuid,
+      }).catch(() => {
+        // Non-critical telemetry failure gracefully swallowed
+      });
+    }
+  };
+
+  // 3. Direct Google Bypass Launch (Independent Anti-Gating: EVENT_GOOGLE_BYPASS_CLICK)
+  const handleDirectGoogleBypass = () => {
+    window.open(destinationGoogleUrl, '_blank', 'noopener,noreferrer');
+
+    onDirectGoogleBypassClick?.();
+
+    if (!isBypassingRef.current) {
+      isBypassingRef.current = true;
+      trackEvent({
+        publicQrId: business.publicQrId,
+        eventName: 'EVENT_GOOGLE_BYPASS_CLICK',
         sessionUuid,
       }).catch(() => {
         // Non-critical telemetry failure gracefully swallowed
@@ -144,11 +174,12 @@ export function HandoffPage({
         </CardHeader>
 
         <CardContent className="space-y-3 pt-2">
+          {/* Direct Bypass Action: Emits EVENT_GOOGLE_BYPASS_CLICK */}
           <Button
             type="button"
             variant="accent"
             size="touch"
-            onClick={handleLaunchGoogleMaps}
+            onClick={handleDirectGoogleBypass}
             className="w-full font-semibold min-h-[48px]"
             data-testid="handoff-direct-google-button"
           >
@@ -319,7 +350,7 @@ export function HandoffPage({
 
         {/* Action Controls */}
         <div className="space-y-2 pt-2">
-          {/* Primary Action (Second Click in Two-Click Handoff): Open Google Maps to Post */}
+          {/* Primary Action (Second Click in Two-Click Handoff): Open Google Maps to Post (EVENT_GOOGLE_REDIRECT_CLICK) */}
           <Button
             type="button"
             variant="accent"
@@ -362,9 +393,21 @@ export function HandoffPage({
             </Button>
           )}
 
+          {/* Independent Direct Google Review Bypass Link (EVENT_GOOGLE_BYPASS_CLICK) */}
+          <div className="pt-2 border-t border-border-subtle mt-2 text-center">
+            <button
+              type="button"
+              onClick={handleDirectGoogleBypass}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 cursor-pointer py-1"
+              data-testid="handoff-direct-bypass-link"
+            >
+              Review directly on Google without copied text ↗
+            </button>
+          </div>
+
           {/* Optional WhatsApp Manager Contact Link */}
           {whatsAppUrl && (
-            <div className="pt-2 border-t border-border-subtle mt-2">
+            <div className="pt-1">
               <Button
                 type="button"
                 variant="ghost"

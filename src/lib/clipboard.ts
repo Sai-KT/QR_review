@@ -10,6 +10,8 @@
  * in-flight double-click guards, and zero persistent storage of review drafts.
  */
 
+import { trackEvent } from './api/analytics';
+
 export type ClipboardErrorCode =
   | 'EMPTY_TEXT'
   | 'UNSUPPORTED'
@@ -110,3 +112,45 @@ export async function copyTextToClipboard(text?: string | null): Promise<Clipboa
   }
 }
 
+export interface CopyReviewTelemetryContext {
+  publicQrId: string;
+  sessionUuid: string;
+}
+
+/**
+ * Coordinates customer clipboard copy with canonical telemetry tracking (API-PUB-05):
+ * - Emits EVENT_COPY_ATTEMPTED when copy is initiated
+ * - Invokes copyTextToClipboard(draft)
+ * - Emits EVENT_COPY_SUCCESS strictly if the clipboard write resolves successfully
+ * - Never emits EVENT_COPY_SUCCESS on rejection, permission denial, or unsupported browser
+ * - Never includes draft text in analytics payloads
+ * - Non-blocking: Telemetry failures do not fail the clipboard operation
+ */
+export async function copyReviewDraftWithTelemetry(
+  draft?: string | null,
+  context?: CopyReviewTelemetryContext,
+): Promise<ClipboardCopyResult> {
+  if (context?.publicQrId && context?.sessionUuid) {
+    trackEvent({
+      publicQrId: context.publicQrId,
+      eventName: 'EVENT_COPY_ATTEMPTED',
+      sessionUuid: context.sessionUuid,
+    }).catch(() => {
+      // Non-critical telemetry failure gracefully swallowed
+    });
+  }
+
+  const result = await copyTextToClipboard(draft);
+
+  if (result.success && context?.publicQrId && context?.sessionUuid) {
+    trackEvent({
+      publicQrId: context.publicQrId,
+      eventName: 'EVENT_COPY_SUCCESS',
+      sessionUuid: context.sessionUuid,
+    }).catch(() => {
+      // Non-critical telemetry failure gracefully swallowed
+    });
+  }
+
+  return result;
+}
