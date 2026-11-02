@@ -244,6 +244,29 @@ async function runVerification() {
     assert(negDraft.sentiment === 'negative', 'Sentiment is negative (preserves criticism)');
     assert(negDraft.wordCount < 60, 'Critical draft word count < 60');
 
+    // Test FIX-AI-NEG-CAFE (Grounded Critical Cafe Feedback)
+    const negCafeReqBody = {
+      contents: [
+        {
+          parts: [{ text: 'The Daily Roast Cafe: Beverage was cold, service took too long' }],
+        },
+      ],
+    };
+    const negCafeRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(negCafeReqBody),
+    });
+    assert(negCafeRes.status === 200, 'POST FIX-AI-NEG-CAFE returns HTTP 200');
+    const negCafeJson = await negCafeRes.json();
+    const negCafeDraft = JSON.parse(negCafeJson.candidates[0].content.parts[0].text);
+    assert(
+      negCafeDraft.reviewDraft === GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!.payload.reviewDraft,
+      'Generated draft matches FIX-AI-NEG-CAFE grounded draft',
+    );
+    assert(negCafeDraft.sentiment === 'negative', 'Cafe sentiment is negative');
+    assert(negCafeDraft.wordCount < 60, 'Cafe critical draft word count < 60');
+
     // Test header-based scenario selection: x-mock-scenario
     const scenarioRes = await fetch(primaryModelUrl, {
       method: 'POST',

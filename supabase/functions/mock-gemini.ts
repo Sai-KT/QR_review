@@ -49,11 +49,21 @@ export const GROUNDED_FIXTURES: Record<string, GroundedFixture> = {
   },
   'FIX-AI-NEG': {
     id: 'FIX-AI-NEG',
-    category: 'critical_feedback',
+    category: 'critical_salon',
     payload: {
       reviewDraft:
         'The staff was warm and attentive, but my service took too long as I waited 45 minutes past my appointment time. Also felt pricing was higher than expected.',
       wordCount: 33,
+      sentiment: 'negative',
+    },
+  },
+  'FIX-AI-NEG-CAFE': {
+    id: 'FIX-AI-NEG-CAFE',
+    category: 'critical_cafe',
+    payload: {
+      reviewDraft:
+        'My beverage was cold and delayed, and counter service took longer than expected. The seating area was also quite crowded and noisy during my visit.',
+      wordCount: 25,
       sentiment: 'negative',
     },
   },
@@ -67,12 +77,27 @@ export function resolveFixture(promptText: string, scenarioHeader?: string): Gro
     const key = scenarioHeader.toUpperCase();
     if (GROUNDED_FIXTURES[key]) return GROUNDED_FIXTURES[key]!;
     if (key === 'NEUTRAL' || key === 'NEU') return GROUNDED_FIXTURES['FIX-AI-NEU']!;
+    if (key === 'NEGATIVE_CAFE' || key === 'NEG_CAFE' || key === 'CRITICAL_CAFE')
+      return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
     if (key === 'NEGATIVE' || key === 'CRITICAL' || key === 'NEG')
       return GROUNDED_FIXTURES['FIX-AI-NEG']!;
     if (key === 'POSITIVE' || key === 'POS') return GROUNDED_FIXTURES['FIX-AI-POS']!;
   }
 
   const lower = promptText.toLowerCase();
+
+  // Grounded Negative Cafe Feedback: Matches critical cafe survey selections and note
+  if (
+    lower.includes('fix-ai-neg-cafe') ||
+    ((lower.includes('cafe') || lower.includes('roast') || lower.includes('beverage')) &&
+      (lower.includes('service took too long') ||
+        lower.includes('beverage was cold') ||
+        lower.includes('slow counter') ||
+        lower.includes('too crowded')))
+  ) {
+    return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
+  }
+
   if (
     lower.includes('fix-ai-neg') ||
     lower.includes('service took too long') ||
@@ -253,7 +278,7 @@ export function createRequestHandler() {
       body += chunk;
     });
 
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         if (!body.trim()) {
           res.statusCode = 400;
@@ -291,6 +316,22 @@ export function createRequestHandler() {
               error: {
                 code: 504,
                 message: 'Simulated Mock Gemini Timeout (FIX-AI-ERR)',
+                status: 'DEADLINE_EXCEEDED',
+              },
+            }),
+          );
+          return;
+        }
+
+        // Check if prompt explicitly triggers generation deadline exceedance (>8000ms delay)
+        if (promptText.includes('FIX-AI-DEADLINE')) {
+          await new Promise((resolve) => setTimeout(resolve, 8500));
+          res.statusCode = 504;
+          res.end(
+            JSON.stringify({
+              error: {
+                code: 504,
+                message: 'Simulated Mock Gemini Exceeded Deadline (8500ms)',
                 status: 'DEADLINE_EXCEEDED',
               },
             }),

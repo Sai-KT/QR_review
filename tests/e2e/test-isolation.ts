@@ -101,6 +101,29 @@ export function computeLocalTestKeyHashes(masterSecret?: string): string[] {
 }
 
 /**
+ * Computes exact rate_limit_buckets key_hashes (gen_{hash}) for generate-review Edge Function.
+ */
+export function computeLocalGenerationKeyHashes(masterSecret?: string): string[] {
+  const secret =
+    masterSecret ||
+    process.env.RATE_LIMIT_SALT ||
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dailySalt = createHmac('sha256', Buffer.from(secret, 'hex'))
+    .update(`qr_rate_limit_salt:${todayStr}`)
+    .digest('hex');
+
+  const localIps = ['127.0.0.1', '172.18.0.1', '172.17.0.1'];
+  return localIps.map((ip) => {
+    const ipHash = createHmac('sha256', Buffer.from(dailySalt, 'hex'))
+      .update(`qr_gen_ip:${ip}`)
+      .digest('hex');
+    return `gen_${ipHash}`;
+  });
+}
+
+/**
  * Safely resets rate limit events ONLY for local runner loopback hashes.
  * Fails closed if the endpoint or credentials cannot be verified as strictly local.
  */

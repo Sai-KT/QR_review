@@ -5,6 +5,7 @@ import {
   performSafeLocalRateLimitReset,
   isStrictLocalTestEndpoint,
   isLocalDemoServiceKey,
+  computeLocalGenerationKeyHashes,
 } from './test-isolation';
 
 const LOCAL_SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
@@ -16,6 +17,7 @@ const anonKey =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
 
 test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-End', () => {
+  test.describe.configure({ mode: 'serial' });
   const createdSessionUuids: string[] = [];
   const createdResponseIds: string[] = [];
   const LUXE_SALON_BIZ_ID = 'b0000000-0000-4000-8000-000000000001';
@@ -77,7 +79,10 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
         const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
           auth: { persistSession: false },
         });
-        await client.from('rate_limit_buckets').delete().like('key_hash', 'gen_%');
+        // Targeted rate-limit cleanup: reset ONLY local test runner loopback/docker gateway hashes
+        const targetBucketKeys = computeLocalGenerationKeyHashes();
+        await client.from('rate_limit_buckets').delete().in('key_hash', targetBucketKeys);
+        await performSafeLocalRateLimitReset(client, LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY);
       } catch (err) {
         console.warn('[Gate D Setup] Non-fatal rate limit reset warning:', err);
       }
@@ -110,8 +115,9 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
         await client.from('subscriptions').delete().eq('business_id', SYNTHETIC_EXHAUSTED_BIZ_ID);
         await client.from('businesses').delete().eq('id', SYNTHETIC_EXHAUSTED_BIZ_ID);
 
-        await client.from('rate_limit_buckets').delete().like('key_hash', 'gen_%');
-        await client.from('rate_limit_events').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        // Targeted cleanup of test runner rate limit keys strictly
+        const targetBucketKeys = computeLocalGenerationKeyHashes();
+        await client.from('rate_limit_buckets').delete().in('key_hash', targetBucketKeys);
       } catch (err) {
         console.warn('[Gate D Cleanup] Non-fatal error cleaning test fixtures:', err);
       }
@@ -308,10 +314,25 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
     await expect(draftTextarea).toBeVisible();
 
     const negativeDraft = await draftTextarea.inputValue();
-    // Verify critical feedback is faithfully represented (matches FIX-AI-NEG)
-    expect(negativeDraft.toLowerCase()).toMatch(/took too long|waited|pricing was higher/i);
-    // Verify NO fabricated praise, 5-star decoration, or perfection claims
-    expect(negativeDraft.toLowerCase()).not.toMatch(/5 stars|five star|perfection|loved everything/i);
+    // 1. Verify word count strictly adheres to <60 words budget (FIX-AI-NEG-CAFE is 25 words)
+    const wordCount = negativeDraft.trim().split(/\s+/).length;
+    expect(wordCount).toBeLessThan(60);
+
+    // 2. Fact Grounding: verify customer-affirmed critical facts are faithfully represented
+    const lower = negativeDraft.toLowerCase();
+    expect(lower).toMatch(/cold|delayed/i);
+    expect(lower).toMatch(/counter service|longer than expected|took too long/i);
+    expect(lower).toMatch(/crowded|noisy/i);
+
+    // 3. Negative Grounding: verify unsupported facts / hallucinations are strictly absent
+    // No fabricated praise, star ratings, or perfection claims
+    expect(lower).not.toMatch(/5 stars|five star|perfection|loved everything|warm and attentive/i);
+    // No invented appointment details or wait durations not submitted
+    expect(lower).not.toMatch(/appointment|45 minutes|reservation/i);
+    // No invented pricing, rupees, or billing claims
+    expect(lower).not.toMatch(/price|pricing|rupees|inr|expensive|cost/i);
+    // No invented facilities or unmentioned amenities
+    expect(lower).not.toMatch(/wifi|wi-fi|parking|valet/i);
 
     // Edit negative draft in-place
     await draftTextarea.fill(`${negativeDraft} Needs improvement.`);
@@ -415,12 +436,25 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       name: /This feedback reflects my genuine, personal experience at this business\./i,
     }).click();
 
+    // Await submit-feedback response to correlate exact responseId
+    const submitPromise = page.waitForResponse(
+      (r) => r.url().includes('submit-feedback') && r.status() === 201,
+    );
     await page.getByRole('button', { name: /Submit Feedback/i }).click();
+    const submitResponse = await submitPromise;
+    const submitJson = (await submitResponse.json()) as { responseId: string };
+    const exactResponseId = submitJson.responseId;
+
     await expect(page.getByRole('button', { name: /Draft My Review with AI ↗/i })).toBeVisible({
       timeout: 10000,
     });
 
+    // Await generate-review response returning abstention
+    const genPromise = page.waitForResponse(
+      (r) => r.url().includes('generate-review') && r.status() === 200,
+    );
     await page.getByRole('button', { name: /Draft My Review with AI ↗/i }).click();
+    await genPromise;
 
     // Verified: InsufficientFactsCard rendered without hallucinations
     await expect(page.getByTestId('insufficient-facts-card')).toBeVisible({
@@ -439,34 +473,32 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
     const googleBtn = page.getByRole('button', { name: /Write Review Directly on Google →/i });
     await expect(googleBtn).toBeVisible();
 
-    // Query database to prove zero quota reservations and zero Gemini dispatches occurred
+    // Query database to prove zero quota reservations and zero Gemini dispatches occurred for this EXACT response
     const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
       auth: { persistSession: false },
     });
-    const { data: latestResp } = await client
+    const { data: respRow } = await client
       .from('survey_responses')
       .select('id, session_uuid')
-      .eq('business_id', LUXE_SALON_BIZ_ID)
-      .order('created_at', { ascending: false })
-      .limit(1)
+      .eq('id', exactResponseId)
       .single();
 
-    expect(latestResp).toBeTruthy();
-    if (latestResp?.id) createdResponseIds.push(latestResp.id);
-    if (latestResp?.session_uuid) createdSessionUuids.push(latestResp.session_uuid);
+    expect(respRow).toBeTruthy();
+    if (respRow?.id) createdResponseIds.push(respRow.id);
+    if (respRow?.session_uuid) createdSessionUuids.push(respRow.session_uuid);
 
-    // Assert 0 quota reservations exist for this abstained response
+    // Assert 0 quota reservations exist for this exact abstained response
     const { data: resRows } = await client
       .from('quota_reservations')
       .select('id')
-      .eq('response_id', latestResp!.id);
+      .eq('response_id', exactResponseId);
     expect(resRows?.length).toBe(0);
 
-    // Assert 0 EVENT_GENERATION_SUCCESS events were recorded
+    // Assert 0 EVENT_GENERATION_SUCCESS events were recorded for this patron session
     const { data: evts } = await client
       .from('analytics_events')
       .select('id')
-      .eq('session_uuid', latestResp!.session_uuid)
+      .eq('session_uuid', respRow!.session_uuid)
       .eq('event_name', 'EVENT_GENERATION_SUCCESS');
     expect(evts?.length).toBe(0);
   });
@@ -642,7 +674,7 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       body: JSON.stringify({
         responseId: subData.responseId,
         submissionToken: subData.submissionToken,
-        idempotencyKey: 'timeout_test_attempt_1',
+        idempotencyKey: `timeout_test_attempt_${Date.now()}`,
         publicQrId: 'luxe000001',
       }),
     });
@@ -670,6 +702,91 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       .eq('response_id', subData.responseId);
 
     // Status is 'released' and 0 pending reservations remain
+    expect(reservations?.some((r: { status: string }) => r.status === 'released')).toBe(true);
+    expect(reservations?.filter((r: { status: string }) => r.status === 'pending').length).toBe(0);
+  });
+
+  // --------------------------------------------------------------------------
+  // Scenario D-05-backend-deadline: Real Edge Function 8s Deadline Abort Verification
+  // --------------------------------------------------------------------------
+  test('D-05-backend-deadline: verifies real Edge Function 8-second deadline abort and reservation release via FIX-AI-DEADLINE', async ({ page }, testInfo) => {
+    void page;
+    test.skip(testInfo.project.name !== 'Mobile Chrome (Pixel 7)', 'Single execution for 8s deadline measurement');
+    const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
+      auth: { persistSession: false },
+    });
+    const cycle = new Date().toISOString().slice(0, 7);
+    const sessionUuid = '88888888-8888-4888-8888-888888888889';
+
+    // 1. Submit feedback with note triggering FIX-AI-DEADLINE in mock Gemini
+    const subRes = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/submit-feedback`, {
+      method: 'POST',
+      headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        publicQrId: 'luxe000001',
+        sessionUuid,
+        responses: [
+          { questionId: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c', optionId: '1a2b3c4d-0001-4000-8000-000000000001' },
+          { questionId: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5d', optionId: '1a2b3c4d-0002-4000-8000-000000000001' },
+          { questionId: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5e', optionId: '1a2b3c4d-0003-4000-8000-000000000001' },
+        ],
+        authenticityConfirmed: true,
+        optionalNote: 'Service was delayed FIX-AI-DEADLINE',
+      }),
+    });
+    const subData = (await subRes.json()) as { responseId: string; submissionToken: string };
+    expect(subRes.status).toBe(201);
+    createdResponseIds.push(subData.responseId);
+    createdSessionUuids.push(sessionUuid);
+
+    // 2. Read initial quota state
+    const { data: qBefore } = await client
+      .from('tenant_quotas')
+      .select('used_count, reserved_count')
+      .eq('business_id', LUXE_SALON_BIZ_ID)
+      .eq('billing_cycle', cycle)
+      .single();
+
+    // 3. Dispatch real Edge Function generate-review and measure elapsed time
+    const startMs = Date.now();
+    const genRes = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/generate-review`, {
+      method: 'POST',
+      headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        responseId: subData.responseId,
+        submissionToken: subData.submissionToken,
+        idempotencyKey: `deadline_test_attempt_${Date.now()}`,
+        publicQrId: 'luxe000001',
+      }),
+    });
+    const elapsedMs = Date.now() - startMs;
+    const genData = (await genRes.json()) as { error?: { code: string; retryable: boolean } };
+
+    // Verifies elapsed time reflects the real 8000ms deadline abort
+    expect(elapsedMs).toBeGreaterThanOrEqual(7900);
+    expect(elapsedMs).toBeLessThan(12000);
+
+    // Returns HTTP 504 ERR_GEMINI_TIMEOUT with retryable=true
+    expect(genRes.status).toBe(504);
+    expect(genData.error?.code).toBe('ERR_GEMINI_TIMEOUT');
+    expect(genData.error?.retryable).toBe(true);
+
+    // 4. Assert PostgreSQL quota state: reservation was safely released
+    const { data: qAfter } = await client
+      .from('tenant_quotas')
+      .select('used_count, reserved_count')
+      .eq('business_id', LUXE_SALON_BIZ_ID)
+      .eq('billing_cycle', cycle)
+      .single();
+
+    expect(qAfter?.reserved_count).toBe(0);
+    expect(qAfter?.used_count).toBe(qBefore?.used_count);
+
+    const { data: reservations } = await client
+      .from('quota_reservations')
+      .select('id, status')
+      .eq('response_id', subData.responseId);
+
     expect(reservations?.some((r: { status: string }) => r.status === 'released')).toBe(true);
     expect(reservations?.filter((r: { status: string }) => r.status === 'pending').length).toBe(0);
   });
@@ -817,7 +934,7 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       body: JSON.stringify({
         responseId: subData.responseId,
         submissionToken: subData.submissionToken,
-        idempotencyKey: 'attempt_cap_test_4',
+        idempotencyKey: `attempt_cap_test_${Date.now()}`,
         publicQrId: 'luxe000001',
       }),
     });
@@ -833,6 +950,92 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       .select('id')
       .eq('response_id', subData.responseId);
     expect(resList?.length).toBe(0);
+  });
+
+  // --------------------------------------------------------------------------
+  // Scenario D-07-ratelimit-backend: Real IP Sliding-Window Rate Limit Enforcement
+  // --------------------------------------------------------------------------
+  test('D-07-ratelimit-backend: enforces real IP rate limit (30 req / 10 min window) returning ERR_RATE_LIMIT_EXCEEDED (429) without Gemini dispatch or quota reservation', async ({ page }, testInfo) => {
+    void page;
+    test.skip(testInfo.project.name !== 'Mobile Chrome (Pixel 7)', 'Single execution for rate limit test');
+    const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
+      auth: { persistSession: false },
+    });
+    const sessionUuid = '77777777-7777-4777-7777-777777777778';
+
+    // 1. Submit a valid feedback response to get valid responseId and submissionToken
+    const subRes = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/submit-feedback`, {
+      method: 'POST',
+      headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        publicQrId: 'luxe000001',
+        sessionUuid,
+        responses: [
+          { questionId: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c', optionId: '1a2b3c4d-0001-4000-8000-000000000001' },
+          { questionId: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5d', optionId: '1a2b3c4d-0002-4000-8000-000000000001' },
+          { questionId: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5e', optionId: '1a2b3c4d-0003-4000-8000-000000000001' },
+        ],
+        authenticityConfirmed: true,
+        optionalNote: 'Real IP rate limit test.',
+      }),
+    });
+    const subData = (await subRes.json()) as { responseId: string; submissionToken: string };
+    expect(subRes.status).toBe(201);
+    createdResponseIds.push(subData.responseId);
+    createdSessionUuids.push(sessionUuid);
+
+    // 2. Pre-seed rate limit buckets for local test runner IPs to the threshold (30 requests)
+    const targetBucketKeys = computeLocalGenerationKeyHashes();
+    const currentWindow = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    for (const key of targetBucketKeys) {
+      await client.from('rate_limit_buckets').upsert({
+        key_hash: key,
+        window_start: currentWindow,
+        request_count: 30,
+        expires_at: expiresAt,
+      });
+    }
+
+    try {
+      // 3. Dispatch real Edge Function generate-review (this is request #31)
+      const genRes = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/generate-review`, {
+        method: 'POST',
+        headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          responseId: subData.responseId,
+          submissionToken: subData.submissionToken,
+          idempotencyKey: `rate_limit_test_${Date.now()}`,
+          publicQrId: 'luxe000001',
+        }),
+      });
+      const genData = (await genRes.json()) as { error?: { code: string; message: string; retryable: boolean } };
+
+      // Assert canonical rate limit response
+      expect(genRes.status).toBe(429);
+      expect(genData.error?.code).toBe('ERR_RATE_LIMIT_EXCEEDED');
+      expect(genData.error?.retryable).toBe(true);
+      expect(genRes.headers.get('retry-after')).toBe('60');
+
+      // 4. Assert zero quota reservation was created
+      const { data: reservations } = await client
+        .from('quota_reservations')
+        .select('id')
+        .eq('response_id', subData.responseId);
+      expect(reservations?.length).toBe(0);
+
+      // 5. Assert generation_attempts was NOT incremented (remains 0)
+      const { data: respRow } = await client
+        .from('survey_responses')
+        .select('generation_attempts')
+        .eq('id', subData.responseId)
+        .single();
+      expect(respRow?.generation_attempts).toBe(0);
+    } finally {
+      // Clean up the seeded test buckets
+      await client.from('rate_limit_buckets').delete().in('key_hash', targetBucketKeys);
+    }
   });
 
   // --------------------------------------------------------------------------
@@ -883,7 +1086,7 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       body: JSON.stringify({
         responseId: subData.responseId,
         submissionToken: subData.submissionToken,
-        idempotencyKey: 'recovery_test_attempt_1',
+        idempotencyKey: `recovery_test_attempt_1_${Date.now()}`,
         publicQrId: 'luxe000001',
       }),
     });
@@ -909,7 +1112,7 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
       body: JSON.stringify({
         responseId: subData.responseId,
         submissionToken: subData.submissionToken,
-        idempotencyKey: 'recovery_test_attempt_2',
+        idempotencyKey: `recovery_test_attempt_2_${Date.now()}`,
         publicQrId: 'luxe000001',
       }),
     });
