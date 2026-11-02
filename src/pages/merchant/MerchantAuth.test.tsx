@@ -6,6 +6,10 @@ import { LoginPage } from './LoginPage.tsx';
 import { ForgotPasswordPage } from './ForgotPasswordPage.tsx';
 import { ResetPasswordPage } from './ResetPasswordPage.tsx';
 import { ToastProvider } from '../../components/ui/toast.tsx';
+import {
+  clearRecoverySession,
+  markRecoverySessionActive,
+} from '../../lib/auth/authUtils.ts';
 
 // Mock Supabase client
 const mockSignInWithPassword = vi.fn();
@@ -46,6 +50,8 @@ function renderWithProviders(ui: React.ReactElement, initialEntries = ['/login']
 describe('M5-T01: Merchant Authentication Suite', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearRecoverySession();
+    mockGetSession.mockReset();
     mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
     mockOnAuthStateChange.mockReturnValue({
       data: { subscription: { unsubscribe: vi.fn() } },
@@ -280,6 +286,37 @@ describe('M5-T01: Merchant Authentication Suite', () => {
         expect(screen.getAllByText(/too many.*attempts/i).length).toBeGreaterThan(0);
       });
     });
+
+    it('masks unregistered email error (otp_disabled) and renders standard confirmation card without error', async () => {
+      const user = userEvent.setup();
+      mockSignInWithOtp.mockResolvedValueOnce({
+        data: {},
+        error: { code: 'otp_disabled', message: 'Signups not allowed for otp', status: 422 },
+      });
+
+      renderWithProviders(<LoginPage />);
+
+      await user.click(screen.getByRole('tab', { name: /magic link/i }));
+      await user.type(screen.getByLabelText(/email address/i), 'unregistered@local.test');
+      await user.click(screen.getByRole('button', { name: /send magic link/i }));
+
+      await waitFor(() => {
+        expect(mockSignInWithOtp).toHaveBeenCalledWith({
+          email: 'unregistered@local.test',
+          options: {
+            emailRedirectTo: expect.stringContaining('/dashboard'),
+            shouldCreateUser: false,
+          },
+        });
+      });
+
+      // Renders standard confirmation card, NOT an error alert
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /check your email/i, level: 3 })).toBeInTheDocument();
+        expect(screen.getAllByText(/unregistered@local.test/).length).toBeGreaterThan(0);
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      });
+    });
   });
 
   // ── TC-OWN-03: Password Recovery Request ──────────────────────────────────
@@ -323,18 +360,15 @@ describe('M5-T01: Merchant Authentication Suite', () => {
 
   // ── Password Reset / Update Flow ──────────────────────────────────────────
   describe('Password Reset / Set New Password (ResetPasswordPage)', () => {
-    it('shows invalid link state when visited without an active recovery session', async () => {
+    it('shows invalid link state when visited without an active recovery session or tokens', async () => {
       mockGetSession.mockResolvedValueOnce({ data: { session: null }, error: null });
 
       renderWithProviders(<ResetPasswordPage />, ['/reset-password']);
 
-      // After check delay, renders invalid link notice
-      await waitFor(
-        () => {
-          expect(screen.getByText(/invalid or expired reset link/i)).toBeInTheDocument();
-        },
-        { timeout: 2000 },
-      );
+      // Immediately renders invalid link notice without grace-period race conditions
+      await waitFor(() => {
+        expect(screen.getByText(/invalid or expired reset link/i)).toBeInTheDocument();
+      });
 
       expect(screen.getByRole('link', { name: /request new reset link/i })).toHaveAttribute(
         'href',
@@ -342,8 +376,30 @@ describe('M5-T01: Merchant Authentication Suite', () => {
       );
     });
 
+    it('shows invalid link state when visited with an ordinary active session without recovery context', async () => {
+      // Ordinary active user session (e.g. standard login) without PASSWORD_RECOVERY event
+      mockGetSession.mockResolvedValue({
+        data: {
+          session: {
+            user: { id: '00000000-0000-4000-8000-000000000002', email: 'merchant.luxe@local.test' },
+          },
+        },
+        error: null,
+      });
+
+      renderWithProviders(<ResetPasswordPage />, ['/reset-password']);
+
+      // Must NOT unlock the recovery form
+      await waitFor(() => {
+        expect(screen.getByText(/invalid or expired reset link/i)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByLabelText(/^new password$/i)).not.toBeInTheDocument();
+    });
+
     it('renders password update form when recovery session is active and updates password', async () => {
       const user = userEvent.setup();
+      markRecoverySessionActive();
       mockGetSession.mockResolvedValue({
         data: {
           session: {
@@ -381,6 +437,7 @@ describe('M5-T01: Merchant Authentication Suite', () => {
 
     it('rejects mismatched password confirmation', async () => {
       const user = userEvent.setup();
+      markRecoverySessionActive();
       mockGetSession.mockResolvedValue({
         data: { session: { user: { id: 'test-user-id' } } },
         error: null,
@@ -402,6 +459,7 @@ describe('M5-T01: Merchant Authentication Suite', () => {
 
     it('rejects passwords shorter than 8 characters', async () => {
       const user = userEvent.setup();
+      markRecoverySessionActive();
       mockGetSession.mockResolvedValue({
         data: { session: { user: { id: 'test-user-id' } } },
         error: null,
@@ -419,6 +477,20 @@ describe('M5-T01: Merchant Authentication Suite', () => {
 
       expect(mockUpdateUser).not.toHaveBeenCalled();
       expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument();
+    });
+
+    it('cleans up subscription and timer safely upon component unmount', () => {
+      const unsubscribeMock = vi.fn();
+      mockOnAuthStateChange.mockReturnValueOnce({
+        data: { subscription: { unsubscribe: unsubscribeMock } },
+      });
+
+      const { unmount } = renderWithProviders(<ResetPasswordPage />, [
+        '/reset-password#access_token=slow-token&type=recovery',
+      ]);
+
+      unmount();
+      expect(unsubscribeMock).toHaveBeenCalled();
     });
   });
 });

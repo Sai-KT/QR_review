@@ -30,6 +30,27 @@ export function validateEmail(email: string): { isValid: boolean; error?: string
 export const MIN_PASSWORD_LENGTH = 8;
 
 /**
+ * Scoped Recovery Session State
+ *
+ * Tracks whether the active client session originated from a validated Supabase
+ * PASSWORD_RECOVERY auth event. Strictly prevents ordinary authenticated sessions
+ * or direct visits from accessing or unlocking the password-recovery update form.
+ */
+let recoverySessionActive = false;
+
+export function isRecoverySessionActive(): boolean {
+  return recoverySessionActive;
+}
+
+export function markRecoverySessionActive(): void {
+  recoverySessionActive = true;
+}
+
+export function clearRecoverySession(): void {
+  recoverySessionActive = false;
+}
+
+/**
  * Validates a password input according to project constraints.
  */
 export function validatePassword(password: string): { isValid: boolean; error?: string } {
@@ -131,6 +152,15 @@ export function getAuthErrorMessage(error: unknown): string {
   if (message.includes('user not found')) {
     // Anti-enumeration: do not distinguish from invalid credentials on login
     return 'Invalid email or password. Please verify your credentials and try again.';
+  }
+
+  if (
+    message.includes('signups not allowed for otp') ||
+    code === 'otp_disabled' ||
+    err.status === 422
+  ) {
+    // Anti-enumeration: mask unregistered email attempt to prevent account enumeration
+    return 'If an account exists for this email address, a sign-in link will be sent.';
   }
 
   if (message.includes('password should be at least')) {

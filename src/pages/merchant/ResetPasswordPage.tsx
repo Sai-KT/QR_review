@@ -1,8 +1,11 @@
 import * as React from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { getSupabaseClient } from '../../lib/supabase.ts';
 import {
+  clearRecoverySession,
   getAuthErrorMessage,
+  isRecoverySessionActive,
+  markRecoverySessionActive,
   validatePassword,
 } from '../../lib/auth/authUtils.ts';
 import { Button } from '../../components/ui/button.tsx';
@@ -11,16 +14,25 @@ import { useToast } from '../../components/ui/toast.tsx';
 
 type RecoveryState = 'checking' | 'ready' | 'invalid_link' | 'success';
 
-function getInitialRecoveryState(): RecoveryState {
-  if (typeof window === 'undefined') return 'checking';
-  const urlHash = window.location.hash;
-  const urlSearch = window.location.search;
+function getInitialRecoveryState(hash = '', search = ''): RecoveryState {
   const searchParams = new URLSearchParams(
-    urlSearch || (urlHash.startsWith('#') ? urlHash.substring(1) : urlHash),
+    search || (hash.startsWith('#') ? hash.substring(1) : hash),
   );
   if (searchParams.get('error') || searchParams.get('error_code')) {
     return 'invalid_link';
   }
+
+  // If no recovery session was tracked and the URL contains no recovery tokens/parameters,
+  // this is an unauthenticated direct visit — fail safely to invalid_link immediately.
+  const hasRecoveryHint =
+    hash.includes('type=recovery') ||
+    search.includes('type=recovery') ||
+    search.includes('code=');
+
+  if (!hasRecoveryHint && !isRecoverySessionActive()) {
+    return 'invalid_link';
+  }
+
   return 'checking';
 }
 
@@ -33,9 +45,15 @@ function getInitialRecoveryState(): RecoveryState {
  */
 export function ResetPasswordPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
 
-  const [recoveryState, setRecoveryState] = React.useState<RecoveryState>(getInitialRecoveryState);
+  const urlHash = location.hash || (typeof window !== 'undefined' ? window.location.hash : '');
+  const urlSearch = location.search || (typeof window !== 'undefined' ? window.location.search : '');
+
+  const [recoveryState, setRecoveryState] = React.useState<RecoveryState>(() =>
+    getInitialRecoveryState(urlHash, urlSearch),
+  );
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
@@ -51,50 +69,60 @@ export function ResetPasswordPage(): React.JSX.Element {
 
   // Recovery session check & auth-state listener
   React.useEffect(() => {
-    if (getInitialRecoveryState() === 'invalid_link') return;
-
     let isMounted = true;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     const supabase = getSupabaseClient();
 
-    // Check if an existing authenticated recovery session is already active
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (!isMounted) return;
+    if (getInitialRecoveryState(urlHash, urlSearch) === 'invalid_link') {
+      return () => {
+        isMounted = false;
+      };
+    }
 
-      if (error || !session) {
-        // Give a short grace period for detectSessionInUrl to finish parsing hash tokens
-        const timer = setTimeout(() => {
-          if (!isMounted) return;
-          supabase.auth.getSession().then(({ data: { session: delayedSession } }) => {
-            if (!isMounted) return;
-            if (delayedSession) {
-              setRecoveryState('ready');
-            } else {
-              setRecoveryState('invalid_link');
-            }
-          });
-        }, 500);
-
-        return () => clearTimeout(timer);
-      } else {
-        setRecoveryState('ready');
-      }
-    });
-
-    // Listen to Supabase Auth state events (PASSWORD_RECOVERY event)
+    // Always attach auth listener to capture genuine PASSWORD_RECOVERY events
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return;
-      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
+      if (event === 'PASSWORD_RECOVERY' && session) {
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        markRecoverySessionActive();
         setRecoveryState('ready');
       }
     });
 
+    // Check if a recovery event was already verified and active
+    if (isRecoverySessionActive()) {
+      supabase.auth.getSession().then(({ data: { session }, error }) => {
+        if (!isMounted) return;
+        if (session && !error) {
+          setRecoveryState('ready');
+        } else {
+          clearRecoverySession();
+          setRecoveryState('invalid_link');
+        }
+      });
+    } else {
+      // Provide a deterministic safety ceiling (5000 ms) for slow-device hash/token processing.
+      fallbackTimer = setTimeout(() => {
+        if (!isMounted) return;
+        if (!isRecoverySessionActive()) {
+          setRecoveryState('invalid_link');
+        }
+      }, 5000);
+    }
+
     return () => {
       isMounted = false;
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+      }
       subscription.unsubscribe();
     };
-  }, []);
+  }, [urlHash, urlSearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,6 +157,7 @@ export function ResetPasswordPage(): React.JSX.Element {
         return;
       }
 
+      clearRecoverySession();
       setRecoveryState('success');
       toast({
         title: 'Password Updated',
@@ -190,15 +219,17 @@ export function ResetPasswordPage(): React.JSX.Element {
           single-use and expire within 1 hour for your security.
         </p>
         <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-          <Link to="/forgot-password">
-            <Button size="sm" className="w-full sm:w-auto text-xs">
-              Request New Reset Link
-            </Button>
+          <Link
+            to="/forgot-password"
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 active:scale-[0.98] h-8 px-3 rounded-md text-xs w-full sm:w-auto"
+          >
+            Request New Reset Link
           </Link>
-          <Link to="/login">
-            <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs">
-              Back to Sign In
-            </Button>
+          <Link
+            to="/login"
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background border border-border bg-surface-base text-foreground shadow-sm hover:bg-muted active:scale-[0.98] h-8 px-3 rounded-md text-xs w-full sm:w-auto"
+          >
+            Back to Sign In
           </Link>
         </div>
       </div>

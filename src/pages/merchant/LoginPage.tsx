@@ -143,6 +143,25 @@ export function MerchantLoginPage(): React.JSX.Element {
       });
 
       if (error) {
+        // Anti-enumeration defense: When GoTrue returns otp_disabled ("Signups not allowed for otp"),
+        // an unregistered email was supplied. Mask this response and render the standard confirmation
+        // card to prevent revealing account existence, while strictly preserving shouldCreateUser: false.
+        const errObj = error as { message?: string; code?: string; status?: number };
+        const isUnregistered =
+          errObj.code === 'otp_disabled' ||
+          (errObj.message || '').toLowerCase().includes('signups not allowed for otp') ||
+          errObj.status === 422;
+
+        if (isUnregistered) {
+          setMagicLinkSentTo(email.trim());
+          toast({
+            title: 'Check Your Email',
+            description: `If an account exists for ${email.trim()}, a sign-in link has been sent.`,
+            variant: 'success',
+          });
+          return;
+        }
+
         const errorMsg = getAuthErrorMessage(error);
         setFormError(errorMsg);
         toast({
@@ -156,7 +175,7 @@ export function MerchantLoginPage(): React.JSX.Element {
       setMagicLinkSentTo(email.trim());
       toast({
         title: 'Check Your Email',
-        description: `A magic sign-in link has been sent to ${email.trim()}.`,
+        description: `If an account exists for ${email.trim()}, a sign-in link has been sent.`,
         variant: 'success',
       });
     } catch (err) {
@@ -407,9 +426,9 @@ export function MerchantLoginPage(): React.JSX.Element {
               </div>
               <h3 className="text-sm font-semibold text-foreground">Check Your Email</h3>
               <p className="text-xs text-muted-foreground">
-                We sent a secure sign-in link to{' '}
-                <strong className="text-foreground font-semibold">{magicLinkSentTo}</strong>.
-                Click the link in the email to access your dashboard.
+                If an account exists for{' '}
+                <strong className="text-foreground font-semibold">{magicLinkSentTo}</strong>,
+                a secure sign-in link has been sent. Click the link in the email to access your dashboard.
               </p>
               <Button
                 type="button"

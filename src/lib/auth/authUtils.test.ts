@@ -5,6 +5,9 @@ import {
   validatePasswordConfirmation,
   getSafeRedirectUrl,
   getAuthErrorMessage,
+  isRecoverySessionActive,
+  markRecoverySessionActive,
+  clearRecoverySession,
   MIN_PASSWORD_LENGTH,
 } from './authUtils.ts';
 
@@ -121,6 +124,27 @@ describe('M5-T01: Authentication Utilities & Validation (authUtils)', () => {
     it('handles unexpected non-object inputs gracefully', () => {
       expect(getAuthErrorMessage(null)).toMatch(/unexpected authentication error/i);
       expect(getAuthErrorMessage('some string')).toMatch(/unexpected authentication error/i);
+    });
+
+    it('formats otp_disabled / signups not allowed as generic confirmation to prevent account enumeration', () => {
+      const msg1 = getAuthErrorMessage({ message: 'Signups not allowed for otp', code: 'otp_disabled', status: 422 });
+      expect(msg1).toMatch(/if an account exists for this email address, a sign-in link will be sent/i);
+
+      const msg2 = getAuthErrorMessage({ message: '422: Signups not allowed for otp' });
+      expect(msg2).toMatch(/if an account exists for this email address, a sign-in link will be sent/i);
+    });
+  });
+
+  describe('Scoped Recovery Session Management', () => {
+    it('initializes as inactive, can be marked active, and cleared', () => {
+      clearRecoverySession();
+      expect(isRecoverySessionActive()).toBe(false);
+
+      markRecoverySessionActive();
+      expect(isRecoverySessionActive()).toBe(true);
+
+      clearRecoverySession();
+      expect(isRecoverySessionActive()).toBe(false);
     });
   });
 });

@@ -13,6 +13,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../types/database';
+import { clearRecoverySession, markRecoverySessionActive } from './auth/authUtils.ts';
 
 let clientInstance: SupabaseClient<Database> | null = null;
 
@@ -95,6 +96,15 @@ export function getSupabaseBrowserClient(): SupabaseClient<Database> {
       autoRefreshToken: true,
       detectSessionInUrl: true,
     },
+  });
+
+  // Track authenticated recovery events arriving before or during component mounting
+  clientInstance.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      markRecoverySessionActive();
+    } else if (event === 'SIGNED_OUT') {
+      clearRecoverySession();
+    }
   });
 
   return clientInstance;
