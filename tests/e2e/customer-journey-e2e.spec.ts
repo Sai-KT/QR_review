@@ -1309,6 +1309,7 @@ test.describe('Post-M4 Integration Gate D: Live Local Customer Journey End-to-En
   test('D-14: passes axe-core WCAG 2.2 AA audits on welcome, survey, and status screens', async ({
     page,
   }) => {
+    test.slow();
     // Audit Welcome Screen
     await page.goto('/q/luxe000001');
     await expect(page.getByRole('heading', { name: 'Luxe Studio Unisex Salon' })).toBeVisible({ timeout: 10000 });

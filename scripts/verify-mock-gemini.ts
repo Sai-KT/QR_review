@@ -314,6 +314,160 @@ async function runVerification() {
       'Critical cafe prompt with different selections fails conservatively with HTTP 422 (avoids fabricating facts)',
     );
 
+    // ── Mandatory Predicate Disambiguation Tests ─────────────────────────────
+    // Test 1: Ambiguous cold-or-delayed option without a note does not assert cold beverage
+    const ambigColdRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Cold or delayed beverage\n- Super prompt & courteous staff\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      ambigColdRes.status === 422,
+      'Mandatory Test 1: Ambiguous cold-or-delayed option without note does not assert cold beverage (HTTP 422)',
+    );
+
+    // Test 2: Ambiguous slow-service-or-mix-up option without a note does not assert slow service
+    const ambigSlowRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Specialty coffee & espresso\n- Slow counter service or order mix-up\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      ambigSlowRes.status === 422,
+      'Mandatory Test 2: Ambiguous slow-service-or-mix-up option without note does not assert slow service (HTTP 422)',
+    );
+
+    // Test 3: The combination of two ambiguous options is still insufficient to select cold-and-slow draft
+    const twoAmbigRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Cold or delayed beverage\n- Slow counter service or order mix-up\n- Too crowded or noisy space\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      twoAmbigRes.status === 422,
+      'Mandatory Test 3: Combination of two ambiguous options without note fails conservatively (HTTP 422)',
+    );
+
+    // Test 4: Explicit note confirming both cold beverage and slow service permits FIX-AI-NEG-CAFE
+    const groundedBothRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Cold or delayed beverage\n- Slow counter service or order mix-up\n- Too crowded or noisy space\nOptional Customer Note: "Beverage was cold and service took too long."\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      groundedBothRes.status === 200,
+      'Mandatory Test 4: Explicit note confirming cold beverage and slow service returns HTTP 200',
+    );
+    const groundedBothJson = await groundedBothRes.json();
+    const groundedBothDraft = JSON.parse(groundedBothJson.candidates[0].content.parts[0].text);
+    assert(
+      groundedBothDraft.reviewDraft === GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!.payload.reviewDraft,
+      'Mandatory Test 4: Returns verified FIX-AI-NEG-CAFE draft when both facts affirmed in note',
+    );
+
+    // Test 5: Note confirming only cold beverage does not fabricate slow service
+    const onlyColdRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Cold or delayed beverage\n- Slow counter service or order mix-up\nOptional Customer Note: "Beverage was cold."\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      onlyColdRes.status === 422,
+      'Mandatory Test 5: Note confirming only cold beverage does not fabricate slow service (HTTP 422)',
+    );
+
+    // Test 6: Note confirming only slow service does not fabricate cold beverage
+    const onlySlowRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Cold or delayed beverage\n- Slow counter service or order mix-up\nOptional Customer Note: "Service took too long."\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      onlySlowRes.status === 422,
+      'Mandatory Test 6: Note confirming only slow service does not fabricate cold beverage (HTTP 422)',
+    );
+
+    // Test 7: Negated statements do not count as affirmations
+    const negatedRes = await fetch(primaryModelUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: '<USER_INPUT>\nBusiness Name: "The Daily Roast Cafe"\nVertical Category: "cafe"\nAffirmed Experiences:\n- Cold or delayed beverage\n- Slow counter service or order mix-up\nOptional Customer Note: "Beverage was not cold and service didn\'t take too long."\n</USER_INPUT>',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    assert(
+      negatedRes.status === 422,
+      'Mandatory Test 7: Negated statements do not count as affirmations (HTTP 422)',
+    );
+
     // Test header-based scenario selection: x-mock-scenario
     const scenarioRes = await fetch(primaryModelUrl, {
       method: 'POST',

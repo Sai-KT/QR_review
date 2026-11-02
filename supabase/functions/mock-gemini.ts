@@ -70,6 +70,77 @@ export const GROUNDED_FIXTURES: Record<string, GroundedFixture> = {
 };
 
 /**
+ * Checks whether an MCQ option label contains a disjunction ("or", "/", "either"),
+ * meaning selection of the label alone does not establish any single specific branch.
+ */
+export function isDisjunctiveOption(text: string): boolean {
+  return /\bor\b|\/|\beither\b/i.test(text);
+}
+
+/**
+ * Checks whether a text snippet contains an unambiguous, non-negated
+ * affirmation that a beverage was cold.
+ */
+export function hasExplicitColdAffirmation(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (!/\bcold\b/.test(lower)) return false;
+
+  // Disjunctive uncertainty inside text: e.g. "cold or delayed", "cold / delayed"
+  if (
+    /\bcold\s+(?:or|\/)\s+delayed\b/.test(lower) ||
+    /\bdelayed\s+(?:or|\/)\s+cold\b/.test(lower)
+  ) {
+    return false;
+  }
+
+  // Negation pattern: "not cold", "wasn't cold", "was not cold", "never cold", "isn't cold"
+  if (
+    /\b(?:not|wasn'?t|was\s+not|isn'?t|is\s+not|never|hardly|no)\s+(?:very\s+|too\s+|that\s+)?cold\b/.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Checks whether a text snippet contains an unambiguous, non-negated
+ * affirmation of slow counter service or long wait times.
+ */
+export function hasExplicitSlowServiceAffirmation(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  const hasSlowKeyword =
+    /\b(?:slow|took\s+(?:too\s+|a\s+)?long|longer\s+than|long\s+wait|waited\s+(?:too\s+|a\s+)?long)\b/.test(
+      lower,
+    );
+  if (!hasSlowKeyword) return false;
+
+  // Disjunctive uncertainty inside text: e.g. "slow or mix-up", "slow / order mix-up"
+  if (
+    /\bslow\s+(?:or|\/)\s+(?:order\s+)?mix-up\b/.test(lower) ||
+    /\bmix-up\s+(?:or|\/)\s+slow\b/.test(lower)
+  ) {
+    return false;
+  }
+
+  // Negation pattern: "not slow", "wasn't slow", "didn't take long", "did not take too long"
+  if (
+    /\b(?:not|wasn'?t|was\s+not|never|no)\s+(?:very\s+|too\s+|that\s+)?slow\b/.test(lower) ||
+    /\b(?:didn'?t|did\s+not|never)\s+(?:take\s+(?:too\s+|a\s+)?long|have\s+to\s+wait)\b/.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Determine fixture from prompt text and headers
  */
 export function resolveFixture(promptText: string, scenarioHeader?: string): GroundedFixture | null {
@@ -91,54 +162,116 @@ export function resolveFixture(promptText: string, scenarioHeader?: string): Gro
     return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
   }
 
-  // 1. Grounded Negative Cafe Feedback:
-  // Requires:
-  // a) Cafe context (cafe, roast, daily roast)
-  // b) Affirmed cold beverage (note or selection explicitly disambiguating to cold)
-  // c) Affirmed slow counter service / long service delay
-  const isCafe = lower.includes('daily roast') || lower.includes('roast') || lower.includes('cafe');
-  const hasColdBeverage =
-    lower.includes('beverage was cold') ||
-    (lower.includes('beverage') && lower.includes('cold'));
-  const hasSlowCounterService =
-    lower.includes('service took too long') ||
-    lower.includes('slow counter') ||
-    (lower.includes('counter') && lower.includes('slow'));
+  // 1. Identify Vertical Category
+  const isCafe =
+    lower.includes('category: "cafe"') ||
+    lower.includes('vertical category: "cafe"') ||
+    lower.includes('the daily roast cafe') ||
+    lower.includes('roast') ||
+    lower.includes('cafe') ||
+    lower.includes('bistro');
 
-  if (isCafe && hasColdBeverage && hasSlowCounterService) {
-    return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
+  // 2. Extract structured customer inputs from <USER_INPUT> envelope if present
+  let customerNote = '';
+  const affirmedExperiences: string[] = [];
+
+  const userInputMatch = promptText.match(/<USER_INPUT>([\s\S]*?)<\/USER_INPUT>/i);
+  if (userInputMatch && userInputMatch[1]) {
+    const userBlock = userInputMatch[1];
+    // Extract optional customer note
+    const noteMatch =
+      userBlock.match(/Optional Customer Note:\s*"([^"]*)"/i) ||
+      userBlock.match(/Optional Customer Note:\s*'([^']*)'/i) ||
+      userBlock.match(/Optional Customer Note:\s*([^\r\n]+)/i);
+    if (noteMatch && noteMatch[1]) {
+      customerNote = noteMatch[1].trim();
+    }
+
+    // Extract affirmed experiences list
+    const experiencesMatch = userBlock.match(
+      /Affirmed Experiences:\s*([\s\S]*?)(?:Optional Customer Note:|$)/i,
+    );
+    if (experiencesMatch && experiencesMatch[1]) {
+      const lines = experiencesMatch[1].split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('-')) {
+          affirmedExperiences.push(trimmed.replace(/^-\s*/, '').trim());
+        }
+      }
+    }
+  } else {
+    // Plain text format without <USER_INPUT> (e.g. direct tests like "The Daily Roast Cafe: Beverage was cold, service took too long")
+    const colonIndex = promptText.indexOf(':');
+    if (colonIndex !== -1) {
+      customerNote = promptText.substring(colonIndex + 1).trim();
+    } else {
+      customerNote = promptText.trim();
+    }
   }
 
-  // Critical cafe prompt with DIFFERENT selections (e.g. only crowding, different complaints):
-  // Must NOT falsely return FIX-AI-NEG-CAFE (asserting cold beverage) or FIX-AI-POS (false praise).
-  // Fails conservatively to prevent fabricating unconfirmed facts.
-  const hasUnrelatedCafeCriticisms =
-    isCafe &&
-    (lower.includes('too crowded') ||
-      lower.includes('noisy space') ||
-      lower.includes('order mix-up') ||
+  // 3. Cafe Predicate Evaluation:
+  if (isCafe) {
+    // Disjunctive options ("Cold or delayed beverage", "Slow counter service or order mix-up")
+    // do NOT independently establish that a specific alternative occurred.
+    // Unambiguous customer affirmation must come from non-disjunctive option or explicit note.
+    const hasUnambiguousColdOption = affirmedExperiences.some(
+      (opt) => !isDisjunctiveOption(opt) && hasExplicitColdAffirmation(opt),
+    );
+    const hasAffirmedCold = hasExplicitColdAffirmation(customerNote) || hasUnambiguousColdOption;
+
+    const hasUnambiguousSlowOption = affirmedExperiences.some(
+      (opt) => !isDisjunctiveOption(opt) && hasExplicitSlowServiceAffirmation(opt),
+    );
+    const hasAffirmedSlowService =
+      hasExplicitSlowServiceAffirmation(customerNote) || hasUnambiguousSlowOption;
+
+    // Both cold beverage and slow service must be unambiguously affirmed to return FIX-AI-NEG-CAFE:
+    if (hasAffirmedCold && hasAffirmedSlowService) {
+      return GROUNDED_FIXTURES['FIX-AI-NEG-CAFE']!;
+    }
+
+    // Check whether the prompt contains any critical / negative café feedback:
+    const hasCafeCriticisms =
+      lower.includes('cold') ||
+      lower.includes('delayed') ||
+      lower.includes('slow') ||
+      lower.includes('mix-up') ||
+      lower.includes('crowded') ||
+      lower.includes('noisy') ||
       lower.includes('stale') ||
       lower.includes('disappointed') ||
-      lower.includes('bad'));
+      lower.includes('bad') ||
+      lower.includes('took too long') ||
+      affirmedExperiences.some(
+        (opt) =>
+          /cold|delayed|slow|mix-up|crowded|noisy|stale|disappointed|bad/i.test(opt),
+      );
 
-  if (hasUnrelatedCafeCriticisms && !(hasColdBeverage && hasSlowCounterService)) {
-    return null;
+    // If critical feedback was provided but specific facts are ambiguous, unsupported, or incomplete:
+    // Fail closed with null (HTTP 422 UNPROCESSABLE_ENTITY). Never launder into false praise (FIX-AI-POS)!
+    if (hasCafeCriticisms) {
+      return null;
+    }
   }
 
-  // 2. Critical Salon Feedback:
+  // 4. Critical Salon Feedback:
   // Requires explicit salon context with appointment delay or pricing complaint
-  const isSalon = lower.includes('salon') || lower.includes('luxe') || lower.includes('hair') || lower.includes('beauty');
+  const isSalon =
+    lower.includes('salon') || lower.includes('luxe') || lower.includes('hair') || lower.includes('beauty');
   const hasSalonCriticalFacts =
     lower.includes('fix-ai-neg') ||
     lower.includes('waited 45 mins') ||
     lower.includes('appointment time') ||
-    (isSalon && (lower.includes('pricing was higher') || (lower.includes('service took too long') && lower.includes('appointment'))));
+    (isSalon &&
+      (lower.includes('pricing was higher') ||
+        (lower.includes('service took too long') && lower.includes('appointment'))));
 
   if (hasSalonCriticalFacts) {
     return GROUNDED_FIXTURES['FIX-AI-NEG']!;
   }
 
-  // 3. Neutral Feedback
+  // 5. Neutral Feedback
   if (
     lower.includes('fix-ai-neu') ||
     lower.includes('standard / satisfactory') ||
@@ -147,7 +280,7 @@ export function resolveFixture(promptText: string, scenarioHeader?: string): Gro
     return GROUNDED_FIXTURES['FIX-AI-NEU']!;
   }
 
-  // 4. Default Positive Feedback
+  // 6. Default Positive Feedback
   return GROUNDED_FIXTURES['FIX-AI-POS']!;
 }
 
