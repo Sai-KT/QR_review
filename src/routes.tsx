@@ -11,7 +11,7 @@ import { NotFoundPageShell } from './pages/NotFoundPageShell.tsx';
 
 // Layout Shells
 import { CustomerLayout } from './components/layout/CustomerLayout.tsx';
-import { MerchantLayout } from './components/layout/MerchantLayout.tsx';
+import { PortalLayout } from './components/merchant/PortalLayout.tsx';
 import { AdminLayout } from './components/layout/AdminLayout.tsx';
 import { AuthLayout } from './components/layout/AuthLayout.tsx';
 
@@ -287,7 +287,7 @@ const router = createBrowserRouter([
   // ── Merchant Owner Portal (/dashboard/*) ────────────────────────────────
   {
     path: '/dashboard',
-    element: <MerchantLayout />,
+    element: <PortalLayout />,
     children: [
       {
         index: true,

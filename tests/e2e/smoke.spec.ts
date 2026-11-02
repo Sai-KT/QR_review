@@ -54,6 +54,13 @@ test.describe('M1-T06 Batch B: Core Route Shells & Navigation Smoke Suite', () =
   test('Test D: redirects /merchant/* to /dashboard/* preserving subpaths, query, and hash', async ({
     page,
   }) => {
+    // Authenticate first so protected dashboard route shell renders
+    await page.goto('/login');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+
     await page.goto('/merchant/analytics?period=30d#trend');
 
     // Confirm subpath, query string, and hash preservation
@@ -85,7 +92,15 @@ test.describe('M1-T06 Batch B: 320px Viewport Reflow Suite (TC-A11Y-04)', () => 
   for (const { path, name } of representativeRoutes) {
     test(`verifies 320px reflow on ${name} (${path})`, async ({ page }) => {
       await page.setViewportSize({ width: 320, height: 568 });
-      await page.goto(path);
+      if (path === '/dashboard') {
+        await page.goto('/login');
+        await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+        await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+        await page.getByRole('button', { name: /^Sign In$/i }).click();
+        await expect(page).toHaveURL(/\/dashboard/);
+      } else {
+        await page.goto(path);
+      }
 
       // Verify main content landmark is present
       const mainContent = page.getByRole('main');
@@ -108,7 +123,11 @@ test.describe('M1-T06 Batch B: Mobile Navigation Keyboard Accessibility Suite', 
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 }); // Mobile viewport
-    await page.goto('/dashboard');
+    await page.goto('/login');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
 
     // Locate mobile navigation toggle (label alternates between Open and Close)
     const menuToggle = page.getByRole('button', { name: /portal navigation/i });
