@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { getSupabaseClient } from '../../lib/supabase.ts';
 import {
   getAuthErrorMessage,
@@ -23,6 +23,7 @@ type LoginMode = 'password' | 'magic-link';
  */
 export function MerchantLoginPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
@@ -40,8 +41,11 @@ export function MerchantLoginPage(): React.JSX.Element {
   // Magic link success notification state
   const [magicLinkSentTo, setMagicLinkSentTo] = React.useState<string | null>(null);
 
-  // Target post-login redirect
-  const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect_to') ?? searchParams.get('redirectTo'));
+  // Target post-login redirect (supports canonical redirect_to, alias redirectTo, or router location state from auth guard)
+  const stateFrom = (location.state as { from?: string } | null)?.from;
+  const redirectTarget = getSafeRedirectUrl(
+    searchParams.get('redirect_to') ?? searchParams.get('redirectTo') ?? stateFrom,
+  );
 
   React.useEffect(() => {
     document.title = 'Merchant Sign In | QR_review';

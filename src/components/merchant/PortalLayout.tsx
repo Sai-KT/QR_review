@@ -311,7 +311,11 @@ function PortalLayoutContent({ children, className }: PortalLayoutProps): React.
 
   // 2. Unauthenticated Guard Redirect
   if (!session) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    const returnPath = `${location.pathname}${location.search}${location.hash}`;
+    const search = returnPath && returnPath !== '/'
+      ? `?redirect_to=${encodeURIComponent(returnPath)}`
+      : '';
+    return <Navigate to={`/login${search}`} replace state={{ from: location.pathname }} />;
   }
 
   // 3. Error State (Profile Fetch Failed)

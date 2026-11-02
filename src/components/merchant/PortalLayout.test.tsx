@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router';
+import { MemoryRouter, Routes, Route, useSearchParams } from 'react-router';
 import type { Session, User } from '@supabase/supabase-js';
 import { PortalLayout } from './PortalLayout';
 import * as useMerchantAuthModule from '../../hooks/useMerchantAuth';
@@ -76,6 +76,42 @@ describe('PortalLayout (SCR-OWN-03 / M5-T02)', () => {
     );
 
     expect(screen.getByText('Merchant Login Page')).toBeInTheDocument();
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+  });
+
+  it('redirects unauthenticated visits to /login with encoded redirect_to query param', () => {
+    vi.mocked(useMerchantAuthModule.useMerchantAuth).mockReturnValue({
+      session: null,
+      user: null,
+      business: null,
+      loading: false,
+      error: null,
+      signOut: mockSignOut,
+      refreshBusiness: mockRefreshBusiness,
+    });
+
+    function LoginWatcher() {
+      const [searchParams] = useSearchParams();
+      return <div data-testid="login-redirect-param">{searchParams.get('redirect_to')}</div>;
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard/analytics']}>
+        <Routes>
+          <Route path="/login" element={<LoginWatcher />} />
+          <Route
+            path="/dashboard/*"
+            element={
+              <PortalLayout>
+                <div>Protected Content</div>
+              </PortalLayout>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId('login-redirect-param')).toHaveTextContent('/dashboard/analytics');
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
   });
 

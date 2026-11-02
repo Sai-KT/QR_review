@@ -30,17 +30,50 @@ test.describe('M5-T02: Merchant Portal Navigation Shell & Auth Guard', () => {
     await expect(page.getByTestId('merchant-business-name')).not.toBeVisible();
   });
 
-  test('Scenario 2: Unauthenticated visit to sub-routes (/dashboard/profile, /dashboard/qr) redirects to /login', async ({
+  test('Scenario 2: Unauthenticated visit to sub-routes (/dashboard/profile, /dashboard/qr) redirects to /login with redirect_to', async ({
     page,
   }) => {
     await page.goto('/dashboard/profile');
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/login\?redirect_to=%2Fdashboard%2Fprofile/);
 
     await page.goto('/dashboard/qr');
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/login\?redirect_to=%2Fdashboard%2Fqr/);
 
     await page.goto('/dashboard/feedback');
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/login\?redirect_to=%2Fdashboard%2Ffeedback/);
+  });
+
+  test('Scenario 2b: Unauthenticated visit to /dashboard/analytics redirects to login with return path and returns post-auth', async ({
+    page,
+  }) => {
+    // 1. Visit /dashboard/analytics while unauthenticated
+    await page.goto('/dashboard/analytics');
+
+    // 2. Verify redirect to login with encoded redirect_to parameter
+    await expect(page).toHaveURL(/\/login\?redirect_to=%2Fdashboard%2Fanalytics/);
+    await expect(page.getByRole('heading', { name: /Portal Authentication/i })).toBeVisible();
+
+    // 3. Sign in with synthetic local merchant account
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+
+    // 4. Verify return to the originally requested authorized route (/dashboard/analytics)
+    await expect(page).toHaveURL(/\/dashboard\/analytics$/);
+    await expect(page.getByRole('heading', { name: /Conversion Funnel & Analytics Trends/i })).toBeVisible();
+  });
+
+  test('Scenario 2c: Open-redirect attempt to external URL falls back safely to /dashboard', async ({
+    page,
+  }) => {
+    await page.goto('/login?redirect_to=https://evil.com/phishing');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+
+    // Must safely fallback to /dashboard, NOT external URL
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole('heading', { name: /Merchant Dashboard Overview/i })).toBeVisible();
   });
 
   test('Scenario 3: TC-OWN-04 - Authenticated merchant sees authorized business name and status in sidebar', async ({

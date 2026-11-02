@@ -126,6 +126,72 @@ describe('M5-T01: Merchant Authentication Suite', () => {
       });
     });
 
+    it('navigates to safe redirectTo alias parameter when provided', async () => {
+      const user = userEvent.setup();
+      mockSignInWithPassword.mockResolvedValueOnce({
+        data: {
+          user: { id: '00000000-0000-4000-8000-000000000002', email: 'merchant.luxe@local.test' },
+          session: { access_token: 'valid-jwt-token' },
+        },
+        error: null,
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/login?redirectTo=/dashboard/analytics']}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/dashboard/analytics"
+                element={<div data-testid="analytics-screen">Merchant Analytics</div>}
+              />
+            </Routes>
+          </ToastProvider>
+        </MemoryRouter>,
+      );
+
+      await user.type(screen.getByLabelText(/email address/i), 'merchant.luxe@local.test');
+      await user.type(screen.getByLabelText(/^password$/i, { selector: 'input' }), 'LocalDevPass123!');
+      await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('analytics-screen')).toBeInTheDocument();
+      });
+    });
+
+    it('rejects hostile open redirect parameters and defaults safely to /dashboard', async () => {
+      const user = userEvent.setup();
+      mockSignInWithPassword.mockResolvedValueOnce({
+        data: {
+          user: { id: '00000000-0000-4000-8000-000000000002', email: 'merchant.luxe@local.test' },
+          session: { access_token: 'valid-jwt-token' },
+        },
+        error: null,
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/login?redirect_to=https://evil.com']}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/dashboard"
+                element={<div data-testid="safe-dashboard-screen">Safe Dashboard</div>}
+              />
+            </Routes>
+          </ToastProvider>
+        </MemoryRouter>,
+      );
+
+      await user.type(screen.getByLabelText(/email address/i), 'merchant.luxe@local.test');
+      await user.type(screen.getByLabelText(/^password$/i, { selector: 'input' }), 'LocalDevPass123!');
+      await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('safe-dashboard-screen')).toBeInTheDocument();
+      });
+    });
+
     it('toggles password visibility between masked and plain text', async () => {
       const user = userEvent.setup();
       renderWithProviders(<LoginPage />);
