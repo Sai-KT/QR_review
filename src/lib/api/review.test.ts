@@ -156,6 +156,118 @@ describe('generateReview (API-PUB-03 Client)', () => {
       }
     });
 
+    it('maps HTTP 401 unauthorized (invalid key) into ApiClientError with ERR_UNAUTHORIZED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          error: {
+            code: 'ERR_UNAUTHORIZED',
+            message: 'Invalid or missing API key',
+            correlationId: 'corr_test_401_unauth',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(401);
+        expect(apiErr.code).toBe('ERR_UNAUTHORIZED');
+      }
+    });
+
+    it('maps HTTP 402 subscription lapsed into ApiClientError with ERR_SUBSCRIPTION_LAPSED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 402,
+        json: async () => ({
+          error: {
+            code: 'ERR_SUBSCRIPTION_LAPSED',
+            message: 'Merchant subscription is inactive. Direct Google review link is preserved.',
+            correlationId: 'corr_test_402',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(402);
+        expect(apiErr.code).toBe('ERR_SUBSCRIPTION_LAPSED');
+      }
+    });
+
+    it('maps HTTP 403 business suspended into ApiClientError with ERR_BUSINESS_SUSPENDED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({
+          error: {
+            code: 'ERR_BUSINESS_SUSPENDED',
+            message: 'Business account is currently suspended.',
+            correlationId: 'corr_test_403_susp',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(403);
+        expect(apiErr.code).toBe('ERR_BUSINESS_SUSPENDED');
+      }
+    });
+
+    it('maps HTTP 403 invalid token into ApiClientError with ERR_INVALID_SUBMISSION_TOKEN', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({
+          error: {
+            code: 'ERR_INVALID_SUBMISSION_TOKEN',
+            message: 'Cryptographic submission signature verification failed.',
+            correlationId: 'corr_test_403_token',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(403);
+        expect(apiErr.code).toBe('ERR_INVALID_SUBMISSION_TOKEN');
+      }
+    });
+
     it('maps HTTP 403 authenticity unconfirmed into ApiClientError with ERR_AUTHENTICITY_UNCONFIRMED', async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: false,
@@ -212,6 +324,62 @@ describe('generateReview (API-PUB-03 Client)', () => {
       }
     });
 
+    it('maps HTTP 409 already committed into ApiClientError with ERR_ALREADY_COMMITTED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            code: 'ERR_ALREADY_COMMITTED',
+            message: 'Draft recovery window has expired. Cannot regenerate.',
+            correlationId: 'corr_test_409_committed',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(409);
+        expect(apiErr.code).toBe('ERR_ALREADY_COMMITTED');
+      }
+    });
+
+    it('maps HTTP 409 idempotency mismatch into ApiClientError with ERR_IDEMPOTENCY_MISMATCH', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            code: 'ERR_IDEMPOTENCY_MISMATCH',
+            message: 'Idempotency key payload mismatch.',
+            correlationId: 'corr_test_409_mismatch',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(409);
+        expect(apiErr.code).toBe('ERR_IDEMPOTENCY_MISMATCH');
+      }
+    });
+
     it('maps HTTP 429 quota exhaustion into ApiClientError with ERR_QUOTA_EXHAUSTED', async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: false,
@@ -238,6 +406,146 @@ describe('generateReview (API-PUB-03 Client)', () => {
         expect(apiErr.status).toBe(429);
         expect(apiErr.code).toBe('ERR_QUOTA_EXHAUSTED');
         expect(apiErr.retryable).toBe(false);
+      }
+    });
+
+    it('maps HTTP 429 canonical IP rate limit into ApiClientError with ERR_RATE_LIMIT_EXCEEDED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: {
+            code: 'ERR_RATE_LIMIT_EXCEEDED',
+            message: 'Too many requests. Please wait before generating another draft.',
+            correlationId: 'corr_test_ratelimit',
+            retryable: true,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(429);
+        expect(apiErr.code).toBe('ERR_RATE_LIMIT_EXCEEDED');
+      }
+    });
+
+    it('maps HTTP 429 max attempts exceeded into ApiClientError with ERR_MAX_ATTEMPTS_EXCEEDED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: {
+            code: 'ERR_MAX_ATTEMPTS_EXCEEDED',
+            message: 'Maximum generation attempts exceeded for this survey response.',
+            correlationId: 'corr_test_max_attempts',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(429);
+        expect(apiErr.code).toBe('ERR_MAX_ATTEMPTS_EXCEEDED');
+      }
+    });
+
+    it('maps HTTP 429 provider rate limited into ApiClientError with ERR_PROVIDER_RATE_LIMITED', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: {
+            code: 'ERR_PROVIDER_RATE_LIMITED',
+            message: 'Upstream AI provider rate limit encountered.',
+            correlationId: 'corr_test_provider_rl',
+            retryable: true,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(429);
+        expect(apiErr.code).toBe('ERR_PROVIDER_RATE_LIMITED');
+      }
+    });
+
+    it('maps HTTP 502 provider error into ApiClientError with ERR_PROVIDER_ERROR', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => ({
+          error: {
+            code: 'ERR_PROVIDER_ERROR',
+            message: 'Upstream AI model unavailable.',
+            correlationId: 'corr_test_502_provider',
+            retryable: true,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(502);
+        expect(apiErr.code).toBe('ERR_PROVIDER_ERROR');
+      }
+    });
+
+    it('maps HTTP 502 malformed output into ApiClientError with ERR_MALFORMED_OUTPUT', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => ({
+          error: {
+            code: 'ERR_MALFORMED_OUTPUT',
+            message: 'AI response failed schema validation.',
+            correlationId: 'corr_test_502_malformed',
+            retryable: false,
+          },
+        }),
+      });
+
+      try {
+        await generateReview(validPayload, {
+          ...defaultOptions,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        });
+        expect.unreachable('Should have thrown ApiClientError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        const apiErr = err as ApiClientError;
+        expect(apiErr.status).toBe(502);
+        expect(apiErr.code).toBe('ERR_MALFORMED_OUTPUT');
       }
     });
 

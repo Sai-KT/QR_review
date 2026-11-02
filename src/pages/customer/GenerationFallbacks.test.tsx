@@ -67,25 +67,34 @@ describe('GenerationFallbacks Component Suite (M4-T08 / SCR-CUST-10 & SCR-CUST-1
     it('classifies session/IP rate limits (ERR_RATE_LIMITED) as rate_limited, NEVER quota_exhausted', () => {
       expect(classifyGenerationError({ status: 429, code: 'ERR_RATE_LIMITED' })).toBe('rate_limited');
       expect(classifyGenerationError({ code: 'ERR_RATE_LIMITED' })).toBe('rate_limited');
+      expect(classifyGenerationError({ code: 'ERR_RATE_LIMIT_EXCEEDED' })).toBe('rate_limited');
+      expect(classifyGenerationError({ code: 'ERR_MAX_ATTEMPTS_EXCEEDED' })).toBe('rate_limited');
       expect(classifyGenerationError({ status: 429 })).toBe('rate_limited');
       expect(isQuotaExhaustedError({ status: 429, code: 'ERR_RATE_LIMITED' })).toBe(false);
+      expect(isQuotaExhaustedError({ status: 429, code: 'ERR_RATE_LIMIT_EXCEEDED' })).toBe(false);
+      expect(isQuotaExhaustedError({ status: 429, code: 'ERR_MAX_ATTEMPTS_EXCEEDED' })).toBe(false);
     });
 
-    it('classifies concurrent requests (409 ERR_CONCURRENT_REQUEST) as conflict, NEVER timeout', () => {
+    it('classifies concurrent requests and already-committed conflicts as conflict, NEVER timeout', () => {
       expect(classifyGenerationError({ status: 409, code: 'ERR_CONCURRENT_REQUEST' })).toBe('conflict');
       expect(classifyGenerationError({ code: 'ERR_IDEMPOTENCY_MISMATCH' })).toBe('conflict');
+      expect(classifyGenerationError({ code: 'ERR_ALREADY_COMMITTED' })).toBe('conflict');
       expect(isGenerationTimeoutError({ status: 409, code: 'ERR_CONCURRENT_REQUEST' })).toBe(false);
+      expect(isGenerationTimeoutError({ code: 'ERR_ALREADY_COMMITTED' })).toBe(false);
     });
 
-    it('classifies expired submission tokens (401 ERR_TOKEN_EXPIRED) as token_expired', () => {
+    it('classifies expired submission tokens (401 ERR_TOKEN_EXPIRED) as token_expired, but NOT ERR_UNAUTHORIZED', () => {
       expect(classifyGenerationError({ status: 401, code: 'ERR_TOKEN_EXPIRED' })).toBe('token_expired');
       expect(classifyGenerationError({ code: 'ERR_SUBMISSION_EXPIRED' })).toBe('token_expired');
       expect(isGenerationTimeoutError({ status: 401, code: 'ERR_TOKEN_EXPIRED' })).toBe(false);
+      // Strictly verify ERR_UNAUTHORIZED (e.g. invalid anon key) is NOT classified as token_expired
+      expect(classifyGenerationError({ status: 401, code: 'ERR_UNAUTHORIZED' })).toBe('generic_error');
     });
 
-    it('classifies abstained responses (M0-16 Insufficient Facts) as abstained', () => {
+    it('classifies abstained responses (M0-16 Insufficient Facts) as abstained across reason and abstentionReason formats', () => {
       expect(classifyGenerationError({ abstained: true, reason: 'INSUFFICIENT_FACTS' })).toBe('abstained');
       expect(classifyGenerationError({ reason: 'INSUFFICIENT_FACTS' })).toBe('abstained');
+      expect(classifyGenerationError({ abstentionReason: 'insufficient_facts' })).toBe('abstained');
       expect(isGenerationTimeoutError({ abstained: true })).toBe(false);
       expect(isQuotaExhaustedError({ abstained: true })).toBe(false);
     });

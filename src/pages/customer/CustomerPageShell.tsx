@@ -290,7 +290,11 @@ function CustomerPageShellInner({ qrId }: { qrId?: string }): React.JSX.Element 
           return;
         }
 
-        if (response.abstained || response.reason === 'INSUFFICIENT_FACTS') {
+        if (
+          response.abstained ||
+          response.reason === 'INSUFFICIENT_FACTS' ||
+          response.abstentionReason === 'insufficient_facts'
+        ) {
           setFallbackMode('abstained');
           setJourneyPhase('fallback');
         } else if (response.reviewDraft && response.reviewDraft.trim().length > 0) {
@@ -303,6 +307,21 @@ function CustomerPageShellInner({ qrId }: { qrId?: string }): React.JSX.Element 
       } catch (err) {
         // Stale response guard
         if (generationRequestId.current !== currentReqId) {
+          return;
+        }
+
+        const errCode = (err as { code?: string })?.code;
+        const errStatus = (err as { status?: number })?.status;
+
+        // HTTP 402 ERR_SUBSCRIPTION_LAPSED -> Preserve existing direct-only business behavior (SCR-CUST-14)
+        if (errStatus === 402 || errCode === 'ERR_SUBSCRIPTION_LAPSED') {
+          setViewState('direct_only');
+          return;
+        }
+
+        // HTTP 403 ERR_BUSINESS_SUSPENDED -> Preserve suspended business behavior (SCR-CUST-13)
+        if (errStatus === 403 && errCode === 'ERR_BUSINESS_SUSPENDED') {
+          setViewState('suspended');
           return;
         }
 

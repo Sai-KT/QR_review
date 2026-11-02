@@ -48,7 +48,18 @@ export function classifyGenerationError(error: unknown): GenerationFallbackMode 
     if ('abstained' in error && Boolean((error as { abstained?: boolean }).abstained)) {
       return 'abstained';
     }
-    if ('reason' in error && (error as { reason?: string }).reason === 'INSUFFICIENT_FACTS') {
+    if (
+      'reason' in error &&
+      ((error as { reason?: string }).reason === 'INSUFFICIENT_FACTS' ||
+        (error as { reason?: string }).reason === 'insufficient_facts')
+    ) {
+      return 'abstained';
+    }
+    if (
+      'abstentionReason' in error &&
+      ((error as { abstentionReason?: string }).abstentionReason === 'INSUFFICIENT_FACTS' ||
+        (error as { abstentionReason?: string }).abstentionReason === 'insufficient_facts')
+    ) {
       return 'abstained';
     }
   }
@@ -75,25 +86,28 @@ export function classifyGenerationError(error: unknown): GenerationFallbackMode 
     return 'timeout';
   }
 
-  // 4. Session / NAT IP Rate Limiting (HTTP 429 ERR_RATE_LIMITED)
+  // 4. Session / NAT IP Rate Limiting (HTTP 429 ERR_RATE_LIMITED / ERR_RATE_LIMIT_EXCEEDED / ERR_MAX_ATTEMPTS_EXCEEDED)
   // Must NOT be labeled as monthly quota exhaustion!
   if (
     code === 'ERR_RATE_LIMITED' ||
+    code === 'ERR_RATE_LIMIT_EXCEEDED' ||
+    code === 'ERR_MAX_ATTEMPTS_EXCEEDED' ||
     (status === 429 && code !== 'ERR_QUOTA_EXHAUSTED')
   ) {
     return 'rate_limited';
   }
 
   // 5. Expired token (HTTP 401 ERR_TOKEN_EXPIRED / ERR_SUBMISSION_EXPIRED)
+  // Do NOT classify ERR_UNAUTHORIZED (e.g. invalid anon key) as token_expired!
   if (
-    status === 401 ||
     code === 'ERR_TOKEN_EXPIRED' ||
-    code === 'ERR_SUBMISSION_EXPIRED'
+    code === 'ERR_SUBMISSION_EXPIRED' ||
+    (status === 401 && code !== 'ERR_UNAUTHORIZED')
   ) {
     return 'token_expired';
   }
 
-  // 6. Concurrency / Idempotency Conflict (HTTP 409 ERR_CONCURRENT_REQUEST / ERR_IDEMPOTENCY_MISMATCH)
+  // 6. Concurrency / Idempotency Conflict (HTTP 409 ERR_CONCURRENT_REQUEST / ERR_IDEMPOTENCY_MISMATCH / ERR_ALREADY_COMMITTED)
   if (
     status === 409 ||
     code === 'ERR_CONCURRENT_REQUEST' ||

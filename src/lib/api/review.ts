@@ -37,6 +37,8 @@ export interface GenerateReviewResponse {
   abstained?: boolean;
   /** Optional reason for abstention (e.g. 'INSUFFICIENT_FACTS') */
   reason?: string;
+  /** Optional reason alias for abstention */
+  abstentionReason?: string;
   /** Informational message from backend */
   message?: string;
 }

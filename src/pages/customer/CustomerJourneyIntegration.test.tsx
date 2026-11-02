@@ -1114,4 +1114,237 @@ describe('Post-M4 Integration Gate C: Complete Customer Journey Orchestration', 
       expect(screen.getByText('Your Review Draft')).toBeInTheDocument();
     });
   });
+
+  // ==========================================================================
+  // 14. Subscription Lapsed (HTTP 402 ERR_SUBSCRIPTION_LAPSED)
+  // ==========================================================================
+  it('transitions to DirectOnlyCard (SCR-CUST-14) when backend returns HTTP 402 ERR_SUBSCRIPTION_LAPSED', async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(mockActiveBusiness);
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockSurveyQuestions);
+    vi.spyOn(surveyApi, 'submitFeedback').mockResolvedValue({
+      status: 'recorded',
+      responseId: 'resp-uuid-lapsed',
+      submissionToken: 'resp-uuid-lapsed.token',
+    });
+
+    const lapsedError = new reviewApi.ApiClientError(
+      'Merchant subscription is inactive. Direct Google review link is preserved.',
+      402,
+      'ERR_SUBSCRIPTION_LAPSED',
+      'corr_lapsed_001',
+      false,
+    );
+    vi.spyOn(reviewApi, 'generateReview').mockRejectedValue(lapsedError);
+
+    renderCustomerJourney();
+
+    await waitFor(() => expect(screen.getByText('Artisan Hair Studio')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i }));
+
+    await waitFor(() => expect(screen.getByText('How was your haircut today?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Masterful & Precise/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+
+    await waitFor(() => expect(screen.getByText('How was the staff hospitality?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Warm & Attentive team/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 3/i }));
+
+    await waitFor(() => expect(screen.getByText('What stood out most about your visit?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Clean & hygienic station/i));
+    await user.click(screen.getByRole('button', { name: /Next.*optional note/i }));
+
+    await waitFor(() => expect(screen.getByText(/Add an Optional Note|Anything else/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', {
+      name: /This feedback reflects my genuine, personal experience at this business\./i,
+    }));
+    await user.click(screen.getByRole('button', { name: /Submit Feedback/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Draft My Review with AI ↗/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Draft My Review with AI ↗/i }));
+
+    // SCR-CUST-14 DirectOnlyCard rendered with direct Google review access
+    await waitFor(() => {
+      expect(screen.getByText(/We are currently collecting direct reviews on Google Maps/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Open Google Maps to Review ↗|Search on Google Maps ↗/i })).toBeInTheDocument();
+    });
+  });
+
+  // ==========================================================================
+  // 15. Suspended Business Notice (HTTP 403 ERR_BUSINESS_SUSPENDED)
+  // ==========================================================================
+  it('transitions to SuspendedBusinessCard (SCR-CUST-13) when backend returns HTTP 403 ERR_BUSINESS_SUSPENDED', async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(mockActiveBusiness);
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockSurveyQuestions);
+    vi.spyOn(surveyApi, 'submitFeedback').mockResolvedValue({
+      status: 'recorded',
+      responseId: 'resp-uuid-suspended',
+      submissionToken: 'resp-uuid-suspended.token',
+    });
+
+    const suspendedError = new reviewApi.ApiClientError(
+      'Business account is currently suspended.',
+      403,
+      'ERR_BUSINESS_SUSPENDED',
+      'corr_suspended_001',
+      false,
+    );
+    vi.spyOn(reviewApi, 'generateReview').mockRejectedValue(suspendedError);
+
+    renderCustomerJourney();
+
+    await waitFor(() => expect(screen.getByText('Artisan Hair Studio')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i }));
+
+    await waitFor(() => expect(screen.getByText('How was your haircut today?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Masterful & Precise/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+
+    await waitFor(() => expect(screen.getByText('How was the staff hospitality?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Warm & Attentive team/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 3/i }));
+
+    await waitFor(() => expect(screen.getByText('What stood out most about your visit?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Clean & hygienic station/i));
+    await user.click(screen.getByRole('button', { name: /Next.*optional note/i }));
+
+    await waitFor(() => expect(screen.getByText(/Add an Optional Note|Anything else/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', {
+      name: /This feedback reflects my genuine, personal experience at this business\./i,
+    }));
+    await user.click(screen.getByRole('button', { name: /Submit Feedback/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Draft My Review with AI ↗/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Draft My Review with AI ↗/i }));
+
+    // SCR-CUST-13 SuspendedBusinessCard rendered
+    await waitFor(() => {
+      expect(screen.getByText('Feedback Temporarily Unavailable')).toBeInTheDocument();
+      expect(screen.getByText(/Review collection for this location is currently paused/i)).toBeInTheDocument();
+    });
+  });
+
+  // ==========================================================================
+  // 16. Unauthorized Request (HTTP 401 ERR_UNAUTHORIZED vs ERR_TOKEN_EXPIRED)
+  // ==========================================================================
+  it('renders generic fallback card rather than token expired card when error is HTTP 401 ERR_UNAUTHORIZED', async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(mockActiveBusiness);
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockSurveyQuestions);
+    vi.spyOn(surveyApi, 'submitFeedback').mockResolvedValue({
+      status: 'recorded',
+      responseId: 'resp-uuid-unauth',
+      submissionToken: 'resp-uuid-unauth.token',
+    });
+
+    const unauthError = new reviewApi.ApiClientError(
+      'Invalid or missing API key',
+      401,
+      'ERR_UNAUTHORIZED',
+      'corr_unauth_001',
+      false,
+    );
+    vi.spyOn(reviewApi, 'generateReview').mockRejectedValue(unauthError);
+
+    renderCustomerJourney();
+
+    await waitFor(() => expect(screen.getByText('Artisan Hair Studio')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i }));
+
+    await waitFor(() => expect(screen.getByText('How was your haircut today?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Masterful & Precise/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+
+    await waitFor(() => expect(screen.getByText('How was the staff hospitality?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Warm & Attentive team/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 3/i }));
+
+    await waitFor(() => expect(screen.getByText('What stood out most about your visit?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Clean & hygienic station/i));
+    await user.click(screen.getByRole('button', { name: /Next.*optional note/i }));
+
+    await waitFor(() => expect(screen.getByText(/Add an Optional Note|Anything else/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', {
+      name: /This feedback reflects my genuine, personal experience at this business\./i,
+    }));
+    await user.click(screen.getByRole('button', { name: /Submit Feedback/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Draft My Review with AI ↗/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Draft My Review with AI ↗/i }));
+
+    // Verifies generic fallback card is shown, NOT "Submission Session Expired"
+    await waitFor(() => {
+      expect(screen.getByText('Unable to Generate Review Draft')).toBeInTheDocument();
+      expect(screen.queryByText('Submission Session Expired')).not.toBeInTheDocument();
+    });
+  });
+
+  // ==========================================================================
+  // 17. Already Committed Generation (HTTP 409 ERR_ALREADY_COMMITTED)
+  // ==========================================================================
+  it('routes HTTP 409 ERR_ALREADY_COMMITTED to conflict recovery card without retry button', async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(publicApi, 'fetchPublicBusiness').mockResolvedValue(mockActiveBusiness);
+    vi.spyOn(surveyApi, 'fetchSurveyQuestions').mockResolvedValue(mockSurveyQuestions);
+    vi.spyOn(surveyApi, 'submitFeedback').mockResolvedValue({
+      status: 'recorded',
+      responseId: 'resp-uuid-committed',
+      submissionToken: 'resp-uuid-committed.token',
+    });
+
+    const committedError = new reviewApi.ApiClientError(
+      'Draft recovery window has expired. Cannot regenerate.',
+      409,
+      'ERR_ALREADY_COMMITTED',
+      'corr_committed_001',
+      false,
+    );
+    vi.spyOn(reviewApi, 'generateReview').mockRejectedValue(committedError);
+
+    renderCustomerJourney();
+
+    await waitFor(() => expect(screen.getByText('Artisan Hair Studio')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Start 30-Sec(ond)? Review/i }));
+
+    await waitFor(() => expect(screen.getByText('How was your haircut today?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Masterful & Precise/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 2/i }));
+
+    await waitFor(() => expect(screen.getByText('How was the staff hospitality?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Warm & Attentive team/i));
+    await user.click(screen.getByRole('button', { name: /Next to question 3/i }));
+
+    await waitFor(() => expect(screen.getByText('What stood out most about your visit?')).toBeInTheDocument());
+    await user.click(screen.getByText(/Clean & hygienic station/i));
+    await user.click(screen.getByRole('button', { name: /Next.*optional note/i }));
+
+    await waitFor(() => expect(screen.getByText(/Add an Optional Note|Anything else/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', {
+      name: /This feedback reflects my genuine, personal experience at this business\./i,
+    }));
+    await user.click(screen.getByRole('button', { name: /Submit Feedback/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Draft My Review with AI ↗/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Draft My Review with AI ↗/i }));
+
+    // Verifies conflict card is displayed with NO retry button
+    await waitFor(() => {
+      expect(screen.getByText('Request Already in Progress')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Retry/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Write Review Directly on Google →/i })).toBeInTheDocument();
+    });
+  });
 });
