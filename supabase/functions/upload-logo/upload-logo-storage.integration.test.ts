@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
+import { pruneSupersededLogos } from './index';
 
 const LOCAL_SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
 const LOCAL_SERVICE_ROLE_KEY =
@@ -136,6 +137,10 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     await restoreBusinessLogos();
   });
 
+  beforeEach(async () => {
+    await restoreBusinessLogos();
+  });
+
   it('rejects unauthenticated requests with HTTP 401', async () => {
     const formData = new FormData();
     formData.append('businessId', BUSINESS_1_ID);
@@ -169,9 +174,11 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     const body = await res.json();
     expect(body.status).toBe('uploaded');
     expect(body.businessId).toBe(BUSINESS_1_ID);
-    // Option A: path is under ${businessId}/logos/logo_<ts>_<uuid8>.png
+    // Correction A: path is under ${businessId}/logos/logo_<full-uuid-v4>.png
     expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
-    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.png/);
+    expect(body.logoUrl).toMatch(
+      /logo_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png/,
+    );
 
     // Verify persistence in PostgreSQL
     const { data: biz } = await supabaseAdmin
@@ -204,9 +211,11 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    // Option A: URL path is under ${businessId}/logos/
+    // Correction A: URL path is under ${businessId}/logos/ with full UUID
     expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
-    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.jpeg/);
+    expect(body.logoUrl).toMatch(
+      /logo_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jpeg/,
+    );
 
     // Verify public download of JPEG
     const fileRes = await fetch(body.logoUrl);
@@ -229,9 +238,11 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    // Option A: URL path is under ${businessId}/logos/
+    // Correction A: URL path is under ${businessId}/logos/ with full UUID
     expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
-    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.webp/);
+    expect(body.logoUrl).toMatch(
+      /logo_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp/,
+    );
   });
 
   it('TC-UPL-04: strictly rejects SVG file with HTTP 415 and prevents storage writes', async () => {
@@ -328,7 +339,7 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     expect(biz2?.logo_url).toBeNull();
   });
 
-  it('TC-UPL-08: logo replacement cleans up old extension file from storage', async () => {
+  it('TC-UPL-08: logo replacement retains previous logo during grace period then prunes after expiry', async () => {
     // 1. Upload JPEG
     const formData1 = new FormData();
     formData1.append('businessId', BUSINESS_1_ID);
@@ -370,15 +381,21 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       .single();
     expect(biz?.logo_url).toBe(body2.logoUrl);
 
-    // Old JPEG file should have been pruned — verify via storage listing
+    // Correction C: Recently superseded JPEG is RETAINED during grace period (no 404 for existing sessions)
+    const oldFileRes = await fetch(body1.logoUrl);
+    expect(oldFileRes.status).toBe(200);
+
+    // Now simulate grace period expiry: prune with gracePeriodMs = 0
+    await pruneSupersededLogos(supabaseAdmin, BUSINESS_1_ID, body2.logoUrl, null, 0);
+
+    // After grace period expiry: old JPEG file is pruned while active PNG is preserved
     const { data: logosDir } = await supabaseAdmin.storage
       .from('business-logos')
       .list(`${BUSINESS_1_ID}/logos`);
     const names = (logosDir || []).map((o) => o.name);
-    // Only the new PNG file should remain
     expect(names.length).toBe(1);
     expect(names[0]).toMatch(/\.png$/);
-    // Old JPEG should not be present
+
     const oldJpegName = decodeURIComponent(
       body1.logoUrl.split('/logos/')[1]?.split('?')[0] || '',
     );
@@ -519,11 +536,14 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     const download2 = await fetch(body2.logoUrl);
     expect(download2.status).toBe(200);
 
-    // Option A: both uploads go to unique paths, so URLs differ
-    expect(body2.logoUrl).not.toBe(body1.logoUrl);
+    // Correction C: Initial logo is STILL downloadable during grace period
+    const downloadOld = await fetch(body1.logoUrl);
+    expect(downloadOld.status).toBe(200);
+
+    // Now simulate grace period expiry:
+    await pruneSupersededLogos(supabaseAdmin, BUSINESS_1_ID, body2.logoUrl, null, 0);
 
     // Verify storage directory has exactly one file in logos/ and zero .backup_ files
-    // (old file was pruned after CAS committed the new one)
     const { data: objects } = await supabaseAdmin.storage
       .from('business-logos')
       .list(`${BUSINESS_1_ID}/logos`);
@@ -570,10 +590,14 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     // Option A: current URL is under /logos/ with .webp extension
     expect(body2.logoUrl).toContain(`${BUSINESS_1_ID}/logos/`);
-    expect(body2.logoUrl).toMatch(/\.webp/);
+    expect(body2.logoUrl).toMatch(
+      /logo_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp/,
+    );
+
+    // Simulate grace period expiry:
+    await pruneSupersededLogos(supabaseAdmin, BUSINESS_1_ID, body2.logoUrl, null, 0);
 
     // Storage /logos/ should contain exactly one .webp file
-    // (the old JPEG was pruned after the WebP CAS update committed)
     const { data: objects } = await supabaseAdmin.storage
       .from('business-logos')
       .list(`${BUSINESS_1_ID}/logos`);
@@ -625,7 +649,7 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     const { data: objects } = await supabaseAdmin.storage
       .from('business-logos')
-      .list(BUSINESS_1_ID);
+      .list(`${BUSINESS_1_ID}/logos`);
 
     expect(objects?.length || 0).toBe(0);
   });
@@ -674,6 +698,9 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     expect(biz?.logo_url).not.toBeNull();
     const download = await fetch(biz!.logo_url!);
     expect(download.status).toBe(200);
+
+    // Simulate grace period expiry: prune obsolete unreferenced files
+    await pruneSupersededLogos(supabaseAdmin, BUSINESS_1_ID, biz!.logo_url, null, 0);
 
     // Verify no .backup_ files remain (Option A creates none)
     const { data: logosDir } = await supabaseAdmin.storage

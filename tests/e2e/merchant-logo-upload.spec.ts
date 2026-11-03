@@ -118,9 +118,11 @@ test.describe('M5-T05: Merchant Logo Upload & Storage Gateway', () => {
       .single();
 
     expect(biz?.logo_url).not.toBeNull();
-    // Option A: unique immutable object path under ${businessId}/logos/logo_<timestamp>_<uuid8>.png
+    // Correction A: unique immutable object path under ${businessId}/logos/logo_<full-uuid-v4>.png
     expect(biz?.logo_url).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
-    expect(biz?.logo_url).toMatch(/logo_\d+_[0-9a-f]{8}\.png/);
+    expect(biz?.logo_url).toMatch(
+      /logo_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png/,
+    );
 
     // 9. Verify public customer flow displays the updated logo
     await page.goto('/q/luxe000001');
