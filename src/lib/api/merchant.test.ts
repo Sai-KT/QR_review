@@ -1,11 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchMerchantBusiness, updateMerchantBusiness } from './merchant';
-import { supabase } from '../supabase';
+import {
+  fetchMerchantBusiness,
+  updateMerchantBusiness,
+  updateGoogleDestination,
+} from './merchant';
+import { supabase, getSupabaseUrl, getSupabaseAnonKey } from '../supabase';
 
 vi.mock('../supabase', () => ({
   supabase: {
     from: vi.fn(),
+    auth: {
+      getSession: vi.fn(),
+    },
   },
+  getSupabaseUrl: vi.fn(() => 'https://test.supabase.co'),
+  getSupabaseAnonKey: vi.fn(() => 'mock-anon-key'),
 }));
 
 describe('fetchMerchantBusiness (API-OWN-01)', () => {
@@ -252,4 +261,128 @@ describe('updateMerchantBusiness (API-OWN-02)', () => {
     expect(result.error?.message).toBe('Supabase client crashed');
   });
 });
+
+describe('updateGoogleDestination (API-OWN-03)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getSupabaseUrl).mockReturnValue('https://test.supabase.co');
+    vi.mocked(getSupabaseAnonKey).mockReturnValue('mock-anon-key');
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({
+      data: {
+        session: {
+          access_token: 'mock-access-token',
+        } as unknown,
+      },
+      error: null,
+    } as unknown as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+  });
+
+  it('rejects empty or missing businessId', async () => {
+    const result = await updateGoogleDestination('', 'https://search.google.com/local/writereview?placeid=123');
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('A valid business ID is required.');
+  });
+
+  it('rejects empty or missing googleReviewUrl', async () => {
+    const result = await updateGoogleDestination('b0000000-0000-4000-8000-000000000001', '');
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Google review URL is required.');
+  });
+
+  it('rejects when active authentication session is missing', async () => {
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({
+      data: { session: null },
+      error: null,
+    } as unknown as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+
+    const result = await updateGoogleDestination(
+      'b0000000-0000-4000-8000-000000000001',
+      'https://search.google.com/local/writereview?placeid=123',
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Authentication session required to update review destination.');
+  });
+
+  it('successfully calls update-destination Edge Function and returns updated DTO', async () => {
+    const mockResponse = {
+      status: 'updated',
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+      googleReviewUrl: 'https://search.google.com/local/writereview?placeid=ChIJLUXE00000001',
+      googlePlaceId: 'ChIJLUXE00000001',
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await updateGoogleDestination(
+      'b0000000-0000-4000-8000-000000000001',
+      'https://search.google.com/local/writereview?placeid=ChIJLUXE00000001',
+      'ChIJLUXE00000001',
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://test.supabase.co/functions/v1/update-destination',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer mock-access-token',
+          apikey: 'mock-anon-key',
+        }),
+      }),
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual(mockResponse);
+  });
+
+  it('surfaces server error code ERR_INVALID_DESTINATION_URL', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        error: {
+          code: 'ERR_INVALID_DESTINATION_URL',
+          message: 'URL must be an approved Google Maps review link.',
+        },
+      }),
+    } as Response);
+
+    const result = await updateGoogleDestination(
+      'b0000000-0000-4000-8000-000000000001',
+      'https://google.com.attacker.com',
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('URL must be an approved Google Maps review link.');
+  });
+
+  it('surfaces server error code ERR_PLACE_ID_MISMATCH', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        error: {
+          code: 'ERR_PLACE_ID_MISMATCH',
+          message: 'Provided Google Place ID does not match the Place ID in the destination URL.',
+        },
+      }),
+    } as Response);
+
+    const result = await updateGoogleDestination(
+      'b0000000-0000-4000-8000-000000000001',
+      'https://search.google.com/local/writereview?placeid=ChIJAAA',
+      'ChIJBBB',
+    );
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe(
+      'Provided Google Place ID does not match the Place ID in the destination URL.',
+    );
+  });
+});
+
 

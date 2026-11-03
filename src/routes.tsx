@@ -55,7 +55,7 @@ const MerchantPages = {
     })),
   ),
   Destination: React.lazy(() =>
-    import('./pages/merchant/MerchantPageShells.tsx').then((m) => ({
+    import('./pages/merchant/GoogleDestinationPage.tsx').then((m) => ({
       default: m.GoogleDestinationPage,
     })),
   ),

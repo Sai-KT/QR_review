@@ -93,7 +93,7 @@ describe('ProfileSettingsPage (SCR-OWN-04)', () => {
     // Read-only cards
     expect(screen.getByTestId('public-qr-id-display')).toHaveTextContent('luxe000001');
     expect(screen.getByText(/Salon & Personal Care/i)).toBeInTheDocument();
-    expect(screen.getByText(/active/i)).toBeInTheDocument();
+    expect(screen.getByText(/^active$/i)).toBeInTheDocument();
 
     // Buttons should initially be disabled because form is pristine
     expect(screen.getByTestId('profile-save-btn')).toBeDisabled();

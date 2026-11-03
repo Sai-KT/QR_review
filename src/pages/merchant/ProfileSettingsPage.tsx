@@ -35,6 +35,7 @@ import {
   CardFooter,
 } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
+import { GoogleDestinationModal } from '../../components/merchant/GoogleDestinationModal';
 import type { Business } from '../../types/domain';
 
 interface ValidationErrors {
@@ -63,6 +64,7 @@ function ProfileSettingsForm({
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = React.useState<string | null>(null);
   const [externalUpdateNotice, setExternalUpdateNotice] = React.useState<boolean>(false);
+  const [isDestinationModalOpen, setIsDestinationModalOpen] = React.useState<boolean>(false);
 
   // Compute dirty state
   const isDirty = React.useMemo(() => {
@@ -611,25 +613,34 @@ function ProfileSettingsForm({
           </CardContent>
         </Card>
 
-        {/* Google Review Destination Notice */}
-        <Card className="border-dashed border-border-subtle min-w-0 overflow-hidden">
+        {/* Google Review Destination Configuration Card */}
+        <Card className="border-border-subtle min-w-0 overflow-hidden">
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-sm font-semibold text-text-primary">
                 Google Review Destination
               </CardTitle>
-              <Badge variant="secondary" shape="pill" className="text-[11px] shrink-0">
-                Task M5-T04
-              </Badge>
+              {business.googleReviewUrl ? (
+                <Badge variant="success" shape="pill" className="text-[11px] shrink-0">
+                  Active & Routing
+                </Badge>
+              ) : (
+                <Badge variant="warning" shape="pill" className="text-[11px] shrink-0">
+                  Setup Required
+                </Badge>
+              )}
             </div>
             <CardDescription className="text-xs text-text-secondary">
               Strictly verified server-side URL link to your Google Maps review prompt.
             </CardDescription>
           </CardHeader>
-          <CardContent className="min-w-0">
+          <CardContent className="space-y-3 min-w-0">
             {business.googleReviewUrl ? (
               <div className="space-y-1 min-w-0">
-                <p className="text-xs text-text-primary font-mono truncate min-w-0">
+                <p
+                  className="text-xs text-text-primary font-mono truncate min-w-0"
+                  data-testid="profile-destination-url-preview"
+                >
                   {business.googleReviewUrl}
                 </p>
                 {business.googlePlaceId && (
@@ -639,15 +650,35 @@ function ProfileSettingsForm({
                 )}
               </div>
             ) : (
-              <p className="text-xs text-text-secondary italic">
+              <p
+                className="text-xs text-text-secondary italic"
+                data-testid="profile-destination-unconfigured-text"
+              >
                 No Google review destination configured.
               </p>
             )}
-            <p className="text-[11px] text-text-muted mt-2">
-              Google destination link verification is managed via the Google Destination Setup gateway.
-            </p>
+            <div className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDestinationModalOpen(true)}
+                data-testid="configure-destination-btn"
+                className="min-h-[44px] text-xs font-medium"
+              >
+                {business.googleReviewUrl ? 'Update Destination Link' : 'Configure Google Destination'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
+
+        {/* Google Destination Modal */}
+        <GoogleDestinationModal
+          business={business}
+          open={isDestinationModalOpen}
+          onOpenChange={setIsDestinationModalOpen}
+          onSuccess={refreshBusiness}
+        />
       </div>
     </div>
   );

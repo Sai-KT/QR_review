@@ -10,7 +10,7 @@
  * - PostgREST raw snake_case rows transformed to camelCase Business DTOs via centralized adapter.
  */
 
-import { supabase } from '../supabase';
+import { supabase, getSupabaseUrl, getSupabaseAnonKey } from '../supabase';
 import { toBusinessDto, toBusinessUpdateRow } from '../adapters/business';
 import type { BusinessRow } from '../../types/database';
 import type { Business, BusinessProfileUpdate } from '../../types/domain';
@@ -22,6 +22,18 @@ export interface FetchMerchantBusinessResult {
 
 export interface UpdateMerchantBusinessResult {
   data: Business | null;
+  error: Error | null;
+}
+
+export interface DestinationUpdateResponse {
+  status: 'updated';
+  businessId: string;
+  googleReviewUrl: string;
+  googlePlaceId: string | null;
+}
+
+export interface UpdateGoogleDestinationResult {
+  data: DestinationUpdateResponse | null;
   error: Error | null;
 }
 
@@ -174,5 +186,128 @@ export async function updateMerchantBusiness(
     };
   }
 }
+
+/**
+ * Updates Google Review Destination URL via the dedicated authenticated Edge Function gateway.
+ *
+ * Endpoint: POST /functions/v1/update-destination (API-OWN-03)
+ * Trust Boundary: OWNER_AUTHENTICATED
+ * Security: Validates session JWT, strict server-side Google domain whitelist, Place ID format,
+ *           and records audit log in public.admin_audit_logs.
+ */
+export async function updateGoogleDestination(
+  businessId: string,
+  googleReviewUrl: string,
+  googlePlaceId?: string | null,
+): Promise<UpdateGoogleDestinationResult> {
+  if (!businessId || typeof businessId !== 'string' || businessId.trim() === '') {
+    return {
+      data: null,
+      error: new Error('A valid business ID is required.'),
+    };
+  }
+
+  if (!googleReviewUrl || typeof googleReviewUrl !== 'string' || googleReviewUrl.trim() === '') {
+    return {
+      data: null,
+      error: new Error('Google review URL is required.'),
+    };
+  }
+
+  try {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session?.access_token) {
+      return {
+        data: null,
+        error: new Error('Authentication session required to update review destination.'),
+      };
+    }
+
+    const supabaseUrl = getSupabaseUrl();
+    const anonKey = getSupabaseAnonKey();
+
+    if (!supabaseUrl) {
+      return {
+        data: null,
+        error: new Error('Supabase URL configuration is missing.'),
+      };
+    }
+
+    const cleanBase = supabaseUrl.replace(/\/+$/, '');
+    const endpoint = `${cleanBase}/functions/v1/update-destination`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    };
+
+    if (anonKey) {
+      headers['apikey'] = anonKey;
+    }
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        businessId: businessId.trim(),
+        googleReviewUrl: googleReviewUrl.trim(),
+        googlePlaceId: googlePlaceId ? googlePlaceId.trim() : null,
+      }),
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const serverMessage = json?.error?.message;
+      const serverCode = json?.error?.code;
+
+      if (serverCode === 'ERR_INVALID_DESTINATION_URL') {
+        return {
+          data: null,
+          error: new Error(serverMessage || 'URL must be an approved Google Maps review link.'),
+        };
+      }
+
+      if (serverCode === 'ERR_PLACE_ID_MISMATCH') {
+        return {
+          data: null,
+          error: new Error(serverMessage || 'Google Place ID does not match destination URL.'),
+        };
+      }
+
+      if (serverCode === 'ERR_PERMISSION_DENIED') {
+        return {
+          data: null,
+          error: new Error(
+            serverMessage || 'You do not have permission to update this business destination.',
+          ),
+        };
+      }
+
+      return {
+        data: null,
+        error: new Error(serverMessage || `Destination update failed with status ${res.status}.`),
+      };
+    }
+
+    return {
+      data: json as DestinationUpdateResponse,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error:
+        err instanceof Error
+          ? err
+          : new Error('An unexpected network error occurred while updating review destination.'),
+    };
+  }
+}
+
 
 
