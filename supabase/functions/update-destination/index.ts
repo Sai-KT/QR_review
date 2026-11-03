@@ -310,14 +310,40 @@ export async function handler(
     }
   }
 
-  // 10. Persist Destination Update via Service Role
-  const { error: updateError } = await supabaseAdmin
+  // 10. Check for No-Op Mutation (Identical Payload)
+  const isNoOp =
+    business.google_review_url === sanitizedUrl &&
+    (business.google_place_id || null) === (targetPlaceId || null);
+
+  if (isNoOp) {
+    return new Response(
+      JSON.stringify({
+        status: 'unmodified',
+        businessId,
+        googleReviewUrl: sanitizedUrl,
+        googlePlaceId: targetPlaceId,
+      }),
+      {
+        status: 200,
+        headers: {
+          ...CORS_HEADERS,
+          ...NO_CACHE_HEADERS,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+  }
+
+  // 11. Persist Destination Update via Service Role with Owner Guard (TOCTOU Defense)
+  const { data: updatedRows, error: updateError } = await supabaseAdmin
     .from('businesses')
     .update({
       google_review_url: sanitizedUrl,
       google_place_id: targetPlaceId,
     })
-    .eq('id', businessId);
+    .eq('id', businessId)
+    .eq('owner_id', user.id)
+    .select('id');
 
   if (updateError) {
     return buildErrorResponse(
@@ -327,7 +353,15 @@ export async function handler(
     );
   }
 
-  // 11. Write Append-Only Audit Trail (public.admin_audit_logs)
+  if (!updatedRows || updatedRows.length === 0) {
+    return buildErrorResponse(
+      403,
+      'ERR_PERMISSION_DENIED',
+      'You do not have permission to modify this business review destination.',
+    );
+  }
+
+  // 12. Write Append-Only Audit Trail (public.admin_audit_logs)
   const ipHash = extractClientIpHash(req);
   const { error: auditError } = await supabaseAdmin
     .from('admin_audit_logs')
@@ -348,11 +382,29 @@ export async function handler(
     });
 
   if (auditError) {
-    // Log error internally; do not fail customer request since primary mutation succeeded
-    console.error('Failed to write audit log entry for destination update:', auditError);
+    console.error(
+      'Failed to record audit log for destination update. Performing compensating rollback:',
+      auditError,
+    );
+
+    // Compensating Rollback: Revert destination fields to preserve audit-log consistency
+    await supabaseAdmin
+      .from('businesses')
+      .update({
+        google_review_url: business.google_review_url,
+        google_place_id: business.google_place_id,
+      })
+      .eq('id', businessId)
+      .eq('owner_id', user.id);
+
+    return buildErrorResponse(
+      500,
+      'ERR_INTERNAL_SERVER_ERROR',
+      'Failed to record required audit log for destination change. Destination change reverted.',
+    );
   }
 
-  // 12. Return Success Response (API-OWN-03 DTO)
+  // 13. Return Success Response (API-OWN-03 DTO)
   const responsePayload = {
     status: 'updated',
     businessId,

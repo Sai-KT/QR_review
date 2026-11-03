@@ -180,6 +180,14 @@ export function validateDestinationUrl(
         errorMessage: 'www.google.com links must target /maps.',
       };
     }
+  } else if (hostname === 'maps.google.com') {
+    if (pathname.length <= 1 && !parsed.search) {
+      return {
+        isValid: false,
+        errorCode: 'ERR_INVALID_DESTINATION_URL',
+        errorMessage: 'maps.google.com links must contain a specific place or map query.',
+      };
+    }
   } else if (hostname === 'g.page') {
     if (!pathname.startsWith('/r/')) {
       return {

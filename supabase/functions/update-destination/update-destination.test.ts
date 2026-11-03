@@ -62,10 +62,27 @@ function createMockSupabase(options: {
             };
           }),
         }),
-        update: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({
-            error: updateError,
-          }),
+        update: vi.fn().mockImplementation(() => {
+          const builder: Record<string, unknown> = {
+            then(onFulfilled?: (value: unknown) => unknown) {
+              const res = {
+                data: updateError ? null : [{ id: business?.id || MOCK_BUSINESS_ID }],
+                error: updateError,
+              };
+              return Promise.resolve(res).then(onFulfilled);
+            },
+            select: vi.fn().mockImplementation(() => ({
+              then(onFulfilled?: (value: unknown) => unknown) {
+                const res = {
+                  data: updateError ? null : [{ id: business?.id || MOCK_BUSINESS_ID }],
+                  error: updateError,
+                };
+                return Promise.resolve(res).then(onFulfilled);
+              },
+            })),
+          };
+          builder.eq = vi.fn().mockReturnValue(builder);
+          return builder;
         }),
       };
     }
@@ -324,5 +341,49 @@ describe('update-destination Edge Function (API-OWN-03)', () => {
     expect(body.status).toBe('updated');
     expect(body.googleReviewUrl).toBe(shortlink);
     expect(body.googlePlaceId).toBe('ChIJLUXE_MANUAL_00000001');
+  });
+
+  it('returns status unmodified without writes when payload matches existing destination (no-op)', async () => {
+    const mockSupabase = createMockSupabase({
+      business: {
+        id: MOCK_BUSINESS_ID,
+        owner_id: MOCK_USER_ID,
+        google_review_url: 'https://search.google.com/local/writereview?placeid=ChIJLUXE00000001',
+        google_place_id: 'ChIJLUXE00000001',
+      },
+    });
+
+    const req = makeRequest('POST', {
+      businessId: MOCK_BUSINESS_ID,
+      googleReviewUrl: 'https://search.google.com/local/writereview?placeid=ChIJLUXE00000001',
+    });
+
+    const res = await handler(req, mockSupabase);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.status).toBe('unmodified');
+    expect(body.businessId).toBe(MOCK_BUSINESS_ID);
+    // Audit log should NOT be written for no-op requests
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('admin_audit_logs');
+  });
+
+  it('triggers compensating rollback and returns 500 when audit log insertion fails', async () => {
+    const mockSupabase = createMockSupabase({
+      auditInsertError: { message: 'Database connection dropped while inserting audit log' },
+    });
+
+    const newUrl = 'https://search.google.com/local/writereview?placeid=ChIJLUXE_NEW_000000000001';
+    const req = makeRequest('POST', {
+      businessId: MOCK_BUSINESS_ID,
+      googleReviewUrl: newUrl,
+    });
+
+    const res = await handler(req, mockSupabase);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+
+    expect(body.error.code).toBe('ERR_INTERNAL_SERVER_ERROR');
+    expect(body.error.message).toContain('Failed to record required audit log');
   });
 });

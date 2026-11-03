@@ -101,6 +101,17 @@ describe('destinationValidator (M5-T04 / SCR-OWN-05 / API-OWN-03)', () => {
       }
     });
 
+    it('rejects bare maps.google.com without specific query or path', () => {
+      const url = 'https://maps.google.com/';
+      const result = validateDestinationUrl(url);
+
+      expect(result.isValid).toBe(false);
+      if (!result.isValid) {
+        expect(result.errorCode).toBe('ERR_INVALID_DESTINATION_URL');
+        expect(result.errorMessage).toContain('maps.google.com links must contain a specific place or map query');
+      }
+    });
+
     it('TC-DST-03: rejects insecure HTTP links', () => {
       const url = 'http://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4';
       const result = validateDestinationUrl(url);

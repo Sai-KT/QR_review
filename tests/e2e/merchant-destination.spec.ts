@@ -351,6 +351,51 @@ test.describe('M5-T04: Google Review Destination Setup', () => {
     expect(checkRow?.google_place_id).toBe('ChIJDAILY0000001');
   });
 
+  test('Idempotent Update: Submitting identical destination returns status unmodified without duplicate audit row', async () => {
+    const client = createClient(LOCAL_SUPABASE_URL, LOCAL_ANON_KEY, {
+      auth: { persistSession: false },
+    });
+    const { data: authData } = await client.auth.signInWithPassword({
+      email: 'merchant.luxe@local.test',
+      password: 'LocalDevPass123!',
+    });
+    const token = authData.session?.access_token;
+    expect(token).toBeDefined();
+
+    // Fetch initial audit log count
+    const { count: initialAuditCount } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('target_business_id', BUSINESS_1_ID)
+      .eq('action', 'UPDATE_GOOGLE_DESTINATION');
+
+    // Submit identical current destination
+    const res = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/update-destination`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        businessId: BUSINESS_1_ID,
+        googleReviewUrl: 'https://search.google.com/local/writereview?placeid=ChIJLUXE00000001',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('unmodified');
+
+    // Verify audit log count did NOT increase
+    const { count: finalAuditCount } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('target_business_id', BUSINESS_1_ID)
+      .eq('action', 'UPDATE_GOOGLE_DESTINATION');
+
+    expect(finalAuditCount).toBe(initialAuditCount);
+  });
+
   test('Anti-Gating Integration: Customer portal routes immediately to updated Google destination', async ({
     page,
   }) => {
