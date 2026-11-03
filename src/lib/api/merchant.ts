@@ -309,5 +309,16 @@ export async function updateGoogleDestination(
   }
 }
 
+export {
+  uploadBusinessLogo,
+  deleteBusinessLogo,
+  prevalidateLogoFile,
+  type LogoUploadResponse,
+  type LogoDeleteResponse,
+  type LogoUploadResult,
+  type LogoDeleteResult,
+} from '../storage';
+
+
 
 

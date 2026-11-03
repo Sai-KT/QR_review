@@ -36,6 +36,7 @@ import {
 } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
 import { GoogleDestinationModal } from '../../components/merchant/GoogleDestinationModal';
+import { LogoUploader } from '../../components/merchant/LogoUploader';
 import type { Business } from '../../types/domain';
 
 interface ValidationErrors {
@@ -575,41 +576,36 @@ function ProfileSettingsForm({
 
       {/* Related Gateways Status Notices (M5-T04 and M5-T05 boundaries) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 min-w-0">
-        {/* Logo Branding Notice */}
-        <Card className="border-dashed border-border-subtle min-w-0 overflow-hidden">
+        {/* Brand Logo & Standee Artwork Card (Task M5-T05 / SCR-OWN-04) */}
+        <Card className="border-border-subtle min-w-0 overflow-hidden" data-testid="profile-logo-card">
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-sm font-semibold text-text-primary">
-                Brand Logo & Standee Artwork
+                Brand Logo & Counter Artwork
               </CardTitle>
-              <Badge variant="secondary" shape="pill" className="text-[11px] shrink-0">
-                Task M5-T05
-              </Badge>
+              {business.logoUrl ? (
+                <Badge variant="success" shape="pill" className="text-[11px] shrink-0">
+                  Custom Logo Active
+                </Badge>
+              ) : (
+                <Badge variant="secondary" shape="pill" className="text-[11px] shrink-0">
+                  Default Avatar
+                </Badge>
+              )}
             </div>
             <CardDescription className="text-xs text-text-secondary">
-              Logo upload with magic-byte verification (PNG/JPEG/WebP &le; 2MB).
+              Upload your official brand logo for customer surveys, Google review prompts, and digital QR codes (PNG, JPEG, WebP &le; 2 MB).
             </CardDescription>
           </CardHeader>
           <CardContent className="min-w-0">
-            {business.logoUrl ? (
-              <div className="flex items-center gap-3 min-w-0">
-                <img
-                  src={business.logoUrl}
-                  alt={`${business.name} logo`}
-                  className="h-10 w-10 rounded-md object-contain border border-border-subtle bg-surface-base shrink-0"
-                />
-                <span className="text-xs text-text-secondary truncate min-w-0">
-                  {business.logoUrl}
-                </span>
-              </div>
-            ) : (
-              <p className="text-xs text-text-secondary italic">
-                No custom logo uploaded yet. Default platform standee avatar in use.
-              </p>
-            )}
-            <p className="text-[11px] text-text-muted mt-2">
-              Logo uploads and high-resolution standee downloads are managed via the Digital QR Studio.
-            </p>
+            <LogoUploader
+              businessId={business.id}
+              businessName={business.name}
+              currentLogoUrl={business.logoUrl}
+              onLogoUpdated={async () => {
+                await refreshBusiness();
+              }}
+            />
           </CardContent>
         </Card>
 
