@@ -60,8 +60,8 @@ const MerchantPages = {
     })),
   ),
   Qr: React.lazy(() =>
-    import('./pages/merchant/MerchantPageShells.tsx').then((m) => ({
-      default: m.DigitalQrStudioPage,
+    import('./pages/merchant/DigitalQRPage.tsx').then((m) => ({
+      default: m.DigitalQRPage,
     })),
   ),
   Feedback: React.lazy(() =>
