@@ -82,10 +82,28 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       .update({ logo_url: null })
       .in('id', [BUSINESS_1_ID, BUSINESS_2_ID]);
 
-    // Clean storage files for test businesses
-    const files1 = ['png', 'jpeg', 'webp'].map((ext) => `${BUSINESS_1_ID}/logo.${ext}`);
-    const files2 = ['png', 'jpeg', 'webp'].map((ext) => `${BUSINESS_2_ID}/logo.${ext}`);
-    await supabaseAdmin.storage.from('business-logos').remove([...files1, ...files2]);
+    // Clean all logo files for test businesses (Option A uses ${businessId}/logos/ prefix)
+    for (const biz of [BUSINESS_1_ID, BUSINESS_2_ID]) {
+      try {
+        const { data: topLevel } = await supabaseAdmin.storage
+          .from('business-logos')
+          .list(biz, { limit: 100 });
+        const topFiles = (topLevel || []).map((f) => `${biz}/${f.name}`);
+        if (topFiles.length > 0) {
+          await supabaseAdmin.storage.from('business-logos').remove(topFiles);
+        }
+
+        const { data: logosDir } = await supabaseAdmin.storage
+          .from('business-logos')
+          .list(`${biz}/logos`, { limit: 100 });
+        const logoFiles = (logosDir || []).map((f) => `${biz}/logos/${f.name}`);
+        if (logoFiles.length > 0) {
+          await supabaseAdmin.storage.from('business-logos').remove(logoFiles);
+        }
+      } catch {
+        // Non-fatal on cleanup
+      }
+    }
   };
 
   beforeAll(async () => {
@@ -151,7 +169,9 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     const body = await res.json();
     expect(body.status).toBe('uploaded');
     expect(body.businessId).toBe(BUSINESS_1_ID);
-    expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logo.png`);
+    // Option A: path is under ${businessId}/logos/logo_<ts>_<uuid8>.png
+    expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
+    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.png/);
 
     // Verify persistence in PostgreSQL
     const { data: biz } = await supabaseAdmin
@@ -184,7 +204,9 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logo.jpeg`);
+    // Option A: URL path is under ${businessId}/logos/
+    expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
+    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.jpeg/);
 
     // Verify public download of JPEG
     const fileRes = await fetch(body.logoUrl);
@@ -207,7 +229,9 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logo.webp`);
+    // Option A: URL path is under ${businessId}/logos/
+    expect(body.logoUrl).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
+    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.webp/);
   });
 
   it('TC-UPL-04: strictly rejects SVG file with HTTP 415 and prevents storage writes', async () => {
@@ -316,6 +340,7 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       body: formData1,
     });
     expect(res1.status).toBe(200);
+    const body1 = await res1.json();
 
     // 2. Upload PNG replacing JPEG
     const formData2 = new FormData();
@@ -328,18 +353,52 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       body: formData2,
     });
     expect(res2.status).toBe(200);
+    const body2 = await res2.json();
 
-    // Verify storage object listing only has logo.png and old logo.jpeg is deleted
-    const { data: objects } = await supabaseAdmin.storage
+    // Option A: each upload gets a unique path — URLs are distinct
+    expect(body2.logoUrl).not.toBe(body1.logoUrl);
+
+    // New PNG is accessible
+    const newFileRes = await fetch(body2.logoUrl);
+    expect(newFileRes.status).toBe(200);
+
+    // DB points to new PNG URL
+    const { data: biz } = await supabaseAdmin
+      .from('businesses')
+      .select('logo_url')
+      .eq('id', BUSINESS_1_ID)
+      .single();
+    expect(biz?.logo_url).toBe(body2.logoUrl);
+
+    // Old JPEG file should have been pruned — verify via storage listing
+    const { data: logosDir } = await supabaseAdmin.storage
       .from('business-logos')
-      .list(BUSINESS_1_ID);
-
-    const fileNames = objects?.map((o) => o.name) || [];
-    expect(fileNames).toContain('logo.png');
-    expect(fileNames).not.toContain('logo.jpeg');
+      .list(`${BUSINESS_1_ID}/logos`);
+    const names = (logosDir || []).map((o) => o.name);
+    // Only the new PNG file should remain
+    expect(names.length).toBe(1);
+    expect(names[0]).toMatch(/\.png$/);
+    // Old JPEG should not be present
+    const oldJpegName = decodeURIComponent(
+      body1.logoUrl.split('/logos/')[1]?.split('?')[0] || '',
+    );
+    if (oldJpegName) {
+      expect(names).not.toContain(oldJpegName);
+    }
   });
 
   it('API-OWN-08 / TC-API-23: deletes logo files and clears database logo_url', async () => {
+    // First upload a logo so there is something to delete
+    const formData = new FormData();
+    formData.append('businessId', BUSINESS_1_ID);
+    formData.append('file', new File([createPngBytes(120, 120)], 'logo.png', { type: 'image/png' }));
+    const uploadRes = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      body: formData,
+    });
+    expect(uploadRes.status).toBe(200);
+
     const res = await fetch(
       `${LOCAL_SUPABASE_URL}/functions/v1/upload-logo?businessId=${BUSINESS_1_ID}`,
       {
@@ -365,12 +424,12 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
 
     expect(biz?.logo_url).toBeNull();
 
-    // Verify storage bucket is empty for this business
-    const { data: objects } = await supabaseAdmin.storage
+    // Option A: logos are under ${businessId}/logos/ — verify that subdir is also empty
+    const { data: logosObjects } = await supabaseAdmin.storage
       .from('business-logos')
-      .list(BUSINESS_1_ID);
+      .list(`${BUSINESS_1_ID}/logos`);
 
-    expect(objects?.length || 0).toBe(0);
+    expect(logosObjects?.length || 0).toBe(0);
   });
 
   it('cross-tenant: merchant 2 cannot delete merchant 1 logo with HTTP 403', async () => {
@@ -440,7 +499,7 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     const download1 = await fetch(body1.logoUrl);
     expect(download1.status).toBe(200);
 
-    // 2. Upload replacement PNG (same extension)
+    // 2. Upload replacement PNG (same extension) — should get its own unique path
     const formData2 = new FormData();
     formData2.append('businessId', BUSINESS_1_ID);
     formData2.append('file', new File([createPngBytes(150, 150)], 'replacement.png', { type: 'image/png' }));
@@ -453,18 +512,33 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     expect(res2.status).toBe(200);
     const body2 = await res2.json();
 
+    // Verify replacement URL is different from initial URL (unique paths in Option A)
+    expect(body2.logoUrl).not.toBe(body1.logoUrl);
+
     // Verify replacement public URL is downloadable
     const download2 = await fetch(body2.logoUrl);
     expect(download2.status).toBe(200);
 
-    // Verify storage directory has only logo.png and zero .backup_ files
+    // Option A: both uploads go to unique paths, so URLs differ
+    expect(body2.logoUrl).not.toBe(body1.logoUrl);
+
+    // Verify storage directory has exactly one file in logos/ and zero .backup_ files
+    // (old file was pruned after CAS committed the new one)
     const { data: objects } = await supabaseAdmin.storage
       .from('business-logos')
-      .list(BUSINESS_1_ID);
+      .list(`${BUSINESS_1_ID}/logos`);
 
     const names = objects?.map((o) => o.name) || [];
-    expect(names).toEqual(['logo.png']);
+    expect(names.length).toBe(1);
     expect(names.some((n) => n.startsWith('.backup_'))).toBe(false);
+
+    // Old file name should not appear in the listing
+    const oldFileName = decodeURIComponent(
+      body1.logoUrl.split('/logos/')[1]?.split('?')[0] || '',
+    );
+    if (oldFileName) {
+      expect(names).not.toContain(oldFileName);
+    }
   });
 
   it('Check B: multi-step extension transitions (PNG -> JPEG -> WebP) prune obsolete objects', async () => {
@@ -479,6 +553,7 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       body: formData1,
     });
     expect(res1.status).toBe(200);
+    const body1 = await res1.json();
 
     // JPEG -> WebP
     const formData2 = new FormData();
@@ -491,15 +566,29 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       body: formData2,
     });
     expect(res2.status).toBe(200);
+    const body2 = await res2.json();
 
+    // Option A: current URL is under /logos/ with .webp extension
+    expect(body2.logoUrl).toContain(`${BUSINESS_1_ID}/logos/`);
+    expect(body2.logoUrl).toMatch(/\.webp/);
+
+    // Storage /logos/ should contain exactly one .webp file
+    // (the old JPEG was pruned after the WebP CAS update committed)
     const { data: objects } = await supabaseAdmin.storage
       .from('business-logos')
-      .list(BUSINESS_1_ID);
+      .list(`${BUSINESS_1_ID}/logos`);
 
     const names = objects?.map((o) => o.name) || [];
-    expect(names).toContain('logo.webp');
-    expect(names).not.toContain('logo.jpeg');
-    expect(names).not.toContain('logo.png');
+    expect(names.length).toBe(1);
+    expect(names[0]).toMatch(/\.webp$/);
+
+    // Old JPEG file should not appear in the listing
+    const oldJpegFileName = decodeURIComponent(
+      body1.logoUrl.split('/logos/')[1]?.split('?')[0] || '',
+    );
+    if (oldJpegFileName) {
+      expect(names).not.toContain(oldJpegFileName);
+    }
   });
 
   it('Check C: repeated deletion calls are idempotent and maintain null DB pointer', async () => {
@@ -563,10 +652,19 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
       }),
     ]);
 
-    expect(resA.status).toBe(200);
-    expect(resB.status).toBe(200);
+    // Option A + CAS: exactly one request wins (200), the other loses CAS (409 Conflict).
+    // Both are acceptable non-error outcomes; no file corruption, no broken images.
+    const statuses = [resA.status, resB.status].sort();
+    const validPairs = [
+      [200, 200], // Both read same initial null logo_url; both may succeed in test env
+      [200, 409], // One wins CAS; loser self-cleans and retries
+    ];
+    const isValid = validPairs.some(
+      (pair) => pair[0] === statuses[0] && pair[1] === statuses[1],
+    );
+    expect(isValid).toBe(true);
 
-    // Verify DB points to an active valid URL
+    // Regardless of outcome: DB must point to a valid, downloadable URL
     const { data: biz } = await supabaseAdmin
       .from('businesses')
       .select('logo_url')
@@ -577,12 +675,14 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     const download = await fetch(biz!.logo_url!);
     expect(download.status).toBe(200);
 
-    // Verify no stray backup files remain
-    const { data: objects } = await supabaseAdmin.storage
+    // Verify no .backup_ files remain (Option A creates none)
+    const { data: logosDir } = await supabaseAdmin.storage
       .from('business-logos')
-      .list(BUSINESS_1_ID);
+      .list(`${BUSINESS_1_ID}/logos`);
+    const names = (logosDir || []).map((o) => o.name);
+    expect(names.some((n) => n.startsWith('.backup_'))).toBe(false);
 
-    const names = objects?.map((o) => o.name) || [];
-    expect(names).toEqual(['logo.png']);
+    // Exactly one unique logo file should remain in /logos/
+    expect(names.length).toBe(1);
   });
 });

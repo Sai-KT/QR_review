@@ -11,16 +11,27 @@
  *   - docs/SECURITY.md (v1.1) §15.1 (Founder Decision M0-03)
  *   - docs/TEST_PLAN.md (v1.1) TC-UPL-01..08, TC-API-21..23
  *
- * Architecture & Consistency Model:
+ * Architecture & Consistency Model (Option A — Immutable Request-Unique Paths + CAS):
  *   Supabase Storage and PostgreSQL operate as two independent distributed services
  *   without a shared two-phase commit (2PC) transaction coordinator.
- *   This gateway implements a Compensating Saga / Dual-Phase Reconciliation protocol:
- *   - Isolated per-request backup keys (`.backup_${requestId}_logo.${ext}`)
- *   - Zero-downtime same-extension copy-based backup (live file remains available during upload)
- *   - Best-effort compensation rollbacks on upload or DB persistence failure
- *   - In-place replacement with post-commit pruning of obsolete extensions
- *   - DB-first deletion with rollback compensation on storage removal failure
- *   - Database mutation predicates bound to caller tenant ownership (`owner_id = user.id`)
+ *   This gateway eliminates shared-path mutable overwrites entirely by giving each upload
+ *   its own unique immutable object key:
+ *
+ *     Path:  ${businessId}/logos/logo_${Date.now()}_${uuid8}.${ext}
+ *
+ *   Concurrency control is provided by a PostgreSQL Compare-and-Swap (CAS) predicate:
+ *     - .is('logo_url', null)             when the DB slot is currently empty
+ *     - .eq('logo_url', initialLogoUrl)   when the DB slot holds a prior URL
+ *   A stale concurrent request that loses the CAS race receives 0 matched rows,
+ *   removes only its own unique file, and returns HTTP 409 Conflict.
+ *   No backup copy/move operations are needed; live logos are never touched.
+ *
+ *   Deletion (Decision M5-T05-D02 — Fail-Safe Avatar Fallback):
+ *   On Storage removal failure after a successful DB NULL commit, the backend logs
+ *   an alert for background pruning but does NOT restore the DB pointer. The client
+ *   receives the monogram avatar rather than a broken image URL.
+ *
+ *   Database mutation predicates are bound to caller tenant ownership (owner_id = user.id).
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -258,42 +269,27 @@ export async function handler(
       );
     }
 
-    const requestId = crypto.randomUUID().slice(0, 8);
-    const targetPath = `${businessId}/logo.${validation.extension}`;
-    const backupPath = `${businessId}/.backup_${requestId}_logo.${validation.extension}`;
+    // Option A — Immutable Request-Unique Object Path:
+    // Every upload writes to its own unique key. No two in-flight requests ever
+    // share a Storage object key, eliminating all shared-path overwrite races.
+    const uuid8 = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+    const fileName = `logo_${Date.now()}_${uuid8}.${validation.extension}`;
+    const targetPath = `${businessId}/logos/${fileName}`;
 
-    // Failure Safety: Check if current logo has same extension and create a non-destructive safety copy
-    let hasBackup = false;
-    try {
-      const { error: copyError } = await supabaseAdmin.storage
-        .from(BUCKET_NAME)
-        .copy(targetPath, backupPath);
+    // Capture the initial DB logo_url before upload for CAS predicate and post-commit pruning.
+    // This is the value we will assert in the PostgreSQL update; if it has changed by commit
+    // time (concurrent winner already committed), the CAS update matches 0 rows → 409 Conflict.
+    const initialLogoUrl = business.logo_url as string | null;
 
-      if (!copyError) {
-        hasBackup = true;
-      }
-    } catch {
-      // Non-fatal if target file did not exist yet
-    }
-
-    // Upload new logo with validated extension (in-place upsert)
+    // Upload to the unique immutable path. No backup, no copy, no upsert overwrite of existing.
     const { error: uploadError } = await supabaseAdmin.storage
       .from(BUCKET_NAME)
       .upload(targetPath, bytes, {
         contentType: validation.mimeType,
-        upsert: true,
+        upsert: false,
       });
 
     if (uploadError) {
-      // Restore backup if it existed
-      if (hasBackup) {
-        try {
-          await supabaseAdmin.storage.from(BUCKET_NAME).remove([targetPath]);
-          await supabaseAdmin.storage.from(BUCKET_NAME).move(backupPath, targetPath);
-        } catch {
-          // Best effort restore
-        }
-      }
       return errorResponse(
         'ERR_STORAGE_ERROR',
         `Failed to store logo file: ${uploadError.message}`,
@@ -314,68 +310,76 @@ export async function handler(
     const timestamp = Date.now();
     const logoUrl = `${publicBaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${targetPath}?v=${timestamp}`;
 
-    // Update public.businesses.logo_url with owner_id verification guard
-    const { data: updatedBusiness, error: dbUpdateError } = await supabaseAdmin
+    // CAS (Compare-and-Swap) update:
+    // Only commit if logo_url still matches the value we read before uploading.
+    // This detects a concurrent winner that committed between our DB read and our DB write.
+    // On mismatch the update matches 0 rows → we abort and clean up only our own unique file.
+    let dbUpdateQuery = supabaseAdmin
       .from('businesses')
       .update({
         logo_url: logoUrl,
         updated_at: new Date().toISOString(),
       })
       .eq('id', businessId)
-      .eq('owner_id', user.id)
+      .eq('owner_id', user.id);
+
+    if (initialLogoUrl === null) {
+      dbUpdateQuery = dbUpdateQuery.is('logo_url', null);
+    } else {
+      dbUpdateQuery = dbUpdateQuery.eq('logo_url', initialLogoUrl);
+    }
+
+    const { data: updatedBusiness, error: dbUpdateError } = await dbUpdateQuery
       .select('id, logo_url')
       .maybeSingle();
 
-    if (dbUpdateError || !updatedBusiness) {
-      // Rollback storage mutations
+    if (dbUpdateError) {
+      // DB error — clean up only our own unique file and return 500.
       try {
         await supabaseAdmin.storage.from(BUCKET_NAME).remove([targetPath]);
-        if (hasBackup) {
-          await supabaseAdmin.storage.from(BUCKET_NAME).move(backupPath, targetPath);
-        }
       } catch {
-        // Best effort rollback
-      }
-
-      if (dbUpdateError) {
-        return errorResponse(
-          'ERR_DATABASE_ERROR',
-          `Failed to persist business logo URL: ${dbUpdateError.message}`,
-          500,
-        );
+        // Best effort Storage cleanup
       }
       return errorResponse(
-        'ERR_PERMISSION_DENIED',
-        'Business ownership changed during update.',
-        403,
+        'ERR_DATABASE_ERROR',
+        `Failed to persist business logo URL: ${dbUpdateError.message}`,
+        500,
       );
     }
 
-    // Successful persistence: Clean up safety backup and any stale backups
-    try {
-      const { data: tenantFiles } = await supabaseAdmin.storage
-        .from(BUCKET_NAME)
-        .list(businessId);
-      const backupsToDelete = (tenantFiles || [])
-        .filter((f) => f.name.startsWith('.backup_'))
-        .map((f) => `${businessId}/${f.name}`);
-      if (backupsToDelete.length > 0) {
-        await supabaseAdmin.storage.from(BUCKET_NAME).remove(backupsToDelete);
+    if (!updatedBusiness) {
+      // CAS mismatch: a concurrent upload already committed a newer logo_url, OR
+      // ownership check failed. Remove only our own file and report the conflict.
+      try {
+        await supabaseAdmin.storage.from(BUCKET_NAME).remove([targetPath]);
+      } catch {
+        // Best effort Storage cleanup
       }
-    } catch {
-      // Non-fatal cleanup
+      return errorResponse(
+        'ERR_CONFLICT',
+        'Another upload committed a newer logo concurrently. Please retry.',
+        409,
+        undefined,
+        true,
+      );
     }
 
-    // Clean up old extension files in tenant directory (TC-UPL-08)
-    const possibleExts = ['png', 'jpeg', 'webp'];
-    const oldExtsToDelete = possibleExts
-      .filter((ext) => ext !== validation.extension)
-      .map((ext) => `${businessId}/logo.${ext}`);
-
-    try {
-      await supabaseAdmin.storage.from(BUCKET_NAME).remove(oldExtsToDelete);
-    } catch {
-      // Non-fatal cleanup attempt
+    // CAS succeeded — prune the specific superseded file extracted from initialLogoUrl.
+    // We only delete the one file we displaced; we never touch files we did not create.
+    if (initialLogoUrl) {
+      try {
+        // Extract the Storage path from the full URL (strip base URL and query string)
+        const urlObj = new URL(initialLogoUrl);
+        // Path looks like /storage/v1/object/public/business-logos/<tenant-path>
+        const pathMatch = urlObj.pathname.match(
+          /\/storage\/v1\/object\/public\/business-logos\/(.+)$/,
+        );
+        if (pathMatch?.[1]) {
+          await supabaseAdmin.storage.from(BUCKET_NAME).remove([pathMatch[1]]);
+        }
+      } catch {
+        // Non-fatal: orphaned file will be pruned by background maintenance
+      }
     }
 
     return jsonResponse({
@@ -431,16 +435,27 @@ export async function handler(
       );
     }
 
-    // Clear public.businesses.logo_url FIRST with owner_id verification guard
-    const previousLogoUrl = business.logo_url;
-    const { data: updatedBusiness, error: dbClearError } = await supabaseAdmin
+    // CAS deletion: clear logo_url only if it still matches what we read.
+    // This prevents accidentally clobbering a logo_url that a concurrent upload
+    // committed between our DB read and our DB update.
+    const initialLogoUrl = business.logo_url as string | null;
+
+    let dbClearQuery = supabaseAdmin
       .from('businesses')
       .update({
         logo_url: null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', businessId)
-      .eq('owner_id', user.id)
+      .eq('owner_id', user.id);
+
+    if (initialLogoUrl === null) {
+      dbClearQuery = dbClearQuery.is('logo_url', null);
+    } else {
+      dbClearQuery = dbClearQuery.eq('logo_url', initialLogoUrl);
+    }
+
+    const { data: updatedBusiness, error: dbClearError } = await dbClearQuery
       .select('id')
       .maybeSingle();
 
@@ -453,56 +468,46 @@ export async function handler(
     }
 
     if (!updatedBusiness) {
+      // CAS mismatch: a concurrent upload committed a new logo between our read and write.
+      // The existing logo is now valid — report 409 so the client can reload and re-try.
       return errorResponse(
-        'ERR_PERMISSION_DENIED',
-        'Business ownership changed during deletion.',
-        403,
+        'ERR_CONFLICT',
+        'A new logo was uploaded concurrently. Reload the page before deleting.',
+        409,
+        undefined,
+        true,
       );
     }
 
-    // Delete all potential logo files and backups for this tenant
-    const filesToDelete = ['png', 'jpeg', 'webp'].map(
-      (ext) => `${businessId}/logo.${ext}`,
-    );
-
-    try {
-      const { data: tenantFiles } = await supabaseAdmin.storage
-        .from(BUCKET_NAME)
-        .list(businessId);
-      const extraFiles = (tenantFiles || [])
-        .filter((f) => f.name.startsWith('.backup_'))
-        .map((f) => `${businessId}/${f.name}`);
-      filesToDelete.push(...extraFiles);
-    } catch {
-      // Non-fatal
-    }
-
-    const { error: storageRemoveError } = await supabaseAdmin.storage
-      .from(BUCKET_NAME)
-      .remove(filesToDelete);
-
-    if (storageRemoveError) {
-      // Attempt compensation: restore DB pointer if storage removal failed
-      if (previousLogoUrl) {
-        try {
-          await supabaseAdmin
-            .from('businesses')
-            .update({
-              logo_url: previousLogoUrl,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', businessId)
-            .eq('owner_id', user.id);
-        } catch {
-          // Best effort rollback
+    // DB pointer is now NULL. Attempt to remove the specific Storage object named in
+    // initialLogoUrl. Failure is non-fatal (Decision M5-T05-D02 — Fail-Safe Avatar Fallback):
+    // we do NOT restore the DB pointer. The client renders the monogram avatar rather than
+    // a broken image. Orphaned objects are pruned by scheduled background maintenance.
+    if (initialLogoUrl) {
+      try {
+        const urlObj = new URL(initialLogoUrl);
+        const pathMatch = urlObj.pathname.match(
+          /\/storage\/v1\/object\/public\/business-logos\/(.+)$/,
+        );
+        if (pathMatch?.[1]) {
+          const { error: storageRemoveError } = await supabaseAdmin.storage
+            .from(BUCKET_NAME)
+            .remove([pathMatch[1]]);
+          if (storageRemoveError) {
+            // Log alert for background pruning; DO NOT restore DB pointer.
+            console.error(
+              `[upload-logo] Storage pruning failed for ${pathMatch[1]} ` +
+                `(business ${businessId}): ${storageRemoveError.message}. ` +
+                'DB logo_url is NULL. Orphan scheduled for background cleanup.',
+            );
+          }
         }
+      } catch (err) {
+        // Non-fatal: URL parse or removal error; orphan logged for background pruning.
+        console.error(
+          `[upload-logo] Non-fatal Storage removal error for business ${businessId}: ${String(err)}`,
+        );
       }
-
-      return errorResponse(
-        'ERR_STORAGE_ERROR',
-        `Failed to remove storage files: ${storageRemoveError.message}`,
-        500,
-      );
     }
 
     return jsonResponse({

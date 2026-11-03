@@ -38,6 +38,14 @@ test.describe('M5-T05: Merchant Logo Upload & Storage Gateway', () => {
 
     const files = ['png', 'jpeg', 'webp'].map((ext) => `${BUSINESS_1_ID}/logo.${ext}`);
     await supabaseAdmin.storage.from('business-logos').remove(files);
+
+    const { data: logosDir } = await supabaseAdmin.storage
+      .from('business-logos')
+      .list(`${BUSINESS_1_ID}/logos`);
+    const logoFiles = (logosDir || []).map((f) => `${BUSINESS_1_ID}/logos/${f.name}`);
+    if (logoFiles.length > 0) {
+      await supabaseAdmin.storage.from('business-logos').remove(logoFiles);
+    }
   };
 
   test.beforeAll(async () => {
@@ -110,7 +118,9 @@ test.describe('M5-T05: Merchant Logo Upload & Storage Gateway', () => {
       .single();
 
     expect(biz?.logo_url).not.toBeNull();
-    expect(biz?.logo_url).toContain(`business-logos/${BUSINESS_1_ID}/logo.png`);
+    // Option A: unique immutable object path under ${businessId}/logos/logo_<timestamp>_<uuid8>.png
+    expect(biz?.logo_url).toContain(`business-logos/${BUSINESS_1_ID}/logos/`);
+    expect(biz?.logo_url).toMatch(/logo_\d+_[0-9a-f]{8}\.png/);
 
     // 9. Verify public customer flow displays the updated logo
     await page.goto('/q/luxe000001');

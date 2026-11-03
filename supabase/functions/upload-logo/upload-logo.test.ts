@@ -35,7 +35,6 @@ function createMockSupabase(overrides: {
   business?: { id: string; owner_id: string; logo_url: string | null } | null;
   storageUploadError?: Error | null;
   storageRemoveError?: Error | null;
-  storageMoveError?: Error | null;
   dbUpdateError?: Error | null;
   updateReturnsNoRows?: boolean;
 }) {
@@ -91,6 +90,23 @@ function createMockSupabase(overrides: {
                 maybeSingle: vi.fn().mockResolvedValue({
                   data: overrides.updateReturnsNoRows || overrides.dbUpdateError ? null : business,
                   error: overrides.dbUpdateError || null,
+                }),
+              }),
+              // CAS predicates: .is() and .eq() added after the two .eq() calls
+              is: vi.fn().mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                  maybeSingle: vi.fn().mockResolvedValue({
+                    data: overrides.updateReturnsNoRows || overrides.dbUpdateError ? null : business,
+                    error: overrides.dbUpdateError || null,
+                  }),
+                }),
+              }),
+              eq: vi.fn().mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                  maybeSingle: vi.fn().mockResolvedValue({
+                    data: overrides.updateReturnsNoRows || overrides.dbUpdateError ? null : business,
+                    error: overrides.dbUpdateError || null,
+                  }),
                 }),
               }),
             }),
@@ -296,20 +312,20 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     const body = await res.json();
     expect(body.status).toBe('uploaded');
     expect(body.businessId).toBe(MOCK_BUSINESS_ID);
-    expect(body.logoUrl).toContain(`business-logos/${MOCK_BUSINESS_ID}/logo.png`);
+    // Option A: URL contains unique immutable path under ${businessId}/logos/logo_<ts>_<uuid8>.png
+    expect(body.logoUrl).toContain(`business-logos/${MOCK_BUSINESS_ID}/logos/`);
+    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.png/);
 
-    // Verify storage cleanup of old extensions was dispatched
-    expect(mockStorageFrom.remove).toHaveBeenCalledWith([
-      `${MOCK_BUSINESS_ID}/logo.jpeg`,
-      `${MOCK_BUSINESS_ID}/logo.webp`,
-    ]);
-
-    // Verify file upload was dispatched
+    // Verify file upload was dispatched to unique immutable path
     expect(mockStorageFrom.upload).toHaveBeenCalledWith(
-      `${MOCK_BUSINESS_ID}/logo.png`,
+      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/logos/logo_\\d+_[0-9a-f]{8}\\.png$`)),
       expect.any(Uint8Array),
-      expect.objectContaining({ contentType: 'image/png', upsert: true }),
+      expect.objectContaining({ contentType: 'image/png', upsert: false }),
     );
+
+    // No backup copy/move operations should occur in Option A
+    expect(mockStorageFrom.copy).not.toHaveBeenCalled();
+    expect(mockStorageFrom.move).not.toHaveBeenCalled();
   });
 
   it('TC-UPL-02: successfully uploads valid JPEG and updates database', async () => {
@@ -333,9 +349,11 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
 
     const body = await res.json();
     expect(body.status).toBe('uploaded');
-    expect(body.logoUrl).toContain(`business-logos/${MOCK_BUSINESS_ID}/logo.jpeg`);
+    // Option A: URL contains unique immutable path under ${businessId}/logos/
+    expect(body.logoUrl).toContain(`business-logos/${MOCK_BUSINESS_ID}/logos/`);
+    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.jpeg/);
     expect(mockStorageFrom.upload).toHaveBeenCalledWith(
-      `${MOCK_BUSINESS_ID}/logo.jpeg`,
+      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/logos/logo_\\d+_[0-9a-f]{8}\\.jpeg$`)),
       expect.any(Uint8Array),
       expect.objectContaining({ contentType: 'image/jpeg' }),
     );
@@ -365,9 +383,11 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
 
     const body = await res.json();
     expect(body.status).toBe('uploaded');
-    expect(body.logoUrl).toContain(`business-logos/${MOCK_BUSINESS_ID}/logo.webp`);
+    // Option A: URL contains unique immutable path under ${businessId}/logos/
+    expect(body.logoUrl).toContain(`business-logos/${MOCK_BUSINESS_ID}/logos/`);
+    expect(body.logoUrl).toMatch(/logo_\d+_[0-9a-f]{8}\.webp/);
     expect(mockStorageFrom.upload).toHaveBeenCalledWith(
-      `${MOCK_BUSINESS_ID}/logo.webp`,
+      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/logos/logo_\\d+_[0-9a-f]{8}\\.webp$`)),
       expect.any(Uint8Array),
       expect.objectContaining({ contentType: 'image/webp' }),
     );
@@ -466,11 +486,13 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
   });
 
   it('DELETE: successfully removes logo files from storage and clears database logo_url', async () => {
+    const existingLogoPath = `${MOCK_BUSINESS_ID}/logos/logo_1000_abcd1234.png`;
+    const existingLogoUrl = `http://localhost:54321/storage/v1/object/public/business-logos/${existingLogoPath}`;
     const { client, mockStorageFrom } = createMockSupabase({
       business: {
         id: MOCK_BUSINESS_ID,
         owner_id: MOCK_USER_ID,
-        logo_url: `http://localhost:54321/storage/v1/object/public/business-logos/${MOCK_BUSINESS_ID}/logo.png`,
+        logo_url: existingLogoUrl,
       },
     });
 
@@ -489,16 +511,12 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     expect(body.status).toBe('deleted');
     expect(body.businessId).toBe(MOCK_BUSINESS_ID);
 
-    // Verify storage removal was called
-    expect(mockStorageFrom.remove).toHaveBeenCalledWith([
-      `${MOCK_BUSINESS_ID}/logo.png`,
-      `${MOCK_BUSINESS_ID}/logo.jpeg`,
-      `${MOCK_BUSINESS_ID}/logo.webp`,
-    ]);
+    // Option A: only the specific file extracted from logo_url is removed
+    expect(mockStorageFrom.remove).toHaveBeenCalledWith([existingLogoPath]);
   });
 
-  // Check A & B: Failure-safe replacement tests
-  it('Check A & B: creates non-destructive copy backup and restores if upload fails during same-extension replacement', async () => {
+  // Option A — Immutable Path + CAS: Upload failure tests
+  it('Option A: returns HTTP 500 when Storage upload fails and does NOT call backup/restore', async () => {
     const { client, mockStorageFrom } = createMockSupabase({
       storageUploadError: new Error('S3 connection drop'),
     });
@@ -510,19 +528,42 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     const res = await handler(req, client as unknown as SupabaseClient);
     expect(res.status).toBe(500);
 
-    // Verify copy to request-unique backup was attempted (preserves active logo.png during upload)
-    expect(mockStorageFrom.copy).toHaveBeenCalledWith(
-      `${MOCK_BUSINESS_ID}/logo.png`,
-      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/\\.backup_`)),
-    );
-    // Verify backup restoration was executed
-    expect(mockStorageFrom.move).toHaveBeenCalledWith(
-      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/\\.backup_`)),
-      `${MOCK_BUSINESS_ID}/logo.png`,
-    );
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_STORAGE_ERROR');
+
+    // Option A: no backup copy/move — upload directly failed without touching existing files
+    expect(mockStorageFrom.copy).not.toHaveBeenCalled();
+    expect(mockStorageFrom.move).not.toHaveBeenCalled();
+    // No self-file removal needed since upload failed before file was written
+    expect(mockStorageFrom.remove).not.toHaveBeenCalled();
   });
 
-  it('Check A & B: rolls back new file and restores backup if database update fails', async () => {
+  it('Option A: CAS mismatch on DB update removes only own unique file and returns HTTP 409', async () => {
+    const { client, mockStorageFrom } = createMockSupabase({
+      updateReturnsNoRows: true, // Simulates concurrent winner committed first
+    });
+    const formData = new FormData();
+    formData.append('businessId', MOCK_BUSINESS_ID);
+    formData.append('file', new File([createValidPngBytes(200, 200)], 'logo.png', { type: 'image/png' }));
+
+    const req = makeUploadRequest(formData);
+    const res = await handler(req, client as unknown as SupabaseClient);
+    expect(res.status).toBe(409);
+
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_CONFLICT');
+    expect(body.error.retryable).toBe(true);
+
+    // Option A: only the unique file this request created is removed
+    expect(mockStorageFrom.remove).toHaveBeenCalledWith(
+      [expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/logos/logo_\\d+_[0-9a-f]{8}\\.png$`))],
+    );
+    // No copy/move; no existing logos touched
+    expect(mockStorageFrom.copy).not.toHaveBeenCalled();
+    expect(mockStorageFrom.move).not.toHaveBeenCalled();
+  });
+
+  it('Option A: DB error during CAS removes only own unique file and returns HTTP 500', async () => {
     const { client, mockStorageFrom } = createMockSupabase({
       dbUpdateError: new Error('Database transaction lock conflict'),
     });
@@ -537,22 +578,23 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     const body = await res.json();
     expect(body.error.code).toBe('ERR_DATABASE_ERROR');
 
-    // Verify new file was deleted in rollback
-    expect(mockStorageFrom.remove).toHaveBeenCalledWith([`${MOCK_BUSINESS_ID}/logo.png`]);
-    // Verify backup was restored
-    expect(mockStorageFrom.move).toHaveBeenCalledWith(
-      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/\\.backup_`)),
-      `${MOCK_BUSINESS_ID}/logo.png`,
+    // Option A: only this request's unique file is cleaned up; no copies or restores
+    expect(mockStorageFrom.remove).toHaveBeenCalledWith(
+      [expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/logos/logo_\\d+_[0-9a-f]{8}\\.png$`))],
     );
+    expect(mockStorageFrom.copy).not.toHaveBeenCalled();
+    expect(mockStorageFrom.move).not.toHaveBeenCalled();
   });
 
-  // Check C: Honest error handling on DELETE and DB rollback
-  it('Check C: returns HTTP 500 and attempts DB compensation when storage remove fails on DELETE', async () => {
+  // Check C: Fail-Safe Avatar Fallback on DELETE Storage failure (Decision M5-T05-D02)
+  it('Check C: DELETE Storage removal failure does NOT restore DB pointer (fail-safe avatar fallback)', async () => {
+    const existingLogoPath = `${MOCK_BUSINESS_ID}/logos/logo_1000_abcd1234.png`;
+    const existingLogoUrl = `http://localhost:54321/storage/v1/object/public/business-logos/${existingLogoPath}`;
     const { client, mockFrom } = createMockSupabase({
       business: {
         id: MOCK_BUSINESS_ID,
         owner_id: MOCK_USER_ID,
-        logo_url: `http://localhost:54321/storage/v1/object/public/business-logos/${MOCK_BUSINESS_ID}/logo.png`,
+        logo_url: existingLogoUrl,
       },
       storageRemoveError: new Error('Storage cluster unreachable'),
     });
@@ -564,18 +606,20 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
       },
     );
     const res = await handler(req, client as unknown as SupabaseClient);
-    expect(res.status).toBe(500);
+    // Option A (Decision D02): DELETE returns 200 even if Storage removal fails —
+    // DB is already NULL, client gets monogram avatar. No false restoration attempted.
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error.code).toBe('ERR_STORAGE_ERROR');
+    expect(body.status).toBe('deleted');
 
-    // Verify DB update was initially set to null and compensation attempted to restore
+    // Verify DB was cleared (businesses table was updated)
     expect(mockFrom).toHaveBeenCalledWith('businesses');
   });
 
-  // Check E: Tenant ownership constraint at mutation time
-  it('Check E: returns HTTP 403 if business ownership changed during upload DB update', async () => {
+  // Check E: Tenant ownership constraint at mutation time / CAS conflict
+  it('Check E: returns HTTP 409 ERR_CONFLICT if concurrent upload committed first (CAS mismatch)', async () => {
     const { client } = createMockSupabase({
-      updateReturnsNoRows: true, // Simulated ownership change
+      updateReturnsNoRows: true, // Simulated CAS mismatch (concurrent winner committed first)
     });
     const formData = new FormData();
     formData.append('businessId', MOCK_BUSINESS_ID);
@@ -583,8 +627,9 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
 
     const req = makeUploadRequest(formData);
     const res = await handler(req, client as unknown as SupabaseClient);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.error.code).toBe('ERR_PERMISSION_DENIED');
+    expect(body.error.code).toBe('ERR_CONFLICT');
+    expect(body.error.retryable).toBe(true);
   });
 });
