@@ -400,6 +400,132 @@ assertEquals(
   null,
   'toFeedbackDto strictly redacts optionalNote to null when purged_at is populated',
 );
+assertEquals(
+  purgedFeedbackDto.noteStatus,
+  'PURGED',
+  'toFeedbackDto assigns PURGED status when purged_at is populated',
+);
+
+// -----------------------------------------------------------------------------
+// Section 4: Focused 8-Scenario Note Privacy Lifecycle Suite (Adapter Verification)
+// -----------------------------------------------------------------------------
+
+// Scenario 1: Recent response with retained note (Case A)
+const rowRecentRetained: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: 'Fresh haircut comment',
+  purged_at: null,
+  created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoRecentRetained = toFeedbackDto(rowRecentRetained);
+assertEquals(dtoRecentRetained.noteStatus, 'RETAINED', 'Scenario 1: recent response with note has RETAINED status');
+assertEquals(dtoRecentRetained.optionalNote, 'Fresh haircut comment', 'Scenario 1: optionalNote is preserved');
+assertEquals(dtoRecentRetained.purgedAt, null, 'Scenario 1: purgedAt is null');
+
+// Scenario 2: Recent response without note (Case C)
+const rowRecentNone: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: null,
+  purged_at: null,
+  created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoRecentNone = toFeedbackDto(rowRecentNone);
+assertEquals(dtoRecentNone.noteStatus, 'NONE', 'Scenario 2: recent response without note has NONE status');
+assertEquals(dtoRecentNone.optionalNote, null, 'Scenario 2: optionalNote is null');
+assertEquals(dtoRecentNone.purgedAt, null, 'Scenario 2: purgedAt is null');
+
+// Scenario 3: 45-day-old response that never contained a note (Case C)
+const rowOldNone: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: null,
+  purged_at: null,
+  created_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoOldNone = toFeedbackDto(rowOldNone);
+assertEquals(dtoOldNone.noteStatus, 'NONE', 'Scenario 3: 45-day-old response without note has NONE status');
+assertEquals(dtoOldNone.optionalNote, null, 'Scenario 3: optionalNote is null');
+assertEquals(dtoOldNone.purgedAt, null, 'Scenario 3: purgedAt is null (no invented purge)');
+
+// Scenario 4: 45-day-old response with unpurged note in DB response (Case D)
+const rowOldUnpurged: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: 'Raw unpurged database secret note',
+  purged_at: null,
+  created_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoOldUnpurged = toFeedbackDto(rowOldUnpurged);
+assertEquals(dtoOldUnpurged.noteStatus, 'EXPIRED', 'Scenario 4: 45-day-old unpurged note has EXPIRED status');
+assertEquals(dtoOldUnpurged.optionalNote, null, 'Scenario 4: raw note is redacted from client state immediately');
+assertEquals(dtoOldUnpurged.purgedAt, null, 'Scenario 4: purgedAt remains null in DB truth without synthetic timestamp');
+
+// Scenario 5: Physically purged response with purged_at (Case B)
+const rowPurged: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: null,
+  purged_at: '2026-10-15T08:30:00.000Z',
+  created_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoPurged = toFeedbackDto(rowPurged);
+assertEquals(dtoPurged.noteStatus, 'PURGED', 'Scenario 5: row with purged_at has PURGED status');
+assertEquals(dtoPurged.optionalNote, null, 'Scenario 5: optionalNote is null');
+assertEquals(dtoPurged.purgedAt, '2026-10-15T08:30:00.000Z', 'Scenario 5: authoritative purgedAt timestamp preserved');
+
+// Scenario 6: Inconsistent row containing both optional_note and purged_at (Case B)
+const rowInconsistent: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: 'Inconsistent stale note that was not scrubbed in DB',
+  purged_at: '2026-10-15T08:30:00.000Z',
+  created_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoInconsistent = toFeedbackDto(rowInconsistent);
+assertEquals(dtoInconsistent.noteStatus, 'PURGED', 'Scenario 6: inconsistent row has PURGED status');
+assertEquals(dtoInconsistent.optionalNote, null, 'Scenario 6: stale note text strictly suppressed');
+assertEquals(dtoInconsistent.purgedAt, '2026-10-15T08:30:00.000Z', 'Scenario 6: purgedAt preserved');
+
+// Scenario 7: Exact 30-day boundary tests
+const nowBoundary = Date.now();
+// 7a: Exact 30-day boundary (not yet strictly greater than 30 days)
+const rowAtBoundary: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: 'Border note',
+  purged_at: null,
+  created_at: new Date(nowBoundary - 30 * 24 * 60 * 60 * 1000).toISOString(),
+};
+const dtoAtBoundary = toFeedbackDto(rowAtBoundary);
+assertEquals(dtoAtBoundary.noteStatus, 'RETAINED', 'Scenario 7a: at exact 30-day boundary, status is RETAINED');
+assertEquals(dtoAtBoundary.optionalNote, 'Border note', 'Scenario 7a: note is retained');
+
+// 7b: 30 days + 1 second past boundary
+const rowPastBoundary: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: 'Border note',
+  purged_at: null,
+  created_at: new Date(nowBoundary - (30 * 24 * 60 * 60 * 1000 + 1000)).toISOString(),
+};
+const dtoPastBoundary = toFeedbackDto(rowPastBoundary);
+assertEquals(dtoPastBoundary.noteStatus, 'EXPIRED', 'Scenario 7b: 1 second past 30 days, status is EXPIRED');
+assertEquals(dtoPastBoundary.optionalNote, null, 'Scenario 7b: note is redacted');
+
+// Scenario 8: Safe behavior when timestamps are malformed or unavailable
+const rowMalformedDateWithNote: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: 'Note with bad date',
+  purged_at: null,
+  created_at: 'invalid-date-string',
+};
+const dtoMalformedDateWithNote = toFeedbackDto(rowMalformedDateWithNote);
+assertEquals(dtoMalformedDateWithNote.noteStatus, 'RETAINED', 'Scenario 8a: malformed date with note safely defaults to RETAINED');
+assertEquals(dtoMalformedDateWithNote.optionalNote, 'Note with bad date', 'Scenario 8a: note is preserved');
+
+const rowMalformedDateWithoutNote: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  optional_note: null,
+  purged_at: null,
+  created_at: 'invalid-date-string',
+};
+const dtoMalformedDateWithoutNote = toFeedbackDto(rowMalformedDateWithoutNote);
+assertEquals(dtoMalformedDateWithoutNote.noteStatus, 'NONE', 'Scenario 8b: malformed date without note safely defaults to NONE');
+assertEquals(dtoMalformedDateWithoutNote.optionalNote, null, 'Scenario 8b: optionalNote is null');
 
 // Malformed / stringified JSON handling
 const MOCK_STRINGIFIED_ROW: SurveyResponseRow = {

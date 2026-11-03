@@ -24,9 +24,91 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
+import {
+  isStrictLocalTestEndpoint,
+  isLocalDemoServiceKey,
+} from './test-isolation';
+
+const LOCAL_SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
+const LOCAL_SERVICE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
 
 test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators', () => {
   test.describe.configure({ mode: 'serial' });
+  const FIXTURE_PURGED_ID = 'f0000000-0000-4000-8000-000000000099';
+  const FIXTURE_CRITICAL_ID = 'f0000000-0000-4000-8000-000000000098';
+
+  test.beforeAll(async () => {
+    if (
+      isStrictLocalTestEndpoint(LOCAL_SUPABASE_URL) &&
+      isLocalDemoServiceKey(LOCAL_SERVICE_KEY)
+    ) {
+      try {
+        const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
+          auth: { persistSession: false },
+        });
+        // Seed a fresh privacy-purged fixture at current timestamp so it deterministically appears on page 1
+        await client.from('survey_responses').upsert({
+          id: FIXTURE_PURGED_ID,
+          business_id: 'b0000000-0000-4000-8000-000000000001',
+          category_id: 'salon',
+          selected_options: [
+            { question_id: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c', option_id: '1a2b3c4d-0001-4000-8000-000000000001' },
+            { question_id: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5d', option_id: '1a2b3c4d-0002-4000-8000-000000000001' },
+            { question_id: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5e', option_id: '1a2b3c4d-0003-4000-8000-000000000001' },
+          ],
+          affirmed_facts_snapshot: ['Masterful & Precise', 'Warm & Attentive team', 'Great styling advice'],
+          optional_note: null,
+          session_uuid: 'e0000000-0000-4000-8000-000000000099',
+          purged_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          is_generated: true,
+          generation_attempts: 1,
+          authenticity_confirmed: true,
+        });
+
+        // Seed a fresh critical fixture at current timestamp so it deterministically appears on page 1
+        await client.from('survey_responses').upsert({
+          id: FIXTURE_CRITICAL_ID,
+          business_id: 'b0000000-0000-4000-8000-000000000001',
+          category_id: 'salon',
+          selected_options: [
+            { question_id: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c', option_id: '1a2b3c4d-0001-4000-8000-000000000004' },
+            { question_id: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5d', option_id: '1a2b3c4d-0002-4000-8000-000000000003' },
+            { question_id: '8f1a2b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5e', option_id: '1a2b3c4d-0003-4000-8000-000000000003' },
+          ],
+          affirmed_facts_snapshot: ['Service took too long', 'Crowded / High waiting time', 'Pricing was higher than expected'],
+          optional_note: 'Waited 45 mins past appointment',
+          session_uuid: 'e0000000-0000-4000-8000-000000000098',
+          purged_at: null,
+          created_at: new Date().toISOString(),
+          is_generated: false,
+          generation_attempts: 0,
+          authenticity_confirmed: true,
+        });
+      } catch (err) {
+        console.warn('[E2E Setup] Warning seeding test fixtures:', err);
+      }
+    }
+  });
+
+  test.afterAll(async () => {
+    if (
+      isStrictLocalTestEndpoint(LOCAL_SUPABASE_URL) &&
+      isLocalDemoServiceKey(LOCAL_SERVICE_KEY)
+    ) {
+      try {
+        const client = createClient(LOCAL_SUPABASE_URL, LOCAL_SERVICE_KEY, {
+          auth: { persistSession: false },
+        });
+        await client.from('survey_responses').delete().in('id', [FIXTURE_PURGED_ID, FIXTURE_CRITICAL_ID]);
+      } catch (err) {
+        console.warn('[E2E Teardown] Warning cleaning up test fixtures:', err);
+      }
+    }
+  });
 
   test.beforeEach(async ({ context }) => {
     await context.clearCookies();
@@ -95,19 +177,8 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
       page.getByText(/Loved the styling and warm hospitality/i).first(),
     ).toBeVisible();
 
-    // Case B: Privacy-purged customer note indicator
-    // If recent test submissions have pushed historical purged notes to subsequent pages, paginate to locate it
-    let purgedNotes = page.getByTestId('feedback-note-purged');
-    let paginatedInPriv = false;
-    if (!(await purgedNotes.first().isVisible())) {
-      const nextBtn = page.getByTestId('btn-pagination-next');
-      if ((await nextBtn.isVisible()) && (await nextBtn.isEnabled())) {
-        await nextBtn.click();
-        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
-        purgedNotes = page.getByTestId('feedback-note-purged');
-        paginatedInPriv = true;
-      }
-    }
+    // Case B: Privacy-purged customer note indicator (verified from seeded fixture on page 1)
+    const purgedNotes = page.getByTestId('feedback-note-purged');
     await expect(purgedNotes.first()).toBeVisible();
     await expect(
       page.getByText('[Personal note expired per privacy policy]').first(),
@@ -120,15 +191,6 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
     const noNotes = page.getByTestId('feedback-note-none');
     await expect(noNotes.first()).toBeVisible();
     await expect(page.getByText('No additional note provided.').first()).toBeVisible();
-
-    // Return to page 1 if paginated
-    if (paginatedInPriv) {
-      const prevBtn = page.getByTestId('btn-pagination-prev');
-      if ((await prevBtn.isVisible()) && (await prevBtn.isEnabled())) {
-        await prevBtn.click();
-        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
-      }
-    }
   });
 
   test('TC-OWN-15: Multi-criteria filtering by sentiment and keyword search', async ({ page }) => {
@@ -145,20 +207,8 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
     const criticalTab = page.getByTestId('sentiment-tab-critical');
     await criticalTab.click();
 
-    // If recent test submissions have pushed critical items to subsequent pages, paginate to locate it
-    let criticalText = page.getByText(/Waited 45 mins past appointment/i);
-    let paginatedInSearch = false;
-    if (!(await criticalText.first().isVisible())) {
-      const nextBtn = page.getByTestId('btn-pagination-next');
-      if ((await nextBtn.isVisible()) && (await nextBtn.isEnabled())) {
-        await nextBtn.click();
-        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
-        criticalText = page.getByText(/Waited 45 mins past appointment/i);
-        paginatedInSearch = true;
-      }
-    }
-
-    // Verify critical feedback is shown
+    // Verify critical feedback is shown (from seeded fixture on page 1)
+    const criticalText = page.getByText(/Waited 45 mins past appointment/i);
     await expect(criticalText.first()).toBeVisible();
     await expect(page.getByTestId('badge-sentiment-critical').first()).toBeVisible();
 
@@ -167,15 +217,6 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
 
     // 3. Switch back to "All" sentiment
     await page.getByTestId('sentiment-tab-all').click();
-
-    // Return to page 1 if paginated
-    if (paginatedInSearch) {
-      const prevBtn = page.getByTestId('btn-pagination-prev');
-      if ((await prevBtn.isVisible()) && (await prevBtn.isEnabled())) {
-        await prevBtn.click();
-        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
-      }
-    }
 
     await expect(
       page.getByText(/Loved the styling and warm hospitality/i).first(),

@@ -363,5 +363,260 @@ describe('FeedbackCardItem (CMP-13)', () => {
       screen.queryByText(/Customer secret note that was not yet swept by cron/i),
     ).not.toBeInTheDocument();
   });
+
+  /* -------------------------------------------------------------------------- */
+  /* Section 4: Focused 8-Scenario Note Privacy Lifecycle Test Suite            */
+  /* -------------------------------------------------------------------------- */
+  describe('Section 4: Focused 8-Scenario Note Privacy Lifecycle Suite', () => {
+    it('1. renders a recent response with a retained note (Case A)', () => {
+      const recentFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-1',
+        optionalNote: 'Recent glowing review note',
+        purgedAt: null,
+        noteStatus: 'RETAINED',
+        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      render(
+        <FeedbackCardItem
+          feedback={recentFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-retained')).toBeInTheDocument();
+      expect(screen.getByText('“Recent glowing review note”')).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-purged')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-none')).not.toBeInTheDocument();
+    });
+
+    it('2. renders a recent response without a note (Case C)', () => {
+      const recentNoNoteFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-2',
+        optionalNote: null,
+        purgedAt: null,
+        noteStatus: 'NONE',
+        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      render(
+        <FeedbackCardItem
+          feedback={recentNoNoteFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-none')).toBeInTheDocument();
+      expect(screen.getByText('No additional note provided.')).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-purged')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-retained')).not.toBeInTheDocument();
+    });
+
+    it('3. renders a 45-day-old response that never contained a note (Case C - Critical Fix)', () => {
+      const fortyFiveDaysAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
+      const oldNoNoteFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-3',
+        optionalNote: null,
+        purgedAt: null,
+        noteStatus: 'NONE',
+        createdAt: fortyFiveDaysAgo,
+      };
+
+      render(
+        <FeedbackCardItem
+          feedback={oldNoNoteFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      // CRITICAL INVARIANT: Never invent an expired/purged indicator merely because the response is old!
+      expect(screen.getByTestId('feedback-note-none')).toBeInTheDocument();
+      expect(screen.getByText('No additional note provided.')).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-purged')).not.toBeInTheDocument();
+      expect(screen.queryByText('[Personal note expired per privacy policy]')).not.toBeInTheDocument();
+    });
+
+    it('4. renders a 45-day-old response with an unpurged note still present in database response (Case D)', () => {
+      const fortyFiveDaysAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
+      const oldUnpurgedFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-4',
+        optionalNote: null, // Redacted by DTO adapter
+        purgedAt: null, // Authoritative DB truth
+        noteStatus: 'EXPIRED',
+        createdAt: fortyFiveDaysAgo,
+      };
+
+      render(
+        <FeedbackCardItem
+          feedback={oldUnpurgedFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-purged')).toBeInTheDocument();
+      expect(screen.getByTestId('badge-note-expired')).toBeInTheDocument();
+      expect(screen.getByText('Expired')).toBeInTheDocument();
+      expect(screen.getByText('[Personal note expired per privacy policy]')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Customer notes are automatically expunged after 30 days/i),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-retained')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-none')).not.toBeInTheDocument();
+    });
+
+    it('5. renders a physically purged response with purged_at (Case B)', () => {
+      const purgedFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-5',
+        optionalNote: null,
+        purgedAt: '2026-10-15T12:00:00Z',
+        noteStatus: 'PURGED',
+        createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      render(
+        <FeedbackCardItem
+          feedback={purgedFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-purged')).toBeInTheDocument();
+      expect(screen.getByTestId('badge-note-purged')).toBeInTheDocument();
+      expect(screen.getByText('Purged')).toBeInTheDocument();
+      expect(screen.getByText('[Personal note expired per privacy policy]')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Customer notes are automatically expunged after 30 days/i),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-retained')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-none')).not.toBeInTheDocument();
+    });
+
+    it('6. handles an inconsistent row containing both optional_note and purged_at (Case B)', () => {
+      const inconsistentFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-6',
+        optionalNote: null, // strictly redacted by adapter
+        purgedAt: '2026-10-15T12:00:00Z',
+        noteStatus: 'PURGED',
+        createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      render(
+        <FeedbackCardItem
+          feedback={inconsistentFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-purged')).toBeInTheDocument();
+      expect(screen.getByTestId('badge-note-purged')).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-retained')).not.toBeInTheDocument();
+    });
+
+    it('7. handles exact 30-day boundary: retained at exactly 30 days, expired past 30 days', () => {
+      const now = Date.now();
+      const exactBoundary = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const pastBoundary = new Date(now - (30 * 24 * 60 * 60 * 1000 + 1000)).toISOString();
+
+      // 7a: Exact boundary with note is RETAINED
+      const boundaryFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-7a',
+        optionalNote: 'Note on the exact border',
+        purgedAt: null,
+        noteStatus: 'RETAINED',
+        createdAt: exactBoundary,
+      };
+
+      const { rerender } = render(
+        <FeedbackCardItem
+          feedback={boundaryFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-retained')).toBeInTheDocument();
+      expect(screen.getByText('“Note on the exact border”')).toBeInTheDocument();
+
+      // 7b: Past boundary with note is EXPIRED
+      const expiredFeedback: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-7b',
+        optionalNote: null,
+        purgedAt: null,
+        noteStatus: 'EXPIRED',
+        createdAt: pastBoundary,
+      };
+
+      rerender(
+        <FeedbackCardItem
+          feedback={expiredFeedback}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-purged')).toBeInTheDocument();
+      expect(screen.getByTestId('badge-note-expired')).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-retained')).not.toBeInTheDocument();
+    });
+
+    it('8. handles malformed or missing timestamps safely without crashing', () => {
+      // 8a: Malformed timestamp with active note
+      const malformedWithNote: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-8a',
+        optionalNote: 'Safe note with bad date',
+        purgedAt: null,
+        noteStatus: 'RETAINED',
+        createdAt: 'malformed-date-string',
+      };
+
+      const { rerender } = render(
+        <FeedbackCardItem
+          feedback={malformedWithNote}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-retained')).toBeInTheDocument();
+      expect(screen.getByText('“Safe note with bad date”')).toBeInTheDocument();
+
+      // 8b: Malformed timestamp without note
+      const malformedWithoutNote: CustomerFeedback = {
+        ...baseFeedback,
+        id: 'f-sec4-8b',
+        optionalNote: null,
+        purgedAt: null,
+        noteStatus: 'NONE',
+        createdAt: 'malformed-date-string',
+      };
+
+      rerender(
+        <FeedbackCardItem
+          feedback={malformedWithoutNote}
+          optionsMap={mockOptionsMap}
+          questionsMap={mockQuestionsMap}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-note-none')).toBeInTheDocument();
+      expect(screen.getByText('No additional note provided.')).toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-note-purged')).not.toBeInTheDocument();
+    });
+  });
 });
 

@@ -175,6 +175,8 @@ export interface SubmitFeedbackResponse {
 }
 
 
+export type FeedbackNoteStatus = 'RETAINED' | 'PURGED' | 'NONE' | 'EXPIRED';
+
 /**
  * Customer feedback item rendered in merchant dashboard feedback feed (API-OWN-05 / SCR-OWN-08).
  */
@@ -187,6 +189,7 @@ export interface CustomerFeedback {
   optionalNote: string | null;
   sessionUuid: string;
   purgedAt: string | null;
+  noteStatus?: FeedbackNoteStatus;
   createdAt: string;
   authenticityConfirmed?: boolean;
 }

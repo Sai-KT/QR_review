@@ -24,7 +24,10 @@ import type {
   BusinessCategoryType,
   SelectedSurveyOption,
   AffirmedFact,
+  FeedbackNoteStatus,
 } from '../../types/domain';
+
+export type { FeedbackNoteStatus };
 
 /**
  * Maps a raw survey_options row to the frontend SurveyOption domain model.
@@ -151,21 +154,52 @@ function parseAffirmedFacts(json: Json): AffirmedFact[] {
  * Maps a raw PostgreSQL survey_responses row to CustomerFeedback DTO.
  *
  * PRIVACY SAFEGUARDS (Founder Decision M0-01 / DPDPA 2023):
- * 1. If purged_at is populated, optionalNote is strictly set to null.
- * 2. If row created_at is older than 30 days, optionalNote is strictly redacted to null
- *    and purgedAt is populated, guaranteeing zero leakage even if the database
- *    pg_cron maintenance worker has not yet swept the record.
- * 3. Never returns or reconstructs final customer reviews or raw drafts.
+ * 1. Case A (Retained Note): If row is <= 30 days old and optional_note is present,
+ *    noteStatus is 'RETAINED' and optionalNote is preserved.
+ * 2. Case B (Physically Purged Note): If purged_at is populated, noteStatus is 'PURGED',
+ *    optionalNote is strictly set to null, and authoritative purgedAt is preserved.
+ * 3. Case C (No Note Submitted): If optional_note is null/empty and purged_at is null,
+ *    noteStatus is 'NONE'. Never invents a purge event merely because the response is old.
+ * 4. Case D (Expired Note Awaiting Cleanup): If row contains optional_note but is > 30 days old,
+ *    noteStatus is 'EXPIRED', optionalNote is immediately redacted to null (never kept in client memory),
+ *    and purgedAt remains null (preserving authoritative database truth).
+ * 5. Never returns or reconstructs final customer reviews or raw drafts.
  */
 export function toFeedbackDto(row: SurveyResponseRow): CustomerFeedback {
-  const isPurged = Boolean(row.purged_at);
-  const isPastRetentionWindow = row.created_at
-    ? Date.now() - new Date(row.created_at).getTime() > 30 * 24 * 60 * 60 * 1000
+  const hasPurgedAt = Boolean(row.purged_at);
+  const rawNote = typeof row.optional_note === 'string' ? row.optional_note.trim() : null;
+  const hasRawNote = Boolean(rawNote && rawNote.length > 0);
+
+  // Time-controlled boundary calculation (30 days = 30 * 24 * 60 * 60 * 1000 ms)
+  const createdMs = row.created_at ? new Date(row.created_at).getTime() : NaN;
+  const isPastRetentionWindow = !isNaN(createdMs)
+    ? Date.now() - createdMs > 30 * 24 * 60 * 60 * 1000
     : false;
 
-  const optionalNote = isPurged || isPastRetentionWindow ? null : row.optional_note;
-  const effectivePurgedAt =
-    row.purged_at ?? (isPastRetentionWindow && row.optional_note ? row.created_at : null);
+  let noteStatus: FeedbackNoteStatus;
+  let optionalNote: string | null;
+
+  if (hasPurgedAt) {
+    // Case B: Physically purged note (authoritative DB purge timestamp present)
+    // Conservatively suppress any inconsistent legacy raw note text
+    noteStatus = 'PURGED';
+    optionalNote = null;
+  } else if (!hasRawNote) {
+    // Case C: No note submitted (optional_note is null/empty and purged_at is null)
+    // Never invent a purge event merely because the response is old
+    noteStatus = 'NONE';
+    optionalNote = null;
+  } else if (isPastRetentionWindow) {
+    // Case D: Expired note awaiting database cleanup
+    // Note existed, but retention ceiling (> 30 days) passed. Immediately redact from client state.
+    noteStatus = 'EXPIRED';
+    optionalNote = null;
+  } else {
+    // Case A: Retained note
+    // Note exists and retention deadline has not passed.
+    noteStatus = 'RETAINED';
+    optionalNote = row.optional_note;
+  }
 
   return {
     id: row.id,
@@ -175,7 +209,8 @@ export function toFeedbackDto(row: SurveyResponseRow): CustomerFeedback {
     affirmedFactsSnapshot: parseAffirmedFacts(row.affirmed_facts_snapshot),
     optionalNote,
     sessionUuid: row.session_uuid,
-    purgedAt: effectivePurgedAt,
+    purgedAt: row.purged_at ?? null, // Authoritative DB timestamp; NEVER synthetic!
+    noteStatus,
     createdAt: row.created_at,
     authenticityConfirmed: Boolean(row.authenticity_confirmed),
   };

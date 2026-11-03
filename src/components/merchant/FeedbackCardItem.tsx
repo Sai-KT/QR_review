@@ -27,6 +27,7 @@ import type {
   CustomerFeedback,
   SelectedSurveyOption,
   AffirmedFact,
+  FeedbackNoteStatus,
 } from '../../lib/adapters/feedback';
 import {
   deriveResponseSentiment,
@@ -74,12 +75,55 @@ export function formatFeedbackDate(isoString: string): { relative: string; full:
   }
 }
 
+/**
+ * Resolves the authoritative note lifecycle status across all 4 canonical categories:
+ * - Case A (RETAINED): Note exists and retention deadline has not passed.
+ * - Case B (PURGED): Database purged_at is populated.
+ * - Case C (NONE): No note was submitted (optionalNote is null and purgedAt is null).
+ * - Case D (EXPIRED): Note existed, but > 30 days old; awaiting physical database purge.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveFeedbackNoteStatus(
+  feedback: Pick<CustomerFeedback, 'noteStatus' | 'optionalNote' | 'purgedAt' | 'createdAt'>,
+): FeedbackNoteStatus {
+  // If explicitly provided by DTO adapter, use authoritative status
+  if (feedback.noteStatus) {
+    return feedback.noteStatus;
+  }
+
+  // Fallback for raw objects or legacy test fixtures
+  if (feedback.purgedAt) {
+    return 'PURGED';
+  }
+
+  const hasNote =
+    typeof feedback.optionalNote === 'string' && feedback.optionalNote.trim().length > 0;
+  if (!hasNote) {
+    // Case C: No note was provided. Never invent a purge event merely because response is old!
+    return 'NONE';
+  }
+
+  // If note exists, verify if retention boundary has passed
+  if (feedback.createdAt) {
+    const createdMs = new Date(feedback.createdAt).getTime();
+    if (!isNaN(createdMs) && Date.now() - createdMs > 30 * 24 * 60 * 60 * 1000) {
+      return 'EXPIRED';
+    }
+  }
+
+  return 'RETAINED';
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export function isFeedbackNoteExpired(
   purgedAt: string | null | undefined,
   createdAt?: string,
+  optionalNote?: string | null,
 ): boolean {
   if (purgedAt) return true;
+  if (optionalNote === null || optionalNote === undefined || optionalNote.trim().length === 0) {
+    return false;
+  }
   if (!createdAt) return false;
   const createdMs = new Date(createdAt).getTime();
   if (isNaN(createdMs)) return false;
@@ -100,14 +144,10 @@ export function FeedbackCardItem({
     return formatFeedbackDate(feedback.createdAt);
   }, [feedback.createdAt]);
 
-  // Case B / D: Note is explicitly purged OR past the mandatory 30-day DPDPA retention ceiling
-  const isPurged = React.useMemo(() => {
-    return isFeedbackNoteExpired(feedback.purgedAt, feedback.createdAt);
-  }, [feedback.purgedAt, feedback.createdAt]);
-
-  const hasNote = Boolean(
-    !isPurged && feedback.optionalNote && feedback.optionalNote.trim().length > 0,
-  );
+  // Authoritative 4-category note lifecycle resolution (Cases A, B, C, D)
+  const noteStatus = React.useMemo(() => {
+    return resolveFeedbackNoteStatus(feedback);
+  }, [feedback]);
 
   return (
     <Card
@@ -351,13 +391,14 @@ export function FeedbackCardItem({
           )}
         </div>
 
-        {/* Customer Note Section (DPDPA 30-Day Retention Handling) */}
+        {/* Customer Note Section (DPDPA 30-Day Retention Handling - 4 Note Categories) */}
         <div className="pt-1">
-          {/* Case B: Purged note (purgedAt is set) */}
-          {isPurged ? (
+          {/* Case B: Physically Purged note (authoritative database purgedAt is populated) */}
+          {noteStatus === 'PURGED' ? (
             <div
               className="rounded-lg border border-border/70 bg-surface-alt/30 p-3 space-y-1.5"
               data-testid="feedback-note-purged"
+              data-note-status="PURGED"
             >
               <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
                 <svg
@@ -375,8 +416,9 @@ export function FeedbackCardItem({
                 <Badge
                   variant="outline"
                   className="text-[10px] font-medium border-border/80 text-text-secondary ml-auto"
+                  data-testid="badge-note-purged"
                 >
-                  Expired
+                  Purged
                 </Badge>
               </div>
               <p className="text-xs text-text-secondary font-medium">
@@ -386,11 +428,47 @@ export function FeedbackCardItem({
                 Customer notes are automatically expunged after 30 days in compliance with data privacy policies (DPDPA).
               </p>
             </div>
-          ) : hasNote ? (
+          ) : noteStatus === 'EXPIRED' ? (
+            /* Case D: Expired note awaiting database cleanup (row contained note, > 30 days, purgedAt is null) */
+            <div
+              className="rounded-lg border border-border/70 bg-surface-alt/30 p-3 space-y-1.5"
+              data-testid="feedback-note-purged"
+              data-note-status="EXPIRED"
+            >
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <svg
+                  className="w-3.5 h-3.5 text-text-secondary shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                <span>Customer Note</span>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-medium border-border/80 text-text-secondary ml-auto"
+                  data-testid="badge-note-expired"
+                >
+                  Expired
+                </Badge>
+              </div>
+              <p className="text-xs text-text-secondary font-medium">
+                [Personal note expired per privacy policy]
+              </p>
+              <p className="text-[11px] text-text-secondary leading-relaxed">
+                Customer notes are automatically expunged after 30 days in compliance with data privacy policies (DPDPA). Personal note reached retention ceiling and is hidden pending scheduled database cleanup.
+              </p>
+            </div>
+          ) : noteStatus === 'RETAINED' && feedback.optionalNote ? (
             /* Case A: Active Retained note */
             <div
               className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5"
               data-testid="feedback-note-retained"
+              data-note-status="RETAINED"
             >
               <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
                 <svg
@@ -414,6 +492,7 @@ export function FeedbackCardItem({
             <div
               className="text-xs text-text-secondary italic pl-1"
               data-testid="feedback-note-none"
+              data-note-status="NONE"
             >
               No additional note provided.
             </div>

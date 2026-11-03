@@ -145,6 +145,7 @@ export function FeedbackFeedPage(): React.JSX.Element {
     async function executeLoad() {
       if (!business?.id) return;
 
+      setLoadingFeedback(true);
       const { startDate, endDate } = calculateDateRangeBounds(dateRange, customStart, customEnd);
 
       const result = await fetchMerchantFeedback({
