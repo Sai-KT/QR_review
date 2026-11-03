@@ -132,7 +132,7 @@ export function GoogleDestinationForm({
     const targetUrl = validationResult.sanitizedUrl;
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
     setHasTestedLink(true);
-    setTestNotice('Link opened in a new tab. Verify that your Google listing review prompt loads cleanly.');
+    setTestNotice('Link opened in a new tab. Confirm that your Google listing review prompt loads cleanly.');
   };
 
   // Discard / Reset Action
@@ -168,7 +168,7 @@ export function GoogleDestinationForm({
         return;
       }
 
-      setSubmitSuccess('Google Review Destination updated and verified successfully.');
+      setSubmitSuccess('Google review destination validated and saved successfully.');
       setHasTestedLink(false);
       setTestNotice(null);
 
@@ -368,10 +368,10 @@ export function GoogleDestinationForm({
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h4 className="text-xs font-semibold text-text-primary">
-                    Verify Link in New Tab
+                    Test Review Link in New Tab
                   </h4>
                   <p className="text-[11px] text-text-secondary">
-                    Before saving, open your review link to verify it launches your Google Business review box.
+                    Before saving, open your review link to confirm it launches your store&apos;s Google review dialog.
                   </p>
                 </div>
                 <Button

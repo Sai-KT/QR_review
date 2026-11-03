@@ -128,7 +128,7 @@ test.describe('M5-T04: Google Review Destination Setup', () => {
     // 6. Verify success alert
     const successAlert = page.getByTestId('destination-success-alert');
     await expect(successAlert).toBeVisible();
-    await expect(successAlert).toContainText(/Google review destination updated/i);
+    await expect(successAlert).toContainText(/Google review destination validated and saved/i);
 
     // 7. Verify persistence in database
     const { data: dbBusiness } = await supabaseAdmin

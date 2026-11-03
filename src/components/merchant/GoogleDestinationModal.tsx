@@ -49,7 +49,7 @@ export function GoogleDestinationModal({
             Google Review Destination Setup
           </DialogTitle>
           <DialogDescription className="text-xs text-text-secondary">
-            Configure and verify your official Google Maps review link.
+            Configure, test, and save your official Google Maps review prompt link.
           </DialogDescription>
         </DialogHeader>
 

@@ -63,7 +63,7 @@ export function GoogleDestinationPage(): React.JSX.Element {
           Google Review Destination
         </h1>
         <p className="text-xs text-text-secondary">
-          Configure and verify your official Google Maps review prompt link for{' '}
+          Configure, test, and save your official Google Maps review prompt link for{' '}
           <span className="font-semibold text-text-primary">{business.name}</span>.
         </p>
       </div>

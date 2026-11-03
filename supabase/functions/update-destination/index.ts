@@ -2,21 +2,24 @@
  * Edge Function: update-destination (API-OWN-03)
  *
  * Task: M5-T04 — Google Review Destination Gateway & Verification
+ * Milestone: M5 — Merchant Owner Portal & Digital QR Sharing
+ * Architecture: Option B (Transactional PostgreSQL RPC + Engine-Enforced Unique Place ID)
+ *
  * Specifications:
  *   - docs/ROADMAP.md (v1.1) Task M5-T04
  *   - docs/API_SPEC.md (v1.2) §11.3 (API-OWN-03)
  *   - docs/DATABASE_SCHEMA.md (v1.1) §5.2, §5.12
- *   - docs/SECURITY.md (v1.1) §7.2 (TH-08, GC-01, SEC-001)
+ *   - docs/SECURITY.md (v1.1) §7.2, §8
  *   - docs/TEST_PLAN.md (v1.1) TC-DST-01..10, TC-OWN-08..10, TC-API-16..17
- *   - Founder Decision M0-02 (Destination Verification Protocol)
+ *   - Founder Decisions M0-02 (Destination Verification) & M0-13 (Audit Integrity)
  *
  * Capabilities:
  *   - Authenticated merchant gateway (Authorization: Bearer <owner_jwt>)
  *   - Enforces strict tenant ownership (businesses.owner_id = auth.uid())
  *   - Validates destination URLs against approved Google domain allowlist
  *   - Validates Place ID format (20-100 alphanumeric) and prevents cross-tenant collision
- *   - Updates businesses.google_review_url and google_place_id via service_role
- *   - Writes append-only audit trail to public.admin_audit_logs with actor_role = 'owner'
+ *   - Delegates atomic persistence and immutable audit recording to public.update_merchant_destination
+ *   - True transaction rollback in PostgreSQL: zero orphaned destination updates or un-audited state
  *   - Sanitized canonical error envelopes (RFC 7807 problem details)
  */
 
@@ -235,39 +238,7 @@ export async function handler(
 
   const { businessId, googleReviewUrl, googlePlaceId } = parseResult.data;
 
-  // 7. Verify Business Ownership & Retrieve Baseline
-  const { data: business, error: bizError } = await supabaseAdmin
-    .from('businesses')
-    .select('id, owner_id, google_review_url, google_place_id')
-    .eq('id', businessId)
-    .maybeSingle();
-
-  if (bizError) {
-    return buildErrorResponse(
-      500,
-      'ERR_DATABASE_ERROR',
-      'Failed to resolve business record.',
-    );
-  }
-
-  if (!business) {
-    return buildErrorResponse(
-      404,
-      'ERR_BUSINESS_NOT_FOUND',
-      'Business record not found.',
-    );
-  }
-
-  // Enforce Tenant Boundary: User must be the registered owner
-  if (business.owner_id !== user.id) {
-    return buildErrorResponse(
-      403,
-      'ERR_PERMISSION_DENIED',
-      'You do not have permission to modify this business review destination.',
-    );
-  }
-
-  // 8. Strict Server-Side Google Review URL Validation
+  // 7. Strict Server-Side Google Review URL Validation
   const validation: DestinationValidationResult = validateDestinationUrl(
     googleReviewUrl,
     googlePlaceId,
@@ -284,129 +255,69 @@ export async function handler(
   const sanitizedUrl = validation.sanitizedUrl;
   const targetPlaceId = validation.targetPlaceId;
 
-  // 9. Cross-Tenant Place ID Collision Guard (TC-DST-09)
-  if (targetPlaceId) {
-    const { data: collision, error: collisionError } = await supabaseAdmin
-      .from('businesses')
-      .select('id')
-      .eq('google_place_id', targetPlaceId)
-      .neq('id', businessId)
-      .maybeSingle();
+  // 8. Atomic Mutation via Transactional RPC: public.update_merchant_destination
+  // Executes destination update and audit log in a single transaction with row-level locking.
+  // Enforces tenant ownership under lock; Place ID uniqueness is enforced by businesses_google_place_id_uq.
+  const ipHash = extractClientIpHash(req);
 
-    if (collisionError) {
+  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
+    'update_merchant_destination',
+    {
+      p_business_id: businessId,
+      p_owner_id: user.id, // Derived strictly from verified Supabase Auth session
+      p_google_review_url: sanitizedUrl,
+      p_google_place_id: targetPlaceId,
+      p_ip_hash: ipHash,
+    },
+  );
+
+  if (rpcError) {
+    const errorMsg = rpcError.message || '';
+
+    if (errorMsg.includes('ERR_BUSINESS_NOT_FOUND')) {
       return buildErrorResponse(
-        500,
-        'ERR_DATABASE_ERROR',
-        'Failed to verify Place ID uniqueness.',
+        404,
+        'ERR_BUSINESS_NOT_FOUND',
+        'Business record not found.',
       );
     }
 
-    if (collision) {
+    if (errorMsg.includes('ERR_PERMISSION_DENIED')) {
+      return buildErrorResponse(
+        403,
+        'ERR_PERMISSION_DENIED',
+        'You do not have permission to modify this business review destination.',
+      );
+    }
+
+    if (errorMsg.includes('ERR_PLACE_ID_MISMATCH')) {
       return buildErrorResponse(
         422,
         'ERR_PLACE_ID_MISMATCH',
         'This Google Place ID is already associated with another registered business.',
       );
     }
-  }
 
-  // 10. Check for No-Op Mutation (Identical Payload)
-  const isNoOp =
-    business.google_review_url === sanitizedUrl &&
-    (business.google_place_id || null) === (targetPlaceId || null);
+    if (errorMsg.includes('ERR_INVALID_ARGUMENT')) {
+      return buildErrorResponse(
+        400,
+        'ERR_BAD_REQUEST',
+        'Invalid arguments passed to destination update procedure.',
+      );
+    }
 
-  if (isNoOp) {
-    return new Response(
-      JSON.stringify({
-        status: 'unmodified',
-        businessId,
-        googleReviewUrl: sanitizedUrl,
-        googlePlaceId: targetPlaceId,
-      }),
-      {
-        status: 200,
-        headers: {
-          ...CORS_HEADERS,
-          ...NO_CACHE_HEADERS,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-  }
-
-  // 11. Persist Destination Update via Service Role with Owner Guard (TOCTOU Defense)
-  const { data: updatedRows, error: updateError } = await supabaseAdmin
-    .from('businesses')
-    .update({
-      google_review_url: sanitizedUrl,
-      google_place_id: targetPlaceId,
-    })
-    .eq('id', businessId)
-    .eq('owner_id', user.id)
-    .select('id');
-
-  if (updateError) {
+    // Generic internal error suppresses internal database details
     return buildErrorResponse(
       500,
       'ERR_INTERNAL_SERVER_ERROR',
-      updateError.message || 'Failed to update business destination in database.',
+      'Failed to update business destination in database.',
     );
   }
 
-  if (!updatedRows || updatedRows.length === 0) {
-    return buildErrorResponse(
-      403,
-      'ERR_PERMISSION_DENIED',
-      'You do not have permission to modify this business review destination.',
-    );
-  }
-
-  // 12. Write Append-Only Audit Trail (public.admin_audit_logs)
-  const ipHash = extractClientIpHash(req);
-  const { error: auditError } = await supabaseAdmin
-    .from('admin_audit_logs')
-    .insert({
-      actor_user_id: user.id,
-      actor_role: 'owner',
-      target_business_id: businessId,
-      action: 'UPDATE_GOOGLE_DESTINATION',
-      payload_before: {
-        google_review_url: business.google_review_url,
-        google_place_id: business.google_place_id,
-      },
-      payload_after: {
-        google_review_url: sanitizedUrl,
-        google_place_id: targetPlaceId,
-      },
-      ip_hash: ipHash,
-    });
-
-  if (auditError) {
-    console.error(
-      'Failed to record audit log for destination update. Performing compensating rollback:',
-      auditError,
-    );
-
-    // Compensating Rollback: Revert destination fields to preserve audit-log consistency
-    await supabaseAdmin
-      .from('businesses')
-      .update({
-        google_review_url: business.google_review_url,
-        google_place_id: business.google_place_id,
-      })
-      .eq('id', businessId)
-      .eq('owner_id', user.id);
-
-    return buildErrorResponse(
-      500,
-      'ERR_INTERNAL_SERVER_ERROR',
-      'Failed to record required audit log for destination change. Destination change reverted.',
-    );
-  }
-
-  // 13. Return Success Response (API-OWN-03 DTO)
+  // 9. Return Canonical Success Response (API-OWN-03 DTO)
+  const resultObj = typeof rpcResult === 'object' && rpcResult !== null ? rpcResult : {};
   const responsePayload = {
-    status: 'updated',
+    status: (resultObj as Record<string, unknown>)['status'] || 'updated',
     businessId,
     googleReviewUrl: sanitizedUrl,
     googlePlaceId: targetPlaceId,
@@ -428,4 +339,3 @@ if (typeof Deno !== 'undefined') {
     return await handler(req);
   });
 }
-
