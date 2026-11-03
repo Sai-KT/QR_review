@@ -11,19 +11,16 @@
  *   - docs/SECURITY.md (v1.1) §15.1 (Founder Decision M0-03)
  *   - docs/TEST_PLAN.md (v1.1) TC-UPL-01..08, TC-API-21..23
  *
- * Capabilities:
- *   - Authenticated merchant gateway (Authorization: Bearer <owner_jwt>)
- *   - Strict tenant ownership authorization (businesses.owner_id = auth.uid())
- *   - Binary magic-byte inspection (PNG, JPEG, WebP)
- *   - Prohibits SVGs, scripts, and executable polyglots (HTTP 415)
- *   - Structural integrity validation for PNG, JPEG, and WebP formats
- *   - Enforces 2 MB size limit (HTTP 413)
- *   - Enforces 2048x2048px and 1:3 to 3:1 aspect ratio limits (HTTP 422)
- *   - Format-preserving upload to 'business-logos' storage bucket
- *   - Failure-safe atomic replacement (maintains backup during replacement)
- *   - Cleans up old extensions only after successful persistence (TC-UPL-08)
- *   - Enforces tenant ownership constraint during DB mutations (Check E)
- *   - Deletes storage files and sets businesses.logo_url = NULL on DELETE (API-OWN-08)
+ * Architecture & Consistency Model:
+ *   Supabase Storage and PostgreSQL operate as two independent distributed services
+ *   without a shared two-phase commit (2PC) transaction coordinator.
+ *   This gateway implements a Compensating Saga / Dual-Phase Reconciliation protocol:
+ *   - Isolated per-request backup keys (`.backup_${requestId}_logo.${ext}`)
+ *   - Zero-downtime same-extension copy-based backup (live file remains available during upload)
+ *   - Best-effort compensation rollbacks on upload or DB persistence failure
+ *   - In-place replacement with post-commit pruning of obsolete extensions
+ *   - DB-first deletion with rollback compensation on storage removal failure
+ *   - Database mutation predicates bound to caller tenant ownership (`owner_id = user.id`)
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -261,26 +258,25 @@ export async function handler(
       );
     }
 
+    const requestId = crypto.randomUUID().slice(0, 8);
     const targetPath = `${businessId}/logo.${validation.extension}`;
-    const backupPath = `${businessId}/.backup_logo.${validation.extension}`;
+    const backupPath = `${businessId}/.backup_${requestId}_logo.${validation.extension}`;
 
-    // Failure Safety: Check if current logo has same extension and create a safety backup
+    // Failure Safety: Check if current logo has same extension and create a non-destructive safety copy
     let hasBackup = false;
     try {
-      // Clear any stale backup
-      await supabaseAdmin.storage.from(BUCKET_NAME).remove([backupPath]);
-      const { error: moveError } = await supabaseAdmin.storage
+      const { error: copyError } = await supabaseAdmin.storage
         .from(BUCKET_NAME)
-        .move(targetPath, backupPath);
+        .copy(targetPath, backupPath);
 
-      if (!moveError) {
+      if (!copyError) {
         hasBackup = true;
       }
     } catch {
       // Non-fatal if target file did not exist yet
     }
 
-    // Upload new logo with validated extension
+    // Upload new logo with validated extension (in-place upsert)
     const { error: uploadError } = await supabaseAdmin.storage
       .from(BUCKET_NAME)
       .upload(targetPath, bytes, {
@@ -292,6 +288,7 @@ export async function handler(
       // Restore backup if it existed
       if (hasBackup) {
         try {
+          await supabaseAdmin.storage.from(BUCKET_NAME).remove([targetPath]);
           await supabaseAdmin.storage.from(BUCKET_NAME).move(backupPath, targetPath);
         } catch {
           // Best effort restore
@@ -354,13 +351,19 @@ export async function handler(
       );
     }
 
-    // Successful persistence: Clean up safety backup
-    if (hasBackup) {
-      try {
-        await supabaseAdmin.storage.from(BUCKET_NAME).remove([backupPath]);
-      } catch {
-        // Non-fatal
+    // Successful persistence: Clean up safety backup and any stale backups
+    try {
+      const { data: tenantFiles } = await supabaseAdmin.storage
+        .from(BUCKET_NAME)
+        .list(businessId);
+      const backupsToDelete = (tenantFiles || [])
+        .filter((f) => f.name.startsWith('.backup_'))
+        .map((f) => `${businessId}/${f.name}`);
+      if (backupsToDelete.length > 0) {
+        await supabaseAdmin.storage.from(BUCKET_NAME).remove(backupsToDelete);
       }
+    } catch {
+      // Non-fatal cleanup
     }
 
     // Clean up old extension files in tenant directory (TC-UPL-08)
@@ -428,24 +431,8 @@ export async function handler(
       );
     }
 
-    // Delete all potential logo files for this tenant
-    const filesToDelete = ['png', 'jpeg', 'webp'].map(
-      (ext) => `${businessId}/logo.${ext}`,
-    );
-
-    const { error: storageRemoveError } = await supabaseAdmin.storage
-      .from(BUCKET_NAME)
-      .remove(filesToDelete);
-
-    if (storageRemoveError) {
-      return errorResponse(
-        'ERR_STORAGE_ERROR',
-        `Failed to remove storage files: ${storageRemoveError.message}`,
-        500,
-      );
-    }
-
-    // Clear public.businesses.logo_url with owner_id verification guard
+    // Clear public.businesses.logo_url FIRST with owner_id verification guard
+    const previousLogoUrl = business.logo_url;
     const { data: updatedBusiness, error: dbClearError } = await supabaseAdmin
       .from('businesses')
       .update({
@@ -470,6 +457,51 @@ export async function handler(
         'ERR_PERMISSION_DENIED',
         'Business ownership changed during deletion.',
         403,
+      );
+    }
+
+    // Delete all potential logo files and backups for this tenant
+    const filesToDelete = ['png', 'jpeg', 'webp'].map(
+      (ext) => `${businessId}/logo.${ext}`,
+    );
+
+    try {
+      const { data: tenantFiles } = await supabaseAdmin.storage
+        .from(BUCKET_NAME)
+        .list(businessId);
+      const extraFiles = (tenantFiles || [])
+        .filter((f) => f.name.startsWith('.backup_'))
+        .map((f) => `${businessId}/${f.name}`);
+      filesToDelete.push(...extraFiles);
+    } catch {
+      // Non-fatal
+    }
+
+    const { error: storageRemoveError } = await supabaseAdmin.storage
+      .from(BUCKET_NAME)
+      .remove(filesToDelete);
+
+    if (storageRemoveError) {
+      // Attempt compensation: restore DB pointer if storage removal failed
+      if (previousLogoUrl) {
+        try {
+          await supabaseAdmin
+            .from('businesses')
+            .update({
+              logo_url: previousLogoUrl,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', businessId)
+            .eq('owner_id', user.id);
+        } catch {
+          // Best effort rollback
+        }
+      }
+
+      return errorResponse(
+        'ERR_STORAGE_ERROR',
+        `Failed to remove storage files: ${storageRemoveError.message}`,
+        500,
       );
     }
 

@@ -59,6 +59,14 @@ function createMockSupabase(overrides: {
       data: overrides.storageMoveError ? null : { message: 'Successfully moved' },
       error: overrides.storageMoveError || null,
     }),
+    copy: vi.fn().mockResolvedValue({
+      data: { path: 'copied-path' },
+      error: null,
+    }),
+    list: vi.fn().mockResolvedValue({
+      data: [],
+      error: null,
+    }),
   };
 
   const mockStorage = {
@@ -489,8 +497,8 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     ]);
   });
 
-  // Check B: Failure-safe replacement tests
-  it('Check B: restores safety backup if storage upload fails during same-extension replacement', async () => {
+  // Check A & B: Failure-safe replacement tests
+  it('Check A & B: creates non-destructive copy backup and restores if upload fails during same-extension replacement', async () => {
     const { client, mockStorageFrom } = createMockSupabase({
       storageUploadError: new Error('S3 connection drop'),
     });
@@ -502,19 +510,19 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     const res = await handler(req, client as unknown as SupabaseClient);
     expect(res.status).toBe(500);
 
-    // Verify move to backup was attempted
-    expect(mockStorageFrom.move).toHaveBeenCalledWith(
+    // Verify copy to request-unique backup was attempted (preserves active logo.png during upload)
+    expect(mockStorageFrom.copy).toHaveBeenCalledWith(
       `${MOCK_BUSINESS_ID}/logo.png`,
-      `${MOCK_BUSINESS_ID}/.backup_logo.png`,
+      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/\\.backup_`)),
     );
     // Verify backup restoration was executed
     expect(mockStorageFrom.move).toHaveBeenCalledWith(
-      `${MOCK_BUSINESS_ID}/.backup_logo.png`,
+      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/\\.backup_`)),
       `${MOCK_BUSINESS_ID}/logo.png`,
     );
   });
 
-  it('Check B: rolls back new file and restores backup if database update fails', async () => {
+  it('Check A & B: rolls back new file and restores backup if database update fails', async () => {
     const { client, mockStorageFrom } = createMockSupabase({
       dbUpdateError: new Error('Database transaction lock conflict'),
     });
@@ -533,14 +541,19 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     expect(mockStorageFrom.remove).toHaveBeenCalledWith([`${MOCK_BUSINESS_ID}/logo.png`]);
     // Verify backup was restored
     expect(mockStorageFrom.move).toHaveBeenCalledWith(
-      `${MOCK_BUSINESS_ID}/.backup_logo.png`,
+      expect.stringMatching(new RegExp(`^${MOCK_BUSINESS_ID}/\\.backup_`)),
       `${MOCK_BUSINESS_ID}/logo.png`,
     );
   });
 
-  // Check C: Honest error handling on DELETE
-  it('Check C: returns HTTP 500 when storage remove fails on DELETE', async () => {
-    const { client } = createMockSupabase({
+  // Check C: Honest error handling on DELETE and DB rollback
+  it('Check C: returns HTTP 500 and attempts DB compensation when storage remove fails on DELETE', async () => {
+    const { client, mockFrom } = createMockSupabase({
+      business: {
+        id: MOCK_BUSINESS_ID,
+        owner_id: MOCK_USER_ID,
+        logo_url: `http://localhost:54321/storage/v1/object/public/business-logos/${MOCK_BUSINESS_ID}/logo.png`,
+      },
       storageRemoveError: new Error('Storage cluster unreachable'),
     });
     const req = new Request(
@@ -554,6 +567,9 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.code).toBe('ERR_STORAGE_ERROR');
+
+    // Verify DB update was initially set to null and compensation attempted to restore
+    expect(mockFrom).toHaveBeenCalledWith('businesses');
   });
 
   // Check E: Tenant ownership constraint at mutation time

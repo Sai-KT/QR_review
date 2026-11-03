@@ -421,4 +421,168 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     // Storage remove under RLS returns empty list (0 deleted)
     expect(data?.length || 0).toBe(0);
   });
+
+  it('Check A: same-extension replacement preserves public image accessibility and cleans backups', async () => {
+    // 1. Upload initial PNG
+    const formData1 = new FormData();
+    formData1.append('businessId', BUSINESS_1_ID);
+    formData1.append('file', new File([createPngBytes(100, 100)], 'initial.png', { type: 'image/png' }));
+
+    const res1 = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      body: formData1,
+    });
+    expect(res1.status).toBe(200);
+    const body1 = await res1.json();
+
+    // Verify initial public URL is downloadable
+    const download1 = await fetch(body1.logoUrl);
+    expect(download1.status).toBe(200);
+
+    // 2. Upload replacement PNG (same extension)
+    const formData2 = new FormData();
+    formData2.append('businessId', BUSINESS_1_ID);
+    formData2.append('file', new File([createPngBytes(150, 150)], 'replacement.png', { type: 'image/png' }));
+
+    const res2 = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      body: formData2,
+    });
+    expect(res2.status).toBe(200);
+    const body2 = await res2.json();
+
+    // Verify replacement public URL is downloadable
+    const download2 = await fetch(body2.logoUrl);
+    expect(download2.status).toBe(200);
+
+    // Verify storage directory has only logo.png and zero .backup_ files
+    const { data: objects } = await supabaseAdmin.storage
+      .from('business-logos')
+      .list(BUSINESS_1_ID);
+
+    const names = objects?.map((o) => o.name) || [];
+    expect(names).toEqual(['logo.png']);
+    expect(names.some((n) => n.startsWith('.backup_'))).toBe(false);
+  });
+
+  it('Check B: multi-step extension transitions (PNG -> JPEG -> WebP) prune obsolete objects', async () => {
+    // PNG -> JPEG
+    const formData1 = new FormData();
+    formData1.append('businessId', BUSINESS_1_ID);
+    formData1.append('file', new File([createJpegBytes(100, 100)], 'step1.jpeg', { type: 'image/jpeg' }));
+
+    const res1 = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      body: formData1,
+    });
+    expect(res1.status).toBe(200);
+
+    // JPEG -> WebP
+    const formData2 = new FormData();
+    formData2.append('businessId', BUSINESS_1_ID);
+    formData2.append('file', new File([createWebpBytes(80, 80)], 'step2.webp', { type: 'image/webp' }));
+
+    const res2 = await fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      body: formData2,
+    });
+    expect(res2.status).toBe(200);
+
+    const { data: objects } = await supabaseAdmin.storage
+      .from('business-logos')
+      .list(BUSINESS_1_ID);
+
+    const names = objects?.map((o) => o.name) || [];
+    expect(names).toContain('logo.webp');
+    expect(names).not.toContain('logo.jpeg');
+    expect(names).not.toContain('logo.png');
+  });
+
+  it('Check C: repeated deletion calls are idempotent and maintain null DB pointer', async () => {
+    // Delete 1
+    const res1 = await fetch(
+      `${LOCAL_SUPABASE_URL}/functions/v1/upload-logo?businessId=${BUSINESS_1_ID}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      },
+    );
+    expect(res1.status).toBe(200);
+
+    // Delete 2 (idempotent repeat)
+    const res2 = await fetch(
+      `${LOCAL_SUPABASE_URL}/functions/v1/upload-logo?businessId=${BUSINESS_1_ID}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+      },
+    );
+    expect(res2.status).toBe(200);
+    const body2 = await res2.json();
+    expect(body2.status).toBe('deleted');
+
+    // Confirm DB is null and storage has 0 files
+    const { data: biz } = await supabaseAdmin
+      .from('businesses')
+      .select('logo_url')
+      .eq('id', BUSINESS_1_ID)
+      .single();
+
+    expect(biz?.logo_url).toBeNull();
+
+    const { data: objects } = await supabaseAdmin.storage
+      .from('business-logos')
+      .list(BUSINESS_1_ID);
+
+    expect(objects?.length || 0).toBe(0);
+  });
+
+  it('Check D: concurrent overlapping uploads converge without file corruption or lingering backups', async () => {
+    const formDataA = new FormData();
+    formDataA.append('businessId', BUSINESS_1_ID);
+    formDataA.append('file', new File([createPngBytes(100, 100)], 'concurrentA.png', { type: 'image/png' }));
+
+    const formDataB = new FormData();
+    formDataB.append('businessId', BUSINESS_1_ID);
+    formDataB.append('file', new File([createPngBytes(120, 120)], 'concurrentB.png', { type: 'image/png' }));
+
+    const [resA, resB] = await Promise.all([
+      fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+        body: formDataA,
+      }),
+      fetch(`${LOCAL_SUPABASE_URL}/functions/v1/upload-logo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tokenMerchant1}`, apikey: LOCAL_ANON_KEY },
+        body: formDataB,
+      }),
+    ]);
+
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+
+    // Verify DB points to an active valid URL
+    const { data: biz } = await supabaseAdmin
+      .from('businesses')
+      .select('logo_url')
+      .eq('id', BUSINESS_1_ID)
+      .single();
+
+    expect(biz?.logo_url).not.toBeNull();
+    const download = await fetch(biz!.logo_url!);
+    expect(download.status).toBe(200);
+
+    // Verify no stray backup files remain
+    const { data: objects } = await supabaseAdmin.storage
+      .from('business-logos')
+      .list(BUSINESS_1_ID);
+
+    const names = objects?.map((o) => o.name) || [];
+    expect(names).toEqual(['logo.png']);
+  });
 });
