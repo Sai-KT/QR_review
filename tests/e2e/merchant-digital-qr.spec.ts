@@ -18,8 +18,12 @@
  * - Mobile 320px responsive reflow (no horizontal overflow) & WCAG 2.2 AA accessibility scan.
  */
 
+import { createRequire } from 'node:module';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '@playwright/test';
+
+const require = createRequire(import.meta.url);
+const jsqrDistPath = require.resolve('jsqr/dist/jsQR.js');
 
 test.describe('M5-T06: Digital QR Studio & Multi-Channel Sharing', () => {
   test.describe.configure({ mode: 'serial' });
@@ -132,7 +136,7 @@ test.describe('M5-T06: Digital QR Studio & Multi-Channel Sharing', () => {
     const suggestedFilename = download.suggestedFilename();
     expect(suggestedFilename).toBe('luxe-studio-unisex-salon-review-qr-1024.png');
 
-    // 5. Verify downloaded file content (valid PNG magic bytes: 0x89, 0x50, 0x4E, 0x47)
+    // 5. Verify downloaded file content (valid PNG magic bytes: 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
     const stream = await download.createReadStream();
     if (!stream) {
       throw new Error('Could not create read stream for downloaded file');
@@ -149,9 +153,166 @@ test.describe('M5-T06: Digital QR Studio & Multi-Channel Sharing', () => {
     expect(fileBuffer[1]).toBe(0x50); // 'P'
     expect(fileBuffer[2]).toBe(0x4e); // 'N'
     expect(fileBuffer[3]).toBe(0x47); // 'G'
+    expect(fileBuffer[4]).toBe(0x0d);
+    expect(fileBuffer[5]).toBe(0x0a);
+    expect(fileBuffer[6]).toBe(0x1a);
+    expect(fileBuffer[7]).toBe(0x0a);
+
+    // Verify IHDR chunk dimensions (1024x1024)
+    const width = fileBuffer.readUInt32BE(16);
+    const height = fileBuffer.readUInt32BE(20);
+    expect(width).toBe(1024);
+    expect(height).toBe(1024);
+
+    // In-browser optical scan of the real downloaded PNG using jsQR
+    await page.addScriptTag({ path: jsqrDistPath });
+    const base64Png = fileBuffer.toString('base64');
+    const decodeResult = await page.evaluate(async (b64) => {
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load downloaded PNG'));
+        img.src = `data:image/png;base64,${b64}`;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, 1024, 1024);
+
+      // Verify quiet zone perimeter (sample pixels at 16px border are white)
+      const quietPoints = [
+        [16, 16], [512, 16], [1008, 16],
+        [16, 512], [1008, 512],
+        [16, 1008], [512, 1008], [1008, 1008],
+      ];
+      let quietZoneValid = true;
+      for (const [x, y] of quietPoints) {
+        const idx = (y * 1024 + x) * 4;
+        if (imgData.data[idx] !== 255 || imgData.data[idx + 1] !== 255 || imgData.data[idx + 2] !== 255) {
+          quietZoneValid = false;
+          break;
+        }
+      }
+
+      const jsQR = (window as unknown as { jsQR: (data: Uint8ClampedArray, w: number, h: number) => { data: string } | null }).jsQR;
+      const qrCode = jsQR(imgData.data, 1024, 1024);
+
+      return {
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        quietZoneValid,
+        decodedUrl: qrCode?.data || null,
+      };
+    }, base64Png);
+
+    expect(decodeResult.width).toBe(1024);
+    expect(decodeResult.height).toBe(1024);
+    expect(decodeResult.quietZoneValid).toBe(true);
+    expect(decodeResult.decodedUrl).not.toBeNull();
+    expect(decodeResult.decodedUrl).toMatch(/\/q\/luxe000001$/);
+    expect(decodeResult.decodedUrl).toContain('luxe000001');
+
+    // Security assertions: Zero secrets, zero JWTs, zero Google destination links in QR payload
+    expect(decodeResult.decodedUrl).not.toContain('eyJ');
+    expect(decodeResult.decodedUrl).not.toContain('token');
+    expect(decodeResult.decodedUrl).not.toContain('secret');
+    expect(decodeResult.decodedUrl).not.toContain('google.com');
+    expect(decodeResult.decodedUrl).not.toContain('writereview');
+    expect(decodeResult.decodedUrl).not.toContain('placeid');
 
     // 6. Verify success toast notification
     await expect(page.getByText(/High-Res QR Downloaded/i)).toBeVisible();
+  });
+
+  test('TC-OWN-12-UNBRANDED: Unbranded 1024×1024 PNG export decodes with valid structure, quiet zone, and zero secrets', async ({
+    page,
+  }) => {
+    // 1. Sign in as Merchant Luxe
+    await page.goto('/login');
+    await page.getByLabel(/Email Address/i).fill('merchant.luxe@local.test');
+    await page.getByLabel(/^Password$/i).fill('LocalDevPass123!');
+    await page.getByRole('button', { name: /^Sign In$/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+
+    // 2. Navigate to Digital QR Studio
+    await page.goto('/dashboard/qr');
+
+    // 3. Inject jsQR and generate pure unbranded 1024x1024 PNG in browser context
+    await page.addScriptTag({ path: jsqrDistPath });
+
+    const unbrandedResult = await page.evaluate(async () => {
+      const qrMod = await import('/src/lib/qrGenerator.ts');
+      const unbrandedBlob = await qrMod.generateQrPngBlob(`${window.location.origin}/q/luxe000001`, {
+        size: 1024,
+        quietZone: 4,
+        errorCorrectionLevel: 'H',
+        logoUrl: null,
+        fallbackMonogram: undefined,
+      });
+
+      const reader = new FileReader();
+      const b64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => resolve(reader.result as string);
+      });
+      reader.readAsDataURL(unbrandedBlob);
+      const dataUrl = await b64Promise;
+
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, 1024, 1024);
+
+      const quietPoints = [
+        [16, 16], [512, 16], [1008, 16],
+        [16, 512], [1008, 512],
+        [16, 1008], [512, 1008], [1008, 1008],
+      ];
+      let quietZoneValid = true;
+      for (const [x, y] of quietPoints) {
+        const idx = (y * 1024 + x) * 4;
+        if (imgData.data[idx] !== 255 || imgData.data[idx + 1] !== 255 || imgData.data[idx + 2] !== 255) {
+          quietZoneValid = false;
+          break;
+        }
+      }
+
+      const jsQR = (window as unknown as { jsQR: (data: Uint8ClampedArray, w: number, h: number) => { data: string } | null }).jsQR;
+      const qrCode = jsQR(imgData.data, 1024, 1024);
+
+      return {
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        quietZoneValid,
+        decodedUrl: qrCode?.data || null,
+        byteLength: unbrandedBlob.size,
+      };
+    });
+
+    expect(unbrandedResult.width).toBe(1024);
+    expect(unbrandedResult.height).toBe(1024);
+    expect(unbrandedResult.byteLength).toBeGreaterThan(1000);
+    expect(unbrandedResult.quietZoneValid).toBe(true);
+    expect(unbrandedResult.decodedUrl).not.toBeNull();
+    expect(unbrandedResult.decodedUrl).toMatch(/\/q\/luxe000001$/);
+    expect(unbrandedResult.decodedUrl).toContain('luxe000001');
+
+    // Security assertions: Zero secrets, zero tokens, zero Google links
+    expect(unbrandedResult.decodedUrl).not.toContain('eyJ');
+    expect(unbrandedResult.decodedUrl).not.toContain('token');
+    expect(unbrandedResult.decodedUrl).not.toContain('secret');
+    expect(unbrandedResult.decodedUrl).not.toContain('google.com');
   });
 
   test('Multi-Channel Sharing & Secondary Portal Navigation Links', async ({ page }) => {

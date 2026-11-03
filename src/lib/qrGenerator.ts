@@ -61,6 +61,29 @@ export interface QrExportOptions extends QrRenderOptions {
   filename?: string;
 }
 
+function getProcessEnv(key: string): string | undefined {
+  const g = globalThis as unknown as {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return g.process?.env?.[key];
+}
+
+/**
+ * Retrieves the configured application origin (e.g. https://app.qrs.co) from
+ * Vite client environment variables or Node runtime process.
+ */
+export function getConfiguredAppUrl(): string | undefined {
+  if (
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    'VITE_APP_URL' in import.meta.env &&
+    typeof import.meta.env.VITE_APP_URL === 'string'
+  ) {
+    return import.meta.env.VITE_APP_URL;
+  }
+  return getProcessEnv('VITE_APP_URL');
+}
+
 /**
  * Validates public QR ID format.
  * Decoupled 10-character URL-safe alphanumeric string (e.g. 'luxe000001').
@@ -74,6 +97,8 @@ export function isValidPublicQrId(publicQrId: string): boolean {
  *
  * Invariant: Encodes strictly `https://[domain]/q/:public_qr_id`.
  * Decoupled from mutable business names, vanity slugs, or external Google review URLs.
+ * Prioritizes explicitly passed baseOrigin, followed by the configured VITE_APP_URL,
+ * then browser window.location.origin, and finally default local dev fallback.
  */
 export function buildFirstPartyReviewUrl(publicQrId: string, baseOrigin?: string): string {
   const trimmed = publicQrId?.trim() || '';
@@ -83,7 +108,10 @@ export function buildFirstPartyReviewUrl(publicQrId: string, baseOrigin?: string
 
   let origin = baseOrigin;
   if (!origin) {
-    if (typeof window !== 'undefined' && window.location?.origin) {
+    const envAppUrl = getConfiguredAppUrl()?.trim();
+    if (envAppUrl) {
+      origin = envAppUrl;
+    } else if (typeof window !== 'undefined' && window.location?.origin) {
       origin = window.location.origin;
     } else {
       origin = 'http://localhost:5173';

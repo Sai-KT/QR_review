@@ -62,6 +62,28 @@ describe('M5-T06: qrGenerator', () => {
       expect(url).toBe('https://review.qrs.local/q/luxe000001');
     });
 
+    it('uses configured VITE_APP_URL application origin when provided', () => {
+      const g = globalThis as unknown as {
+        process?: { env?: Record<string, string | undefined> };
+      };
+      const originalEnv = g.process?.env?.VITE_APP_URL;
+      try {
+        if (g.process?.env) {
+          g.process.env.VITE_APP_URL = 'https://app.qrreview.in';
+        }
+        const url = buildFirstPartyReviewUrl(TEST_PUBLIC_QR_ID);
+        expect(url).toBe('https://app.qrreview.in/q/luxe000001');
+      } finally {
+        if (g.process?.env) {
+          if (originalEnv === undefined) {
+            delete g.process.env.VITE_APP_URL;
+          } else {
+            g.process.env.VITE_APP_URL = originalEnv;
+          }
+        }
+      }
+    });
+
     it('throws when building URL with invalid public QR ID', () => {
       expect(() => buildFirstPartyReviewUrl('')).toThrow(/Invalid public QR identifier/);
       expect(() => buildFirstPartyReviewUrl('bad!id')).toThrow(/Invalid public QR identifier/);
