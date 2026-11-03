@@ -96,7 +96,18 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
     ).toBeVisible();
 
     // Case B: Privacy-purged customer note indicator
-    const purgedNotes = page.getByTestId('feedback-note-purged');
+    // If recent test submissions have pushed historical purged notes to subsequent pages, paginate to locate it
+    let purgedNotes = page.getByTestId('feedback-note-purged');
+    let paginatedInPriv = false;
+    if (!(await purgedNotes.first().isVisible())) {
+      const nextBtn = page.getByTestId('btn-pagination-next');
+      if ((await nextBtn.isVisible()) && (await nextBtn.isEnabled())) {
+        await nextBtn.click();
+        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
+        purgedNotes = page.getByTestId('feedback-note-purged');
+        paginatedInPriv = true;
+      }
+    }
     await expect(purgedNotes.first()).toBeVisible();
     await expect(
       page.getByText('[Personal note expired per privacy policy]').first(),
@@ -109,6 +120,15 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
     const noNotes = page.getByTestId('feedback-note-none');
     await expect(noNotes.first()).toBeVisible();
     await expect(page.getByText('No additional note provided.').first()).toBeVisible();
+
+    // Return to page 1 if paginated
+    if (paginatedInPriv) {
+      const prevBtn = page.getByTestId('btn-pagination-prev');
+      if ((await prevBtn.isVisible()) && (await prevBtn.isEnabled())) {
+        await prevBtn.click();
+        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
+      }
+    }
   });
 
   test('TC-OWN-15: Multi-criteria filtering by sentiment and keyword search', async ({ page }) => {
@@ -125,8 +145,21 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
     const criticalTab = page.getByTestId('sentiment-tab-critical');
     await criticalTab.click();
 
+    // If recent test submissions have pushed critical items to subsequent pages, paginate to locate it
+    let criticalText = page.getByText(/Waited 45 mins past appointment/i);
+    let paginatedInSearch = false;
+    if (!(await criticalText.first().isVisible())) {
+      const nextBtn = page.getByTestId('btn-pagination-next');
+      if ((await nextBtn.isVisible()) && (await nextBtn.isEnabled())) {
+        await nextBtn.click();
+        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
+        criticalText = page.getByText(/Waited 45 mins past appointment/i);
+        paginatedInSearch = true;
+      }
+    }
+
     // Verify critical feedback is shown
-    await expect(page.getByText(/Waited 45 mins past appointment/i).first()).toBeVisible();
+    await expect(criticalText.first()).toBeVisible();
     await expect(page.getByTestId('badge-sentiment-critical').first()).toBeVisible();
 
     // Verify positive feedback is filtered out
@@ -134,6 +167,16 @@ test.describe('M5-T07: Merchant Feedback Feed & Privacy-Purged Note Indicators',
 
     // 3. Switch back to "All" sentiment
     await page.getByTestId('sentiment-tab-all').click();
+
+    // Return to page 1 if paginated
+    if (paginatedInSearch) {
+      const prevBtn = page.getByTestId('btn-pagination-prev');
+      if ((await prevBtn.isVisible()) && (await prevBtn.isEnabled())) {
+        await prevBtn.click();
+        await expect(page.getByTestId('feedback-cards-container')).toBeVisible();
+      }
+    }
+
     await expect(
       page.getByText(/Loved the styling and warm hospitality/i).first(),
     ).toBeVisible();

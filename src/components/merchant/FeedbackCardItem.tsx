@@ -74,6 +74,18 @@ export function formatFeedbackDate(isoString: string): { relative: string; full:
   }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
+export function isFeedbackNoteExpired(
+  purgedAt: string | null | undefined,
+  createdAt?: string,
+): boolean {
+  if (purgedAt) return true;
+  if (!createdAt) return false;
+  const createdMs = new Date(createdAt).getTime();
+  if (isNaN(createdMs)) return false;
+  return Date.now() - createdMs > 30 * 24 * 60 * 60 * 1000;
+}
+
 export function FeedbackCardItem({
   feedback,
   optionsMap,
@@ -88,8 +100,14 @@ export function FeedbackCardItem({
     return formatFeedbackDate(feedback.createdAt);
   }, [feedback.createdAt]);
 
-  const isPurged = Boolean(feedback.purgedAt);
-  const hasNote = Boolean(feedback.optionalNote && feedback.optionalNote.trim().length > 0);
+  // Case B / D: Note is explicitly purged OR past the mandatory 30-day DPDPA retention ceiling
+  const isPurged = React.useMemo(() => {
+    return isFeedbackNoteExpired(feedback.purgedAt, feedback.createdAt);
+  }, [feedback.purgedAt, feedback.createdAt]);
+
+  const hasNote = Boolean(
+    !isPurged && feedback.optionalNote && feedback.optionalNote.trim().length > 0,
+  );
 
   return (
     <Card
@@ -232,9 +250,25 @@ export function FeedbackCardItem({
               {feedback.selectedOptions.map((sel: SelectedSurveyOption, idx: number) => {
                 const optMeta = optionsMap?.get(sel.optionId);
                 const questionMeta = optMeta ? questionsMap?.get(optMeta.questionId) : undefined;
-                const displayText = optMeta ? optMeta.optionText : `Option ${idx + 1}`;
+
+                // Historical survey integrity: If option metadata is retired or unavailable,
+                // fall back to the customer's frozen affirmed fact snapshot from submission time
+                const snapshotFact = Array.isArray(feedback.affirmedFactsSnapshot)
+                  ? (feedback.affirmedFactsSnapshot as Array<string | AffirmedFact>)[idx]
+                  : undefined;
+                const snapshotText =
+                  typeof snapshotFact === 'string'
+                    ? snapshotFact
+                    : typeof snapshotFact === 'object' &&
+                        snapshotFact !== null &&
+                        'optionText' in snapshotFact
+                      ? (snapshotFact as { optionText?: string }).optionText
+                      : undefined;
+
+                const displayText = optMeta ? optMeta.optionText : (snapshotText || `Option ${idx + 1}`);
                 const emoji = optMeta?.emojiAnchor || '';
                 const isNegative = optMeta?.sentimentLabel === 'negative';
+                const isHistorical = !optMeta && Boolean(snapshotText);
 
                 return (
                   <div
@@ -245,9 +279,19 @@ export function FeedbackCardItem({
                         : 'border-border/70 bg-surface-alt/40 text-text-primary'
                     }`}
                   >
-                    <p className="text-[11px] text-text-secondary font-medium truncate mb-1">
-                      {questionMeta?.questionText || `Question ${idx + 1}`}
-                    </p>
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <p className="text-[11px] text-text-secondary font-medium truncate">
+                        {questionMeta?.questionText || `Question ${idx + 1}`}
+                      </p>
+                      {isHistorical && (
+                        <span
+                          className="text-[9px] uppercase tracking-wider text-text-secondary font-medium bg-surface-alt px-1 py-0.2 rounded border border-border/60 shrink-0"
+                          title="Questionnaire option is retired; displaying verified snapshot from submission time"
+                        >
+                          Historical
+                        </span>
+                      )}
+                    </div>
                     <p className="font-semibold text-text-primary flex items-center gap-1.5">
                       {emoji && <span aria-hidden="true">{emoji}</span>}
                       <span>{displayText}</span>

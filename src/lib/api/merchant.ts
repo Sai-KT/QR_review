@@ -512,8 +512,11 @@ export type DerivedSentiment = 'positive' | 'neutral' | 'critical';
  *
  * Rules:
  * - If at least one affirmative selection has sentiment_label === 'negative': 'critical'
- * - If all non-N/A selections are positive: 'positive'
+ * - If any selection cannot be resolved (retired option, unknown ID) and no negative is found: 'neutral'
+ *   (Strictly avoids fabricating positive praise when historical metadata is incomplete).
+ * - If all non-N/A selections are resolvable and positive: 'positive'
  * - If all selections are neutral/N/A: 'neutral'
+ * - Safe non-fabricated default: 'neutral'
  * - Preserves sentiment without fabricating numeric stars or running unapproved AI models.
  */
 export function deriveResponseSentiment(
@@ -524,6 +527,7 @@ export function deriveResponseSentiment(
     let hasNegative = false;
     let hasPositive = false;
     let applicableCount = 0;
+    let unresolvableCount = 0;
 
     for (const sel of feedback.selectedOptions) {
       const opt = optionsMap.get(sel.optionId);
@@ -536,17 +540,31 @@ export function deriveResponseSentiment(
             hasPositive = true;
           }
         }
+      } else {
+        // Option is retired, missing from optionsMap, or has an unknown historical ID
+        unresolvableCount++;
       }
     }
 
     if (hasNegative) return 'critical';
+
+    // If any selection is unresolvable (e.g. retired survey option), we cannot authoritatively
+    // guarantee it wasn't negative; therefore strictly abstain from fabricating a positive score.
+    if (unresolvableCount > 0) {
+      return 'neutral';
+    }
+
     if (hasPositive) return 'positive';
     if (applicableCount === 0) return 'neutral';
     return 'neutral';
   }
 
   // Fallback to affirmedFactsSnapshot if option metadata unavailable
-  if (feedback.affirmedFactsSnapshot && Array.isArray(feedback.affirmedFactsSnapshot)) {
+  if (
+    feedback.affirmedFactsSnapshot &&
+    Array.isArray(feedback.affirmedFactsSnapshot) &&
+    feedback.affirmedFactsSnapshot.length > 0
+  ) {
     let hasNegative = false;
     let hasPositive = false;
     for (const fact of feedback.affirmedFactsSnapshot) {
@@ -560,7 +578,8 @@ export function deriveResponseSentiment(
     if (hasPositive) return 'positive';
   }
 
-  return 'positive';
+  // Safe non-fabricated default: 'neutral' (never fabricate positive praise)
+  return 'neutral';
 }
 
 export {

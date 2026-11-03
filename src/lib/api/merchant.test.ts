@@ -682,6 +682,27 @@ describe('deriveResponseSentiment', () => {
     expect(sentiment).toBe('critical');
   });
 
+  it('classifies mixed positive and neutral selections as positive', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-2b',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [
+        { questionId: 'q1', optionId: 'opt-pos' },
+        { questionId: 'q3', optionId: 'opt-na' },
+      ],
+      affirmedFactsSnapshot: ['Masterful cut'],
+      optionalNote: null,
+      sessionUuid: 's-2b',
+      purgedAt: null,
+      createdAt: '2026-10-25T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback, optionsMap);
+    expect(sentiment).toBe('positive');
+  });
+
   it('classifies feedback as neutral when all selections are neutral/NA', () => {
     const feedback: CustomerFeedback = {
       id: 'f-3',
@@ -698,6 +719,48 @@ describe('deriveResponseSentiment', () => {
 
     const sentiment = deriveResponseSentiment(feedback, optionsMap);
     expect(sentiment).toBe('neutral');
+  });
+
+  it('classifies feedback as neutral when option metadata is missing, retired, or invalid', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-retired',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [
+        { questionId: 'q1', optionId: 'opt-retired-version-a' },
+      ],
+      affirmedFactsSnapshot: ['Historical option text'],
+      optionalNote: null,
+      sessionUuid: 's-retired',
+      purgedAt: null,
+      createdAt: '2026-10-20T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    // Since opt-retired-version-a is not in active optionsMap, it must not fabricate 'positive'
+    const sentiment = deriveResponseSentiment(feedback, optionsMap);
+    expect(sentiment).toBe('neutral');
+  });
+
+  it('classifies feedback as critical even if one option is retired as long as a negative option is present', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-mixed-retired-neg',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [
+        { questionId: 'q1', optionId: 'opt-retired-version-a' },
+        { questionId: 'q2', optionId: 'opt-neg' },
+      ],
+      affirmedFactsSnapshot: ['Historical option text', 'Rushed service'],
+      optionalNote: null,
+      sessionUuid: 's-mixed',
+      purgedAt: null,
+      createdAt: '2026-10-20T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback, optionsMap);
+    expect(sentiment).toBe('critical');
   });
 
   it('falls back to affirmedFactsSnapshot when optionsMap is missing', () => {
@@ -720,7 +783,7 @@ describe('deriveResponseSentiment', () => {
     expect(sentiment).toBe('critical');
   });
 
-  it('defaults to positive safely when no facts or options exist', () => {
+  it('defaults to neutral safely when no facts or options exist', () => {
     const feedback: CustomerFeedback = {
       id: 'f-5',
       businessId: 'b-1',
@@ -735,7 +798,7 @@ describe('deriveResponseSentiment', () => {
     };
 
     const sentiment = deriveResponseSentiment(feedback);
-    expect(sentiment).toBe('positive');
+    expect(sentiment).toBe('neutral');
   });
 });
 

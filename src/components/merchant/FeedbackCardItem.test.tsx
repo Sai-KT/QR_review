@@ -237,5 +237,54 @@ describe('FeedbackCardItem (CMP-13)', () => {
     expect(screen.getByText('Friendly greeting')).toBeInTheDocument();
     expect(screen.getByText('Great haircut')).toBeInTheDocument();
   });
+
+  it('renders historical affirmed facts text when option was retired and missing from optionsMap', () => {
+    const historicalFeedback: CustomerFeedback = {
+      ...baseFeedback,
+      id: 'f-106',
+      selectedOptions: [{ questionId: 'q-retired', optionId: 'opt-retired-v1' }],
+      affirmedFactsSnapshot: ['Historical Style Choice'],
+    };
+
+    // optionsMap does NOT contain opt-retired-v1 (soft-retired per M0-07 / M0-08)
+    render(
+      <FeedbackCardItem
+        feedback={historicalFeedback}
+        optionsMap={mockOptionsMap}
+        questionsMap={mockQuestionsMap}
+      />,
+    );
+
+    // Displays customer affirmed words from snapshot, not raw "Option 1"
+    expect(screen.getByText('Historical Style Choice')).toBeInTheDocument();
+    expect(screen.getByText('Historical')).toBeInTheDocument();
+  });
+
+  it('redacts customer notes older than 30 days even if purgedAt was not yet set by pg_cron (Case D)', () => {
+    const thirtyFiveDaysAgo = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString();
+    const staleUnpurgedFeedback: CustomerFeedback = {
+      ...baseFeedback,
+      id: 'f-107',
+      optionalNote: 'Customer secret note that was not yet swept by cron',
+      purgedAt: null,
+      createdAt: thirtyFiveDaysAgo,
+    };
+
+    render(
+      <FeedbackCardItem
+        feedback={staleUnpurgedFeedback}
+        optionsMap={mockOptionsMap}
+        questionsMap={mockQuestionsMap}
+      />,
+    );
+
+    expect(screen.getByTestId('feedback-note-purged')).toBeInTheDocument();
+    expect(
+      screen.getByText('[Personal note expired per privacy policy]'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Customer secret note that was not yet swept by cron/i),
+    ).not.toBeInTheDocument();
+  });
 });
 

@@ -355,76 +355,97 @@ export function FeedbackFeedPage(): React.JSX.Element {
       </div>
 
       {/* Summary Metrics Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="feedback-metrics-strip">
-        <button
-          type="button"
-          onClick={() => setSentimentFilter('all')}
-          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-            sentimentFilter === 'all'
-              ? 'border-primary ring-2 ring-primary/20 bg-primary/5'
-              : 'border-border bg-card hover:bg-surface-alt/50'
-          }`}
-          data-testid="metric-total-feedback"
-        >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
-            Total Responses
-          </p>
-          <p className="text-2xl font-extrabold text-text-primary mt-1">{totalCount}</p>
-        </button>
+      <div className="space-y-1.5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="feedback-metrics-strip">
+          <button
+            type="button"
+            onClick={() => setSentimentFilter('all')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              sentimentFilter === 'all'
+                ? 'border-primary ring-2 ring-primary/20 bg-primary/5'
+                : 'border-border bg-card hover:bg-surface-alt/50'
+            }`}
+            data-testid="metric-total-feedback"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+              Total Responses
+            </p>
+            <p className="text-2xl font-extrabold text-text-primary mt-1">{totalCount}</p>
+            <p className="text-[10px] text-text-secondary mt-0.5">
+              {dateRange === 'all' ? 'All-Time Submissions' : 'Filtered Period Total'}
+            </p>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setSentimentFilter('positive')}
-          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-            sentimentFilter === 'positive'
-              ? 'border-emerald-600 ring-2 ring-emerald-500/20 bg-emerald-500/10'
-              : 'border-border bg-card hover:bg-surface-alt/50'
-          }`}
-          data-testid="metric-positive-feedback"
-        >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-400">
-            Positive
-          </p>
-          <p className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
-            {positiveCount}
-          </p>
-        </button>
+          <button
+            type="button"
+            onClick={() => setSentimentFilter('positive')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              sentimentFilter === 'positive'
+                ? 'border-emerald-600 ring-2 ring-emerald-500/20 bg-emerald-500/10'
+                : 'border-border bg-card hover:bg-surface-alt/50'
+            }`}
+            data-testid="metric-positive-feedback"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-400">
+              Positive (Page)
+            </p>
+            <p className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
+              {positiveCount}
+            </p>
+            <p className="text-[10px] text-emerald-800/80 dark:text-emerald-400/80 mt-0.5">
+              Current page
+            </p>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setSentimentFilter('neutral')}
-          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-            sentimentFilter === 'neutral'
-              ? 'border-slate-500 ring-2 ring-slate-400/20 bg-slate-500/10'
-              : 'border-border bg-card hover:bg-surface-alt/50'
-          }`}
-          data-testid="metric-neutral-feedback"
-        >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-            Neutral
-          </p>
-          <p className="text-2xl font-extrabold text-slate-700 dark:text-slate-200 mt-1">
-            {neutralCount}
-          </p>
-        </button>
+          <button
+            type="button"
+            onClick={() => setSentimentFilter('neutral')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              sentimentFilter === 'neutral'
+                ? 'border-slate-500 ring-2 ring-slate-400/20 bg-slate-500/10'
+                : 'border-border bg-card hover:bg-surface-alt/50'
+            }`}
+            data-testid="metric-neutral-feedback"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Neutral (Page)
+            </p>
+            <p className="text-2xl font-extrabold text-slate-700 dark:text-slate-200 mt-1">
+              {neutralCount}
+            </p>
+            <p className="text-[10px] text-slate-600/80 dark:text-slate-400/80 mt-0.5">
+              Current page
+            </p>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setSentimentFilter('critical')}
-          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-            sentimentFilter === 'critical'
-              ? 'border-amber-600 ring-2 ring-amber-500/20 bg-amber-500/10'
-              : 'border-border bg-card hover:bg-surface-alt/50'
-          }`}
-          data-testid="metric-critical-feedback"
-        >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-400">
-            Needs Attention
+          <button
+            type="button"
+            onClick={() => setSentimentFilter('critical')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              sentimentFilter === 'critical'
+                ? 'border-amber-600 ring-2 ring-amber-500/20 bg-amber-500/10'
+                : 'border-border bg-card hover:bg-surface-alt/50'
+            }`}
+            data-testid="metric-critical-feedback"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-400">
+              Needs Attention (Page)
+            </p>
+            <p className="text-2xl font-extrabold text-amber-700 dark:text-amber-300 mt-1">
+              {criticalCount}
+            </p>
+            <p className="text-[10px] text-amber-800/80 dark:text-amber-400/80 mt-0.5">
+              Current page
+            </p>
+          </button>
+        </div>
+
+        {totalCount > 0 && (
+          <p className="text-[11px] text-text-secondary px-1">
+            Page sentiment metrics reflect items {showingFrom}–{showingTo} on the current page of{' '}
+            {totalCount} total submissions.
           </p>
-          <p className="text-2xl font-extrabold text-amber-700 dark:text-amber-300 mt-1">
-            {criticalCount}
-          </p>
-        </button>
+        )}
       </div>
 
       {/* Filter and Search Controls Toolbar */}
@@ -444,11 +465,11 @@ export function FeedbackFeedPage(): React.JSX.Element {
               </div>
               <Input
                 type="text"
-                placeholder="Search notes or affirmed facts..."
+                placeholder="Filter notes on current page..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 pr-8 text-xs sm:text-sm"
-                aria-label="Search feedback notes and facts"
+                aria-label="Filter feedback notes on current page"
                 data-testid="feedback-search-input"
               />
               {searchQuery && (
@@ -674,7 +695,9 @@ export function FeedbackFeedPage(): React.JSX.Element {
               No Feedback Matches Your Criteria
             </CardTitle>
             <CardDescription className="text-xs text-text-secondary max-w-md mx-auto mb-4">
-              We couldn't find any feedback records matching your active filter or search query.
+              We couldn't find any feedback records matching your active filter or search query on
+              the currently loaded page (items {showingFrom}–{showingTo}). Check other pages or
+              reset filters.
             </CardDescription>
             <Button
               variant="outline"

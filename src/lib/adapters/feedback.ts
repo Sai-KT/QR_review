@@ -150,13 +150,22 @@ function parseAffirmedFacts(json: Json): AffirmedFact[] {
 /**
  * Maps a raw PostgreSQL survey_responses row to CustomerFeedback DTO.
  *
- * PRIVACY SAFEGUARD:
- * If purged_at is populated, optionalNote is strictly set to null, honoring
- * the 30-day automated rolling scrub policy (Founder Decision M0-01).
+ * PRIVACY SAFEGUARDS (Founder Decision M0-01 / DPDPA 2023):
+ * 1. If purged_at is populated, optionalNote is strictly set to null.
+ * 2. If row created_at is older than 30 days, optionalNote is strictly redacted to null
+ *    and purgedAt is populated, guaranteeing zero leakage even if the database
+ *    pg_cron maintenance worker has not yet swept the record.
+ * 3. Never returns or reconstructs final customer reviews or raw drafts.
  */
 export function toFeedbackDto(row: SurveyResponseRow): CustomerFeedback {
   const isPurged = Boolean(row.purged_at);
-  const optionalNote = isPurged ? null : row.optional_note;
+  const isPastRetentionWindow = row.created_at
+    ? Date.now() - new Date(row.created_at).getTime() > 30 * 24 * 60 * 60 * 1000
+    : false;
+
+  const optionalNote = isPurged || isPastRetentionWindow ? null : row.optional_note;
+  const effectivePurgedAt =
+    row.purged_at ?? (isPastRetentionWindow && row.optional_note ? row.created_at : null);
 
   return {
     id: row.id,
@@ -166,7 +175,7 @@ export function toFeedbackDto(row: SurveyResponseRow): CustomerFeedback {
     affirmedFactsSnapshot: parseAffirmedFacts(row.affirmed_facts_snapshot),
     optionalNote,
     sessionUuid: row.session_uuid,
-    purgedAt: row.purged_at,
+    purgedAt: effectivePurgedAt,
     createdAt: row.created_at,
     authenticityConfirmed: Boolean(row.authenticity_confirmed),
   };
