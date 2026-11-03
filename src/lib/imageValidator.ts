@@ -3,7 +3,8 @@
  *
  * Implements strict binary validation for business brand logos:
  * - Magic byte inspection (PNG, JPEG, WebP)
- * - Strict SVG and script execution rejection
+ * - Strict SVG and script execution rejection across the entire byte buffer
+ * - Structural format validation (PNG IHDR/IEND chunks, JPEG SOI/SOF/EOI, WebP RIFF/FourCC bounds)
  * - File size boundary check (<= 2 MB = 2,097,152 bytes)
  * - Dimension limits (<= 2048 x 2048 px)
  * - Aspect ratio boundaries (1:3 to 3:1)
@@ -47,57 +48,36 @@ const JPEG_SOI = [0xFF, 0xD8, 0xFF];
 const RIFF_HEADER = [0x52, 0x49, 0x46, 0x46]; // "RIFF"
 const WEBP_HEADER = [0x57, 0x45, 0x42, 0x50]; // "WEBP"
 
+const PROHIBITED_PATTERNS = [
+  '<svg',
+  '<!doctype svg',
+  'xmlns="http://www.w3.org/2000/svg"',
+  'xmlns:svg',
+  '<script',
+  '<?php',
+  '#!/bin/',
+  'eval(',
+  'javascript:',
+  'vbscript:',
+  'onload=',
+  'onerror=',
+  'powershell',
+];
+
 /**
- * Checks for prohibited script or XML patterns anywhere in the byte buffer.
+ * Checks for prohibited script or XML patterns across the entire byte buffer.
  * Rejects SVG, PHP, HTML, and script polyglot injection attempts.
+ * Operates safely without false-positive rejections on camera XMP metadata.
  */
 function containsProhibitedScriptPatterns(bytes: Uint8Array): boolean {
-  const inspectLength = Math.min(bytes.length, 8192);
-  let ascii = '';
-  for (let i = 0; i < inspectLength; i++) {
-    const b = bytes[i];
-    if (b !== undefined && b >= 32 && b <= 126) {
-      ascii += String.fromCharCode(b);
-    } else if (b === 10 || b === 13 || b === 9) {
-      ascii += ' ';
-    }
-  }
-  const lower = ascii.toLowerCase();
-
-  if (
-    lower.includes('<svg') ||
-    lower.includes('<?xml') ||
-    lower.includes('xmlns') ||
-    lower.includes('<script') ||
-    lower.includes('<!doctype svg') ||
-    lower.includes('<?php') ||
-    lower.includes('#!/bin/') ||
-    lower.includes('eval(') ||
-    lower.includes('powershell')
-  ) {
-    return true;
-  }
-
-  if (bytes.length > 8192) {
-    let tailAscii = '';
-    const tailStart = bytes.length - 2048;
-    for (let i = tailStart; i < bytes.length; i++) {
-      const b = bytes[i];
-      if (b !== undefined && b >= 32 && b <= 126) {
-        tailAscii += String.fromCharCode(b);
-      }
-    }
-    const tailLower = tailAscii.toLowerCase();
-    if (
-      tailLower.includes('<?php') ||
-      tailLower.includes('<script') ||
-      tailLower.includes('<svg') ||
-      tailLower.includes('eval(')
-    ) {
+  if (bytes.length === 0) return false;
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  const text = decoder.decode(bytes).toLowerCase();
+  for (const pattern of PROHIBITED_PATTERNS) {
+    if (text.includes(pattern)) {
       return true;
     }
   }
-
   return false;
 }
 
@@ -133,16 +113,20 @@ function detectFormat(bytes: Uint8Array): ImageFormat | null {
 }
 
 /**
- * Extracts dimensions from PNG chunks.
+ * Extracts dimensions from PNG chunks with chunk structural integrity verification.
+ * Verifies IHDR as the first chunk, checks chunk bounds, and ensures IEND chunk is reached.
  */
 function parsePngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
-  if (bytes.length < 24) return null;
+  if (bytes.length < 33) return null; // 8 (sig) + 4 (len) + 4 (IHDR) + 13 (data) + 4 (crc) = 33
 
+  const ihdrLen =
+    ((bytes[8]! << 24) | (bytes[9]! << 16) | (bytes[10]! << 8) | bytes[11]!) >>> 0;
   if (
-    bytes[12] !== 0x49 ||
-    bytes[13] !== 0x48 ||
-    bytes[14] !== 0x44 ||
-    bytes[15] !== 0x52
+    ihdrLen !== 13 ||
+    bytes[12] !== 0x49 || // I
+    bytes[13] !== 0x48 || // H
+    bytes[14] !== 0x44 || // D
+    bytes[15] !== 0x52    // R
   ) {
     return null;
   }
@@ -162,20 +146,62 @@ function parsePngDimensions(bytes: Uint8Array): { width: number; height: number 
 
   if (width <= 0 || height <= 0) return null;
 
+  // Scan chunks to verify chunk integrity and find IEND
+  let offset = 8;
+  let seenIend = false;
+
+  while (offset + 8 <= bytes.length) {
+    const chunkLen =
+      ((bytes[offset]! << 24) |
+        (bytes[offset + 1]! << 16) |
+        (bytes[offset + 2]! << 8) |
+        bytes[offset + 3]!) >>>
+      0;
+    const chunkType = String.fromCharCode(
+      bytes[offset + 4]!,
+      bytes[offset + 5]!,
+      bytes[offset + 6]!,
+      bytes[offset + 7]!,
+    );
+
+    const chunkTotal = 8 + chunkLen + 4;
+    if (offset + chunkTotal > bytes.length) {
+      // Chunk extends beyond buffer (truncated PNG)
+      return null;
+    }
+
+    if (chunkType === 'IEND') {
+      seenIend = true;
+      break;
+    }
+
+    offset += chunkTotal;
+  }
+
+  if (!seenIend) {
+    return null;
+  }
+
   return { width, height };
 }
 
 /**
- * Extracts dimensions from JPEG markers (SOF0, SOF1, SOF2).
+ * Extracts dimensions from JPEG markers (SOF0, SOF1, SOF2) with structural integrity checks.
+ * Ensures marker bounds are valid and stream contains an EOI termination marker.
  */
 function parseJpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4) return null;
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+
   let offset = 2;
+  let dims: { width: number; height: number } | null = null;
+  let hasEoi = false;
 
   while (offset < bytes.length) {
-    while (offset < bytes.length && bytes[offset] !== 0xFF) {
+    while (offset < bytes.length && bytes[offset] !== 0xff) {
       offset++;
     }
-    while (offset < bytes.length && bytes[offset] === 0xFF) {
+    while (offset < bytes.length && bytes[offset] === 0xff) {
       offset++;
     }
     if (offset >= bytes.length) break;
@@ -183,18 +209,23 @@ function parseJpegDimensions(bytes: Uint8Array): { width: number; height: number
     const marker = bytes[offset++];
     if (marker === undefined) break;
 
-    if (marker >= 0xD0 && marker <= 0xD7) continue;
-    if (marker === 0xD8 || marker === 0xD9) continue;
-    if (marker === 0x00 || marker === 0xFF) continue;
+    if (marker >= 0xd0 && marker <= 0xd7) continue;
+    if (marker === 0xd8) continue;
+    if (marker === 0xd9) {
+      hasEoi = true;
+      break;
+    }
+    if (marker === 0x00) continue;
 
-    if (offset + 1 >= bytes.length) break;
+    if (offset + 1 >= bytes.length) return null;
     const bLen0 = bytes[offset] ?? 0;
     const bLen1 = bytes[offset + 1] ?? 0;
     const length = (bLen0 << 8) | bLen1;
-    if (length < 2) break;
+    if (length < 2) return null;
+    if (offset + length > bytes.length) return null;
 
-    if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
-      if (offset + 6 < bytes.length) {
+    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      if (length >= 7 && offset + 6 < bytes.length) {
         const h0 = bytes[offset + 3] ?? 0;
         const h1 = bytes[offset + 4] ?? 0;
         const w0 = bytes[offset + 5] ?? 0;
@@ -203,25 +234,59 @@ function parseJpegDimensions(bytes: Uint8Array): { width: number; height: number
         const width = (w0 << 8) | w1;
 
         if (width > 0 && height > 0) {
-          return { width, height };
+          dims = { width, height };
         }
+      } else {
+        return null;
       }
-      return null;
     }
 
-    if (marker === 0xDA) break;
+    if (marker === 0xda) {
+      let scanIdx = offset + length;
+      while (scanIdx + 1 < bytes.length) {
+        if (bytes[scanIdx] === 0xff && bytes[scanIdx + 1] === 0xd9) {
+          hasEoi = true;
+          break;
+        }
+        scanIdx++;
+      }
+      break;
+    }
 
     offset += length;
   }
 
-  return null;
+  if (!hasEoi) {
+    for (let i = bytes.length - 2; i >= Math.max(0, bytes.length - 16); i--) {
+      if (bytes[i] === 0xff && bytes[i + 1] === 0xd9) {
+        hasEoi = true;
+        break;
+      }
+    }
+  }
+
+  if (!dims || !hasEoi) return null;
+  return dims;
 }
 
 /**
- * Extracts dimensions from WebP chunks (VP8, VP8L, VP8X).
+ * Extracts dimensions from WebP chunks (VP8, VP8L, VP8X) with chunk bounds validation.
  */
 function parseWebpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
   if (bytes.length < 30) return null;
+
+  if (
+    bytes[0] !== 0x52 || // R
+    bytes[1] !== 0x49 || // I
+    bytes[2] !== 0x46 || // F
+    bytes[3] !== 0x46 || // F
+    bytes[8] !== 0x57 || // W
+    bytes[9] !== 0x45 || // E
+    bytes[10] !== 0x42 || // B
+    bytes[11] !== 0x50    // P
+  ) {
+    return null;
+  }
 
   const b12 = bytes[12] ?? 0;
   const b13 = bytes[13] ?? 0;
@@ -229,8 +294,19 @@ function parseWebpDimensions(bytes: Uint8Array): { width: number; height: number
   const b15 = bytes[15] ?? 0;
   const fourCC = String.fromCharCode(b12, b13, b14, b15);
 
+  const chunkLen =
+    ((bytes[16] ?? 0) |
+      ((bytes[17] ?? 0) << 8) |
+      ((bytes[18] ?? 0) << 16) |
+      ((bytes[19] ?? 0) << 24)) >>>
+    0;
+
+  if (12 + 8 + chunkLen > bytes.length + 1) {
+    return null;
+  }
+
   if (fourCC === 'VP8 ') {
-    if (bytes[23] === 0x9D && bytes[24] === 0x01 && bytes[25] === 0x2A) {
+    if (bytes.length >= 30 && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
       const b26 = bytes[26] ?? 0;
       const b27 = bytes[27] ?? 0;
       const b28 = bytes[28] ?? 0;
@@ -242,7 +318,7 @@ function parseWebpDimensions(bytes: Uint8Array): { width: number; height: number
       }
     }
   } else if (fourCC === 'VP8L') {
-    if (bytes[21] === 0x2F && bytes.length >= 26) {
+    if (bytes.length >= 26 && bytes[21] === 0x2f) {
       const b0 = bytes[22] ?? 0;
       const b1 = bytes[23] ?? 0;
       const b2 = bytes[24] ?? 0;
@@ -254,7 +330,7 @@ function parseWebpDimensions(bytes: Uint8Array): { width: number; height: number
       }
     }
   } else if (fourCC === 'VP8X') {
-    if (bytes.length >= 30) {
+    if (bytes.length >= 30 && chunkLen >= 10) {
       const b24 = bytes[24] ?? 0;
       const b25 = bytes[25] ?? 0;
       const b26 = bytes[26] ?? 0;
@@ -293,7 +369,7 @@ export function validateImageBuffer(bytes: Uint8Array): ImageValidationResult {
     };
   }
 
-  // 2. Reject SVG, XML, script patterns (TC-UPL-04)
+  // 2. Reject SVG, scripts, and executable patterns across entire payload
   if (containsProhibitedScriptPatterns(bytes)) {
     return {
       isValid: false,
@@ -312,7 +388,7 @@ export function validateImageBuffer(bytes: Uint8Array): ImageValidationResult {
     };
   }
 
-  // 4. Parse image dimensions
+  // 4. Parse image dimensions and verify structure
   let dimensions: { width: number; height: number } | null = null;
   if (format === 'png') {
     dimensions = parsePngDimensions(bytes);
@@ -396,36 +472,20 @@ export async function prevalidateLogoFile(
     };
   }
 
-  // Read header bytes (first 8192 bytes)
   try {
-    const slice = file.slice(0, Math.min(file.size, 8192));
-    const arrayBuffer = await slice.arrayBuffer();
+    const arrayBuffer = await file.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-
-    if (containsProhibitedScriptPatterns(bytes)) {
+    const result = validateImageBuffer(bytes);
+    if (!result.isValid) {
       return {
         isValid: false,
-        errorMessage: 'SVG and executable scripts are strictly prohibited for security reasons. Please upload a PNG, JPEG, or WebP image.',
+        errorMessage: result.errorMessage,
       };
     }
-
-    const format = detectFormat(bytes);
-    if (!format) {
-      return {
-        isValid: false,
-        errorMessage: 'Invalid file format. Please select a PNG, JPEG, or WebP image.',
-      };
-    }
-
-    const mimeMap: Record<ImageFormat, string> = {
-      png: 'image/png',
-      jpeg: 'image/jpeg',
-      webp: 'image/webp',
-    };
 
     return {
       isValid: true,
-      mimeType: mimeMap[format],
+      mimeType: result.mimeType,
     };
   } catch {
     return {

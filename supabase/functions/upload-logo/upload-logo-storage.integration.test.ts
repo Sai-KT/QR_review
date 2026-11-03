@@ -389,4 +389,36 @@ describe('upload-logo Real Storage & Database Integration (API-OWN-07 & 08)', ()
     const body = await res.json();
     expect(body.error.code).toBe('ERR_PERMISSION_DENIED');
   });
+
+  // Check A: Direct Storage API bypass is strictly rejected by RLS
+  it('Check A: direct Supabase Storage API upload bypass by authenticated merchant is rejected by RLS', async () => {
+    const clientMerchant1 = createClient(LOCAL_SUPABASE_URL, LOCAL_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${tokenMerchant1}` } },
+    });
+
+    const garbageBytes = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05]);
+    const { data, error } = await clientMerchant1.storage
+      .from('business-logos')
+      .upload(`${BUSINESS_1_ID}/bypass.png`, garbageBytes, {
+        contentType: 'image/png',
+        upsert: true,
+      });
+
+    expect(data).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error?.message).toMatch(/violates row-level security policy|permission denied/i);
+  });
+
+  it('Check A: direct Supabase Storage API delete bypass by authenticated merchant is rejected by RLS', async () => {
+    const clientMerchant1 = createClient(LOCAL_SUPABASE_URL, LOCAL_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${tokenMerchant1}` } },
+    });
+
+    const { data } = await clientMerchant1.storage
+      .from('business-logos')
+      .remove([`${BUSINESS_1_ID}/logo.png`]);
+
+    // Storage remove under RLS returns empty list (0 deleted)
+    expect(data?.length || 0).toBe(0);
+  });
 });

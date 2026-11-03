@@ -35,7 +35,9 @@ function createMockSupabase(overrides: {
   business?: { id: string; owner_id: string; logo_url: string | null } | null;
   storageUploadError?: Error | null;
   storageRemoveError?: Error | null;
+  storageMoveError?: Error | null;
   dbUpdateError?: Error | null;
+  updateReturnsNoRows?: boolean;
 }) {
   const user = overrides.user !== undefined ? overrides.user : { id: MOCK_USER_ID };
   const authError = overrides.authError ?? null;
@@ -52,6 +54,10 @@ function createMockSupabase(overrides: {
     remove: vi.fn().mockResolvedValue({
       data: overrides.storageRemoveError ? null : [],
       error: overrides.storageRemoveError || null,
+    }),
+    move: vi.fn().mockResolvedValue({
+      data: overrides.storageMoveError ? null : { message: 'Successfully moved' },
+      error: overrides.storageMoveError || null,
     }),
   };
 
@@ -71,9 +77,15 @@ function createMockSupabase(overrides: {
           }),
         }),
         update: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({
-            data: business,
-            error: overrides.dbUpdateError || null,
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: overrides.updateReturnsNoRows || overrides.dbUpdateError ? null : business,
+                  error: overrides.dbUpdateError || null,
+                }),
+              }),
+            }),
           }),
         }),
       };
@@ -475,5 +487,88 @@ describe('upload-logo Edge Function (API-OWN-07 & API-OWN-08)', () => {
       `${MOCK_BUSINESS_ID}/logo.jpeg`,
       `${MOCK_BUSINESS_ID}/logo.webp`,
     ]);
+  });
+
+  // Check B: Failure-safe replacement tests
+  it('Check B: restores safety backup if storage upload fails during same-extension replacement', async () => {
+    const { client, mockStorageFrom } = createMockSupabase({
+      storageUploadError: new Error('S3 connection drop'),
+    });
+    const formData = new FormData();
+    formData.append('businessId', MOCK_BUSINESS_ID);
+    formData.append('file', new File([createValidPngBytes(200, 200)], 'logo.png', { type: 'image/png' }));
+
+    const req = makeUploadRequest(formData);
+    const res = await handler(req, client as unknown as SupabaseClient);
+    expect(res.status).toBe(500);
+
+    // Verify move to backup was attempted
+    expect(mockStorageFrom.move).toHaveBeenCalledWith(
+      `${MOCK_BUSINESS_ID}/logo.png`,
+      `${MOCK_BUSINESS_ID}/.backup_logo.png`,
+    );
+    // Verify backup restoration was executed
+    expect(mockStorageFrom.move).toHaveBeenCalledWith(
+      `${MOCK_BUSINESS_ID}/.backup_logo.png`,
+      `${MOCK_BUSINESS_ID}/logo.png`,
+    );
+  });
+
+  it('Check B: rolls back new file and restores backup if database update fails', async () => {
+    const { client, mockStorageFrom } = createMockSupabase({
+      dbUpdateError: new Error('Database transaction lock conflict'),
+    });
+    const formData = new FormData();
+    formData.append('businessId', MOCK_BUSINESS_ID);
+    formData.append('file', new File([createValidPngBytes(200, 200)], 'logo.png', { type: 'image/png' }));
+
+    const req = makeUploadRequest(formData);
+    const res = await handler(req, client as unknown as SupabaseClient);
+    expect(res.status).toBe(500);
+
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_DATABASE_ERROR');
+
+    // Verify new file was deleted in rollback
+    expect(mockStorageFrom.remove).toHaveBeenCalledWith([`${MOCK_BUSINESS_ID}/logo.png`]);
+    // Verify backup was restored
+    expect(mockStorageFrom.move).toHaveBeenCalledWith(
+      `${MOCK_BUSINESS_ID}/.backup_logo.png`,
+      `${MOCK_BUSINESS_ID}/logo.png`,
+    );
+  });
+
+  // Check C: Honest error handling on DELETE
+  it('Check C: returns HTTP 500 when storage remove fails on DELETE', async () => {
+    const { client } = createMockSupabase({
+      storageRemoveError: new Error('Storage cluster unreachable'),
+    });
+    const req = new Request(
+      `http://localhost:54321/functions/v1/upload-logo?businessId=${MOCK_BUSINESS_ID}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer valid-token' },
+      },
+    );
+    const res = await handler(req, client as unknown as SupabaseClient);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_STORAGE_ERROR');
+  });
+
+  // Check E: Tenant ownership constraint at mutation time
+  it('Check E: returns HTTP 403 if business ownership changed during upload DB update', async () => {
+    const { client } = createMockSupabase({
+      updateReturnsNoRows: true, // Simulated ownership change
+    });
+    const formData = new FormData();
+    formData.append('businessId', MOCK_BUSINESS_ID);
+    formData.append('file', new File([createValidPngBytes(200, 200)], 'logo.png', { type: 'image/png' }));
+
+    const req = makeUploadRequest(formData);
+    const res = await handler(req, client as unknown as SupabaseClient);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe('ERR_PERMISSION_DENIED');
   });
 });

@@ -247,4 +247,82 @@ describe('imageValidator: Security and Format Verification', () => {
       expect(wideResult.errorMessage).toContain('must be between 1:3 and 3:1');
     }
   });
+
+  it('rejects truncated PNG missing IEND terminating chunk', () => {
+    // 33-byte truncated PNG containing signature and IHDR only
+    const valid = createValidPng(100, 100);
+    const truncated = valid.slice(0, 33);
+    const result = validateImageBuffer(truncated);
+
+    expect(result.isValid).toBe(false);
+    if (!result.isValid) {
+      expect(result.errorCode).toBe('ERR_CORRUPT_IMAGE');
+    }
+  });
+
+  it('rejects truncated JPEG missing EOI marker', () => {
+    const valid = createValidJpeg(120, 80);
+    const truncated = valid.slice(0, valid.length - 2); // Strip EOI FF D9
+    const result = validateImageBuffer(truncated);
+
+    expect(result.isValid).toBe(false);
+    if (!result.isValid) {
+      expect(result.errorCode).toBe('ERR_CORRUPT_IMAGE');
+    }
+  });
+
+  it('rejects truncated WebP where buffer is smaller than 30 bytes', () => {
+    const valid = createValidWebp(64, 64);
+    const truncated = valid.slice(0, 20);
+    const result = validateImageBuffer(truncated);
+
+    expect(result.isValid).toBe(false);
+    if (!result.isValid) {
+      expect(result.errorCode).toBe('ERR_CORRUPT_IMAGE');
+    }
+  });
+
+  it('rejects corrupt WebP where chunk length exceeds buffer bounds', () => {
+    const corrupt = new Uint8Array(createValidWebp(64, 64));
+    // Set chunkLen to 10,000 (0x2710)
+    corrupt[16] = 0x10;
+    corrupt[17] = 0x27;
+    const result = validateImageBuffer(corrupt);
+
+    expect(result.isValid).toBe(false);
+    if (!result.isValid) {
+      expect(result.errorCode).toBe('ERR_CORRUPT_IMAGE');
+    }
+  });
+
+  it('rejects script injected deep in the middle of a large payload', () => {
+    // Inject at byte 10,000 (beyond legacy 8 KB scan limit)
+    const largePng = createValidPng(100, 100, 32 * 1024);
+    const scriptPayload = new TextEncoder().encode('<script>alert("xss")</script>');
+    largePng.set(scriptPayload, 10000);
+
+    const result = validateImageBuffer(largePng);
+    expect(result.isValid).toBe(false);
+    if (!result.isValid) {
+      expect(result.errorCode).toBe('ERR_INVALID_IMAGE_TYPE');
+      expect(result.errorMessage).toContain('SVG and executable scripts are strictly prohibited');
+    }
+  });
+
+  it('accepts valid camera photo containing legitimate XMP metadata without false rejection', () => {
+    const cleanJpeg = createValidJpeg(300, 200);
+    const xmpPayload = new TextEncoder().encode(
+      '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF></x:xmpmeta><?xpacket end="w"?>',
+    );
+    const photoWithXmp = new Uint8Array(cleanJpeg.length + xmpPayload.length);
+    photoWithXmp.set(cleanJpeg.slice(0, cleanJpeg.length - 2)); // before EOI
+    photoWithXmp.set(xmpPayload, cleanJpeg.length - 2);
+    photoWithXmp.set(new Uint8Array([0xff, 0xd9]), photoWithXmp.length - 2); // ending EOI
+
+    const result = validateImageBuffer(photoWithXmp);
+    expect(result.isValid).toBe(true);
+    if (result.isValid) {
+      expect(result.format).toBe('jpeg');
+    }
+  });
 });

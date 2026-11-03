@@ -16,10 +16,13 @@
  *   - Strict tenant ownership authorization (businesses.owner_id = auth.uid())
  *   - Binary magic-byte inspection (PNG, JPEG, WebP)
  *   - Prohibits SVGs, scripts, and executable polyglots (HTTP 415)
+ *   - Structural integrity validation for PNG, JPEG, and WebP formats
  *   - Enforces 2 MB size limit (HTTP 413)
  *   - Enforces 2048x2048px and 1:3 to 3:1 aspect ratio limits (HTTP 422)
  *   - Format-preserving upload to 'business-logos' storage bucket
- *   - Cleans up old extensions on upload (TC-UPL-08)
+ *   - Failure-safe atomic replacement (maintains backup during replacement)
+ *   - Cleans up old extensions only after successful persistence (TC-UPL-08)
+ *   - Enforces tenant ownership constraint during DB mutations (Check E)
  *   - Deletes storage files and sets businesses.logo_url = NULL on DELETE (API-OWN-08)
  */
 
@@ -258,20 +261,26 @@ export async function handler(
       );
     }
 
-    // Clean up old extension files in tenant directory (TC-UPL-08)
-    const possibleExts = ['png', 'jpeg', 'webp'];
-    const oldExtsToDelete = possibleExts
-      .filter((ext) => ext !== validation.extension)
-      .map((ext) => `${businessId}/logo.${ext}`);
+    const targetPath = `${businessId}/logo.${validation.extension}`;
+    const backupPath = `${businessId}/.backup_logo.${validation.extension}`;
 
+    // Failure Safety: Check if current logo has same extension and create a safety backup
+    let hasBackup = false;
     try {
-      await supabaseAdmin.storage.from(BUCKET_NAME).remove(oldExtsToDelete);
+      // Clear any stale backup
+      await supabaseAdmin.storage.from(BUCKET_NAME).remove([backupPath]);
+      const { error: moveError } = await supabaseAdmin.storage
+        .from(BUCKET_NAME)
+        .move(targetPath, backupPath);
+
+      if (!moveError) {
+        hasBackup = true;
+      }
     } catch {
-      // Non-fatal cleanup attempt
+      // Non-fatal if target file did not exist yet
     }
 
     // Upload new logo with validated extension
-    const targetPath = `${businessId}/logo.${validation.extension}`;
     const { error: uploadError } = await supabaseAdmin.storage
       .from(BUCKET_NAME)
       .upload(targetPath, bytes, {
@@ -280,6 +289,14 @@ export async function handler(
       });
 
     if (uploadError) {
+      // Restore backup if it existed
+      if (hasBackup) {
+        try {
+          await supabaseAdmin.storage.from(BUCKET_NAME).move(backupPath, targetPath);
+        } catch {
+          // Best effort restore
+        }
+      }
       return errorResponse(
         'ERR_STORAGE_ERROR',
         `Failed to store logo file: ${uploadError.message}`,
@@ -300,21 +317,62 @@ export async function handler(
     const timestamp = Date.now();
     const logoUrl = `${publicBaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${targetPath}?v=${timestamp}`;
 
-    // Update public.businesses.logo_url
-    const { error: dbUpdateError } = await supabaseAdmin
+    // Update public.businesses.logo_url with owner_id verification guard
+    const { data: updatedBusiness, error: dbUpdateError } = await supabaseAdmin
       .from('businesses')
       .update({
         logo_url: logoUrl,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', businessId);
+      .eq('id', businessId)
+      .eq('owner_id', user.id)
+      .select('id, logo_url')
+      .maybeSingle();
 
-    if (dbUpdateError) {
+    if (dbUpdateError || !updatedBusiness) {
+      // Rollback storage mutations
+      try {
+        await supabaseAdmin.storage.from(BUCKET_NAME).remove([targetPath]);
+        if (hasBackup) {
+          await supabaseAdmin.storage.from(BUCKET_NAME).move(backupPath, targetPath);
+        }
+      } catch {
+        // Best effort rollback
+      }
+
+      if (dbUpdateError) {
+        return errorResponse(
+          'ERR_DATABASE_ERROR',
+          `Failed to persist business logo URL: ${dbUpdateError.message}`,
+          500,
+        );
+      }
       return errorResponse(
-        'ERR_DATABASE_ERROR',
-        `Failed to persist business logo URL: ${dbUpdateError.message}`,
-        500,
+        'ERR_PERMISSION_DENIED',
+        'Business ownership changed during update.',
+        403,
       );
+    }
+
+    // Successful persistence: Clean up safety backup
+    if (hasBackup) {
+      try {
+        await supabaseAdmin.storage.from(BUCKET_NAME).remove([backupPath]);
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    // Clean up old extension files in tenant directory (TC-UPL-08)
+    const possibleExts = ['png', 'jpeg', 'webp'];
+    const oldExtsToDelete = possibleExts
+      .filter((ext) => ext !== validation.extension)
+      .map((ext) => `${businessId}/logo.${ext}`);
+
+    try {
+      await supabaseAdmin.storage.from(BUCKET_NAME).remove(oldExtsToDelete);
+    } catch {
+      // Non-fatal cleanup attempt
     }
 
     return jsonResponse({
@@ -375,26 +433,43 @@ export async function handler(
       (ext) => `${businessId}/logo.${ext}`,
     );
 
-    try {
-      await supabaseAdmin.storage.from(BUCKET_NAME).remove(filesToDelete);
-    } catch {
-      // Non-fatal if storage files were already absent
+    const { error: storageRemoveError } = await supabaseAdmin.storage
+      .from(BUCKET_NAME)
+      .remove(filesToDelete);
+
+    if (storageRemoveError) {
+      return errorResponse(
+        'ERR_STORAGE_ERROR',
+        `Failed to remove storage files: ${storageRemoveError.message}`,
+        500,
+      );
     }
 
-    // Clear public.businesses.logo_url
-    const { error: dbClearError } = await supabaseAdmin
+    // Clear public.businesses.logo_url with owner_id verification guard
+    const { data: updatedBusiness, error: dbClearError } = await supabaseAdmin
       .from('businesses')
       .update({
         logo_url: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', businessId);
+      .eq('id', businessId)
+      .eq('owner_id', user.id)
+      .select('id')
+      .maybeSingle();
 
     if (dbClearError) {
       return errorResponse(
         'ERR_DATABASE_ERROR',
         `Failed to clear business logo URL: ${dbClearError.message}`,
         500,
+      );
+    }
+
+    if (!updatedBusiness) {
+      return errorResponse(
+        'ERR_PERMISSION_DENIED',
+        'Business ownership changed during deletion.',
+        403,
       );
     }
 
