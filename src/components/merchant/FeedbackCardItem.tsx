@@ -246,59 +246,86 @@ export function FeedbackCardItem({
           </h4>
 
           {feedback.selectedOptions && feedback.selectedOptions.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-              {feedback.selectedOptions.map((sel: SelectedSurveyOption, idx: number) => {
-                const optMeta = optionsMap?.get(sel.optionId);
-                const questionMeta = optMeta ? questionsMap?.get(optMeta.questionId) : undefined;
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {feedback.selectedOptions.map((sel: SelectedSurveyOption, idx: number) => {
+                  const optMeta = optionsMap?.get(sel.optionId);
+                  const questionMeta =
+                    (optMeta ? questionsMap?.get(optMeta.questionId) : undefined) ??
+                    (sel.questionId ? questionsMap?.get(sel.questionId) : undefined);
+                  const displayText = optMeta ? optMeta.optionText : 'Archived Option';
+                  const emoji = optMeta?.emojiAnchor || '';
+                  const isNegative = optMeta?.sentimentLabel === 'negative';
+                  const isRetired = !optMeta;
 
-                // Historical survey integrity: If option metadata is retired or unavailable,
-                // fall back to the customer's frozen affirmed fact snapshot from submission time
-                const snapshotFact = Array.isArray(feedback.affirmedFactsSnapshot)
-                  ? (feedback.affirmedFactsSnapshot as Array<string | AffirmedFact>)[idx]
-                  : undefined;
-                const snapshotText =
-                  typeof snapshotFact === 'string'
-                    ? snapshotFact
-                    : typeof snapshotFact === 'object' &&
-                        snapshotFact !== null &&
-                        'optionText' in snapshotFact
-                      ? (snapshotFact as { optionText?: string }).optionText
-                      : undefined;
-
-                const displayText = optMeta ? optMeta.optionText : (snapshotText || `Option ${idx + 1}`);
-                const emoji = optMeta?.emojiAnchor || '';
-                const isNegative = optMeta?.sentimentLabel === 'negative';
-                const isHistorical = !optMeta && Boolean(snapshotText);
-
-                return (
-                  <div
-                    key={`${feedback.id}-opt-${sel.optionId || idx}`}
-                    className={`rounded-lg border p-2.5 text-xs transition-colors ${
-                      isNegative
-                        ? 'border-amber-500/30 bg-amber-500/5 text-amber-950 dark:text-amber-200'
-                        : 'border-border/70 bg-surface-alt/40 text-text-primary'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1 mb-1">
-                      <p className="text-[11px] text-text-secondary font-medium truncate">
-                        {questionMeta?.questionText || `Question ${idx + 1}`}
+                  return (
+                    <div
+                      key={`${feedback.id}-opt-${sel.optionId || idx}`}
+                      className={`rounded-lg border p-2.5 text-xs transition-colors ${
+                        isNegative
+                          ? 'border-amber-500/30 bg-amber-500/5 text-amber-950 dark:text-amber-200'
+                          : 'border-border/70 bg-surface-alt/40 text-text-primary'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <p className="text-[11px] text-text-secondary font-medium truncate">
+                          {questionMeta?.questionText || `Question ${idx + 1}`}
+                        </p>
+                        {isRetired && (
+                          <span
+                            className="text-[9px] uppercase tracking-wider text-text-secondary font-medium bg-surface-alt px-1 py-0.5 rounded border border-border/60 shrink-0"
+                            title="Questionnaire option is retired; see submission-time snapshot below"
+                          >
+                            Archived
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-semibold text-text-primary flex items-center gap-1.5">
+                        {emoji && <span aria-hidden="true">{emoji}</span>}
+                        <span>{displayText}</span>
                       </p>
-                      {isHistorical && (
-                        <span
-                          className="text-[9px] uppercase tracking-wider text-text-secondary font-medium bg-surface-alt px-1 py-0.2 rounded border border-border/60 shrink-0"
-                          title="Questionnaire option is retired; displaying verified snapshot from submission time"
-                        >
-                          Historical
-                        </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Dedicated snapshot section when any option is retired to avoid false positional attribution */}
+              {feedback.selectedOptions.some((sel) => !optionsMap?.has(sel.optionId)) &&
+                Array.isArray(feedback.affirmedFactsSnapshot) &&
+                feedback.affirmedFactsSnapshot.length > 0 && (
+                  <div
+                    className="pt-2 border-t border-border/60 space-y-1.5"
+                    data-testid="feedback-affirmed-facts-snapshot"
+                  >
+                    <p className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider">
+                      Affirmed Experience Snapshot (Submission Time)
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(feedback.affirmedFactsSnapshot as Array<string | AffirmedFact>).map(
+                        (fact: string | AffirmedFact, idx: number) => {
+                          const text =
+                            typeof fact === 'string'
+                              ? fact
+                              : typeof fact === 'object' && fact !== null && 'optionText' in fact
+                                ? (fact as { optionText?: string }).optionText || `Fact ${idx + 1}`
+                                : `Fact ${idx + 1}`;
+                          return (
+                            <Badge
+                              key={`${feedback.id}-fact-${idx}`}
+                              variant="secondary"
+                              className="text-xs py-1 px-2.5 font-medium border-border"
+                            >
+                              {text}
+                            </Badge>
+                          );
+                        },
                       )}
                     </div>
-                    <p className="font-semibold text-text-primary flex items-center gap-1.5">
-                      {emoji && <span aria-hidden="true">{emoji}</span>}
-                      <span>{displayText}</span>
+                    <p className="text-[10px] text-text-secondary italic">
+                      Snapshot preserves verified customer affirmations at submission time; questionnaire options have since been updated.
                     </p>
                   </div>
-                );
-              })}
+                )}
             </div>
           ) : Array.isArray(feedback.affirmedFactsSnapshot) &&
             feedback.affirmedFactsSnapshot.length > 0 ? (

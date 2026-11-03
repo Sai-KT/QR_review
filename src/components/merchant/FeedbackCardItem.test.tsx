@@ -238,26 +238,103 @@ describe('FeedbackCardItem (CMP-13)', () => {
     expect(screen.getByText('Great haircut')).toBeInTheDocument();
   });
 
-  it('renders historical affirmed facts text when option was retired and missing from optionsMap', () => {
+  it('renders historical affirmed facts snapshot separately without false positional attribution when neutral option was omitted', () => {
+    // Exact scenario from Section 3:
+    // Q1 answered positive, Q2 neutral N/A (omitted from snapshot), Q3 answered negative
+    // All 3 options later soft-retired
     const historicalFeedback: CustomerFeedback = {
       ...baseFeedback,
       id: 'f-106',
-      selectedOptions: [{ questionId: 'q-retired', optionId: 'opt-retired-v1' }],
-      affirmedFactsSnapshot: ['Historical Style Choice'],
+      selectedOptions: [
+        { questionId: 'q-1', optionId: 'opt-retired-q1' },
+        { questionId: 'q-2', optionId: 'opt-retired-q2-na' },
+        { questionId: 'q-3', optionId: 'opt-retired-q3-neg' },
+      ],
+      // Snapshot only contains non-neutral affirmative facts (2 items for 3 questions)
+      affirmedFactsSnapshot: ['Masterful & Precise', 'Long wait despite appointment'],
     };
 
-    // optionsMap does NOT contain opt-retired-v1 (soft-retired per M0-07 / M0-08)
     render(
       <FeedbackCardItem
         feedback={historicalFeedback}
+        optionsMap={mockOptionsMap} // does NOT contain the retired options
+        questionsMap={mockQuestionsMap}
+      />,
+    );
+
+    // 1. Grid questions display "Archived Option", NEVER falsely attributing Q3's fact to Q2
+    const archivedBadges = screen.getAllByText('Archived');
+    expect(archivedBadges.length).toBe(3);
+
+    // 2. The dedicated snapshot section contains the verified submission-time affirmations
+    expect(
+      screen.getByTestId('feedback-affirmed-facts-snapshot'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Affirmed Experience Snapshot (Submission Time)'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Masterful & Precise')).toBeInTheDocument();
+    expect(screen.getByText('Long wait despite appointment')).toBeInTheDocument();
+
+    // 3. Question 2's card container must NOT contain "Long wait despite appointment"
+    const q2Card = screen.getByText('Salon cleanliness').closest('.rounded-lg');
+    expect(q2Card).not.toHaveTextContent('Long wait despite appointment');
+    expect(q2Card).toHaveTextContent('Archived Option');
+  });
+
+  it('handles partially retired options where Q2 is active and Q1/Q3 are retired', () => {
+    const mixedRetiredFeedback: CustomerFeedback = {
+      ...baseFeedback,
+      id: 'f-106b',
+      selectedOptions: [
+        { questionId: 'q-1', optionId: 'opt-retired-q1' },
+        { questionId: 'q-2', optionId: 'opt-2' }, // opt-2 IS active in mockOptionsMap
+        { questionId: 'q-3', optionId: 'opt-retired-q3' },
+      ],
+      affirmedFactsSnapshot: ['Style fact', 'Clean & hygienic station'],
+    };
+
+    render(
+      <FeedbackCardItem
+        feedback={mixedRetiredFeedback}
         optionsMap={mockOptionsMap}
         questionsMap={mockQuestionsMap}
       />,
     );
 
-    // Displays customer affirmed words from snapshot, not raw "Option 1"
-    expect(screen.getByText('Historical Style Choice')).toBeInTheDocument();
-    expect(screen.getByText('Historical')).toBeInTheDocument();
+    // Q2 displays its active option text
+    expect(screen.getAllByText('Clean & hygienic station').length).toBeGreaterThanOrEqual(1);
+
+    // Q1 and Q3 display Archived Option
+    expect(screen.getAllByText('Archived Option').length).toBe(2);
+
+    // Dedicated snapshot is rendered because at least one option is retired
+    expect(
+      screen.getByTestId('feedback-affirmed-facts-snapshot'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Style fact')).toBeInTheDocument();
+  });
+
+  it('handles retired options with missing or empty snapshot safely without crashing', () => {
+    const emptySnapshotFeedback: CustomerFeedback = {
+      ...baseFeedback,
+      id: 'f-106c',
+      selectedOptions: [{ questionId: 'q-1', optionId: 'opt-retired-q1' }],
+      affirmedFactsSnapshot: [],
+    };
+
+    render(
+      <FeedbackCardItem
+        feedback={emptySnapshotFeedback}
+        optionsMap={mockOptionsMap}
+        questionsMap={mockQuestionsMap}
+      />,
+    );
+
+    expect(screen.getByText('Archived Option')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('feedback-affirmed-facts-snapshot'),
+    ).not.toBeInTheDocument();
   });
 
   it('redacts customer notes older than 30 days even if purgedAt was not yet set by pg_cron (Case D)', () => {
