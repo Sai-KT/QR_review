@@ -444,6 +444,24 @@ assertEquals(
   'toFeedbackDto safely recovers on non-array affirmed_facts_snapshot',
 );
 
+// String array affirmed facts snapshot (real database format)
+const MOCK_STRING_ARRAY_ROW: SurveyResponseRow = {
+  ...MOCK_FEEDBACK_ROW,
+  affirmed_facts_snapshot: ['Masterful & Precise', 'Clean & hygienic station'],
+};
+
+const stringArrayFeedbackDto = toFeedbackDto(MOCK_STRING_ARRAY_ROW);
+assertEquals(
+  stringArrayFeedbackDto.affirmedFactsSnapshot.length,
+  2,
+  'toFeedbackDto parses string array affirmed_facts_snapshot into AffirmedFact objects',
+);
+assertEquals(
+  (stringArrayFeedbackDto.affirmedFactsSnapshot as Array<{ optionText?: string }>)[0]?.optionText,
+  'Masterful & Precise',
+  'toFeedbackDto preserves optionText from string snapshot',
+);
+
 // Feedback submission payload serialization with 150-char ceiling
 const submission = {
   businessId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',

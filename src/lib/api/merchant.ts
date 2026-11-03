@@ -12,8 +12,9 @@
 
 import { supabase, getSupabaseUrl, getSupabaseAnonKey } from '../supabase';
 import { toBusinessDto, toBusinessUpdateRow } from '../adapters/business';
-import type { BusinessRow } from '../../types/database';
-import type { Business, BusinessProfileUpdate } from '../../types/domain';
+import { toFeedbackDto } from '../adapters/feedback';
+import type { BusinessRow, SurveyResponseRow } from '../../types/database';
+import type { Business, BusinessProfileUpdate, CustomerFeedback } from '../../types/domain';
 
 export interface FetchMerchantBusinessResult {
   data: Business | null;
@@ -307,6 +308,259 @@ export async function updateGoogleDestination(
           : new Error('An unexpected network error occurred while updating review destination.'),
     };
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Customer Feedback Retrieval & Option Metadata (API-OWN-05)                  */
+/* -------------------------------------------------------------------------- */
+
+export interface FetchMerchantFeedbackOptions {
+  businessId: string;
+  startDate?: string; // ISO 8601 or YYYY-MM-DD
+  endDate?: string;   // ISO 8601 or YYYY-MM-DD
+  page?: number;      // 1-based index (default 1)
+  pageSize?: number;  // items per page (default 50 per API-OWN-05)
+}
+
+export interface FetchMerchantFeedbackResult {
+  data: CustomerFeedback[] | null;
+  totalCount: number;
+  error: Error | null;
+}
+
+/**
+ * Fetches chronological customer feedback records for the authenticated merchant's business.
+ *
+ * Endpoint: GET /rest/v1/survey_responses (API-OWN-05)
+ * Security: Enforced strictly by PostgreSQL RLS (`survey_responses_select_owner`).
+ *           Requires authenticated owner session. Returns 0 rows for other businesses.
+ */
+export async function fetchMerchantFeedback(
+  options: FetchMerchantFeedbackOptions,
+): Promise<FetchMerchantFeedbackResult> {
+  const { businessId, startDate, endDate, page = 1, pageSize = 50 } = options;
+
+  if (!businessId || typeof businessId !== 'string' || businessId.trim() === '') {
+    return {
+      data: null,
+      totalCount: 0,
+      error: new Error('A valid business ID is required to fetch feedback.'),
+    };
+  }
+
+  try {
+    let query = supabase
+      .from('survey_responses')
+      .select(
+        'id, business_id, category_id, selected_options, affirmed_facts_snapshot, optional_note, session_uuid, purged_at, created_at, authenticity_confirmed',
+        { count: 'exact' },
+      )
+      .eq('business_id', businessId.trim())
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
+
+    // Apply date range filters if provided
+    if (startDate && startDate.trim() !== '') {
+      const startIso = startDate.includes('T') ? startDate.trim() : `${startDate.trim()}T00:00:00.000Z`;
+      query = query.gte('created_at', startIso);
+    }
+
+    if (endDate && endDate.trim() !== '') {
+      const endIso = endDate.includes('T') ? endDate.trim() : `${endDate.trim()}T23:59:59.999Z`;
+      query = query.lte('created_at', endIso);
+    }
+
+    // Apply pagination range (0-indexed)
+    const validPage = Math.max(1, page);
+    const validPageSize = Math.max(1, Math.min(100, pageSize));
+    const from = (validPage - 1) * validPageSize;
+    const to = from + validPageSize - 1;
+
+    query = query.range(from, to);
+
+    const { data, count, error } = await query;
+
+    if (error) {
+      return {
+        data: null,
+        totalCount: 0,
+        error: new Error(error.message || 'Failed to fetch customer feedback records.'),
+      };
+    }
+
+    if (!data) {
+      return { data: [], totalCount: 0, error: null };
+    }
+
+    const feedbacks = (data as unknown as SurveyResponseRow[]).map(toFeedbackDto);
+
+    return {
+      data: feedbacks,
+      totalCount: count ?? feedbacks.length,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      totalCount: 0,
+      error:
+        err instanceof Error
+          ? err
+          : new Error('An unexpected error occurred while fetching customer feedback.'),
+    };
+  }
+}
+
+export interface SurveyQuestionOptionMeta {
+  id: string;
+  questionId: string;
+  optionText: string;
+  emojiAnchor: string;
+  sentimentLabel: 'positive' | 'neutral' | 'negative';
+  isNeutralNa: boolean;
+}
+
+export interface FetchSurveyOptionsResult {
+  data: Map<string, SurveyQuestionOptionMeta> | null;
+  error: Error | null;
+}
+
+/**
+ * Loads questionnaire option metadata to enrich selected option IDs with
+ * display text, emoji anchors, and authoritative sentiment labels.
+ */
+export async function fetchSurveyOptionsMap(): Promise<FetchSurveyOptionsResult> {
+  try {
+    const { data, error } = await supabase
+      .from('survey_options')
+      .select('id, question_id, option_text, emoji_anchor, sentiment_label, is_neutral_na')
+      .eq('is_active', true);
+
+    if (error) {
+      return { data: null, error: new Error(error.message) };
+    }
+
+    const map = new Map<string, SurveyQuestionOptionMeta>();
+    if (data) {
+      for (const row of data as Array<Record<string, unknown>>) {
+        const id = String(row.id);
+        map.set(id, {
+          id,
+          questionId: String(row.question_id),
+          optionText: String(row.option_text),
+          emojiAnchor: String(row.emoji_anchor || ''),
+          sentimentLabel: (row.sentiment_label as 'positive' | 'neutral' | 'negative') || 'positive',
+          isNeutralNa: Boolean(row.is_neutral_na),
+        });
+      }
+    }
+
+    return { data: map, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err : new Error('Failed to load survey options.'),
+    };
+  }
+}
+
+export interface QuestionMeta {
+  id: string;
+  questionText: string;
+  displayOrder: number;
+}
+
+/**
+ * Loads survey question headers for display context.
+ */
+export async function fetchSurveyQuestionsMap(
+  categoryId?: string,
+): Promise<Map<string, QuestionMeta>> {
+  try {
+    let query = supabase
+      .from('survey_questions')
+      .select('id, question_text, display_order')
+      .eq('is_active', true);
+
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
+
+    const { data } = await query;
+    const map = new Map<string, QuestionMeta>();
+    if (data) {
+      for (const row of data as Array<Record<string, unknown>>) {
+        const id = String(row.id);
+        map.set(id, {
+          id,
+          questionText: String(row.question_text),
+          displayOrder: Number(row.display_order || 0),
+        });
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+export type DerivedSentiment = 'positive' | 'neutral' | 'critical';
+
+/**
+ * Authoritatively derives the sentiment classification for a feedback submission
+ * strictly based on the customer's affirmative option choices from survey_options.
+ *
+ * Rules:
+ * - If at least one affirmative selection has sentiment_label === 'negative': 'critical'
+ * - If all non-N/A selections are positive: 'positive'
+ * - If all selections are neutral/N/A: 'neutral'
+ * - Preserves sentiment without fabricating numeric stars or running unapproved AI models.
+ */
+export function deriveResponseSentiment(
+  feedback: CustomerFeedback,
+  optionsMap?: Map<string, SurveyQuestionOptionMeta>,
+): DerivedSentiment {
+  if (optionsMap && feedback.selectedOptions && feedback.selectedOptions.length > 0) {
+    let hasNegative = false;
+    let hasPositive = false;
+    let applicableCount = 0;
+
+    for (const sel of feedback.selectedOptions) {
+      const opt = optionsMap.get(sel.optionId);
+      if (opt) {
+        if (!opt.isNeutralNa) {
+          applicableCount++;
+          if (opt.sentimentLabel === 'negative') {
+            hasNegative = true;
+          } else if (opt.sentimentLabel === 'positive') {
+            hasPositive = true;
+          }
+        }
+      }
+    }
+
+    if (hasNegative) return 'critical';
+    if (hasPositive) return 'positive';
+    if (applicableCount === 0) return 'neutral';
+    return 'neutral';
+  }
+
+  // Fallback to affirmedFactsSnapshot if option metadata unavailable
+  if (feedback.affirmedFactsSnapshot && Array.isArray(feedback.affirmedFactsSnapshot)) {
+    let hasNegative = false;
+    let hasPositive = false;
+    for (const fact of feedback.affirmedFactsSnapshot) {
+      if (typeof fact === 'object' && fact !== null && 'sentimentLabel' in fact) {
+        const label = (fact as { sentimentLabel?: string }).sentimentLabel;
+        if (label === 'negative') hasNegative = true;
+        if (label === 'positive') hasPositive = true;
+      }
+    }
+    if (hasNegative) return 'critical';
+    if (hasPositive) return 'positive';
+  }
+
+  return 'positive';
 }
 
 export {

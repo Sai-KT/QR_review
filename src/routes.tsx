@@ -65,7 +65,7 @@ const MerchantPages = {
     })),
   ),
   Feedback: React.lazy(() =>
-    import('./pages/merchant/MerchantPageShells.tsx').then((m) => ({
+    import('./pages/merchant/FeedbackFeedPage.tsx').then((m) => ({
       default: m.FeedbackFeedPage,
     })),
   ),

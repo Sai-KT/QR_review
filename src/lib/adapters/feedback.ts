@@ -117,18 +117,27 @@ function parseAffirmedFacts(json: Json): AffirmedFact[] {
 
   const result: AffirmedFact[] = [];
   for (const item of raw) {
-    if (typeof item === 'object' && item !== null) {
+    if (typeof item === 'string') {
+      const trimmed = item.trim();
+      if (trimmed !== '') {
+        result.push({
+          questionId: '',
+          optionText: trimmed,
+          sentimentLabel: 'positive',
+        });
+      }
+    } else if (typeof item === 'object' && item !== null) {
       const rec = item as Record<string, unknown>;
-      const qId = rec.questionId ?? rec.question_id;
+      const qId = String(rec.questionId ?? rec.question_id ?? '');
       const text = rec.optionText ?? rec.option_text;
       const sentiment = (rec.sentimentLabel ??
         rec.sentiment_label ??
         'positive') as AffirmedFact['sentimentLabel'];
 
-      if (typeof qId === 'string' && typeof text === 'string') {
+      if (typeof text === 'string' && text.trim() !== '') {
         result.push({
           questionId: qId,
-          optionText: text,
+          optionText: text.trim(),
           sentimentLabel: sentiment,
         });
       }
@@ -193,3 +202,13 @@ export function toFeedbackSubmissionPayload(submission: CustomerFeedbackSubmissi
     authenticity_confirmed: Boolean(submission.authenticityConfirmed),
   };
 }
+
+export type {
+  SurveyQuestion,
+  SurveyOption,
+  CustomerFeedback,
+  CustomerFeedbackSubmission,
+  SelectedSurveyOption,
+  AffirmedFact,
+};
+

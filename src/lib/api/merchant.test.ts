@@ -3,7 +3,13 @@ import {
   fetchMerchantBusiness,
   updateMerchantBusiness,
   updateGoogleDestination,
+  fetchMerchantFeedback,
+  fetchSurveyOptionsMap,
+  fetchSurveyQuestionsMap,
+  deriveResponseSentiment,
+  type SurveyQuestionOptionMeta,
 } from './merchant';
+import type { CustomerFeedback } from '../adapters/feedback';
 import { supabase, getSupabaseUrl, getSupabaseAnonKey } from '../supabase';
 
 vi.mock('../supabase', () => ({
@@ -384,5 +390,354 @@ describe('updateGoogleDestination (API-OWN-03)', () => {
     );
   });
 });
+
+describe('fetchMerchantFeedback (API-OWN-05)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function createFeedbackQueryMock(response: {
+    data: unknown;
+    count?: number | null;
+    error: unknown;
+  }) {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.eq = vi.fn().mockImplementation(() => builder);
+    builder.gte = vi.fn().mockImplementation(() => builder);
+    builder.lte = vi.fn().mockImplementation(() => builder);
+    builder.order = vi.fn().mockImplementation(() => builder);
+    builder.range = vi.fn().mockImplementation(() => builder);
+
+    // Make the builder thenable
+    Object.assign(builder, {
+      then: (resolve: (val: unknown) => void) => Promise.resolve(response).then(resolve),
+    });
+
+    const mockSelect = vi.fn().mockReturnValue(builder);
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    return { mockSelect, builder };
+  }
+
+  it('rejects empty or whitespace-only businessId', async () => {
+    const res1 = await fetchMerchantFeedback({ businessId: '' });
+    expect(res1.data).toBeNull();
+    expect(res1.error?.message).toBe('A valid business ID is required to fetch feedback.');
+
+    const res2 = await fetchMerchantFeedback({ businessId: '   ' });
+    expect(res2.data).toBeNull();
+    expect(res2.error?.message).toBe('A valid business ID is required to fetch feedback.');
+  });
+
+  it('fetches customer feedback with pagination and deterministic ordering', async () => {
+    const mockRows = [
+      {
+        id: 'r0000000-0000-4000-8000-000000000001',
+        business_id: 'b0000000-0000-4000-8000-000000000001',
+        category_id: 'salon',
+        selected_options: [{ questionId: 'q1', optionId: 'opt1' }],
+        affirmed_facts_snapshot: ['Masterful hair styling'],
+        optional_note: 'Loved the service!',
+        session_uuid: 's0000000-0000-4000-8000-000000000001',
+        purged_at: null,
+        created_at: '2026-10-25T14:30:00Z',
+        authenticity_confirmed: true,
+      },
+    ];
+
+    const { mockSelect, builder } = createFeedbackQueryMock({
+      data: mockRows,
+      count: 1,
+      error: null,
+    });
+
+    const result = await fetchMerchantFeedback({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+      page: 1,
+      pageSize: 50,
+    });
+
+    expect(supabase.from).toHaveBeenCalledWith('survey_responses');
+    expect(mockSelect).toHaveBeenCalledWith(
+      'id, business_id, category_id, selected_options, affirmed_facts_snapshot, optional_note, session_uuid, purged_at, created_at, authenticity_confirmed',
+      { count: 'exact' },
+    );
+    expect(builder.eq).toHaveBeenCalledWith('business_id', 'b0000000-0000-4000-8000-000000000001');
+    expect(builder.order).toHaveBeenCalledWith('created_at', { ascending: false });
+    expect(builder.order).toHaveBeenCalledWith('id', { ascending: false });
+    expect(builder.range).toHaveBeenCalledWith(0, 49);
+
+    expect(result.error).toBeNull();
+    expect(result.totalCount).toBe(1);
+    expect(result.data).toHaveLength(1);
+    expect(result.data?.[0]?.id).toBe('r0000000-0000-4000-8000-000000000001');
+    expect(result.data?.[0]?.optionalNote).toBe('Loved the service!');
+    expect(result.data?.[0]?.purgedAt).toBeNull();
+    expect(result.data?.[0]?.authenticityConfirmed).toBe(true);
+  });
+
+  it('calculates pagination range correctly for page 2', async () => {
+    const { builder } = createFeedbackQueryMock({
+      data: [],
+      count: 75,
+      error: null,
+    });
+
+    const result = await fetchMerchantFeedback({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+      page: 2,
+      pageSize: 50,
+    });
+
+    expect(builder.range).toHaveBeenCalledWith(50, 99);
+    expect(result.totalCount).toBe(75);
+    expect(result.data).toEqual([]);
+  });
+
+  it('applies date filters when provided', async () => {
+    const { builder } = createFeedbackQueryMock({
+      data: [],
+      count: 0,
+      error: null,
+    });
+
+    await fetchMerchantFeedback({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+      startDate: '2026-10-01',
+      endDate: '2026-10-15',
+    });
+
+    expect(builder.gte).toHaveBeenCalledWith('created_at', '2026-10-01T00:00:00.000Z');
+    expect(builder.lte).toHaveBeenCalledWith('created_at', '2026-10-15T23:59:59.999Z');
+  });
+
+  it('returns database error safely', async () => {
+    createFeedbackQueryMock({
+      data: null,
+      count: null,
+      error: { message: 'RLS policy violated or connection dropped' },
+    });
+
+    const result = await fetchMerchantFeedback({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.totalCount).toBe(0);
+    expect(result.error?.message).toBe('RLS policy violated or connection dropped');
+  });
+});
+
+describe('fetchSurveyOptionsMap & fetchSurveyQuestionsMap', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('loads and indexes active survey options', async () => {
+    const mockRows = [
+      {
+        id: 'opt-1',
+        question_id: 'q-1',
+        option_text: 'Expert Haircut',
+        emoji_anchor: '✂️',
+        sentiment_label: 'positive',
+        is_neutral_na: false,
+      },
+      {
+        id: 'opt-2',
+        question_id: 'q-1',
+        option_text: 'Poor Hygiene',
+        emoji_anchor: '⚠️',
+        sentiment_label: 'negative',
+        is_neutral_na: false,
+      },
+    ];
+
+    const mockEq = vi.fn().mockResolvedValue({ data: mockRows, error: null });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchSurveyOptionsMap();
+
+    expect(supabase.from).toHaveBeenCalledWith('survey_options');
+    expect(result.error).toBeNull();
+    expect(result.data).toBeInstanceOf(Map);
+    expect(result.data?.size).toBe(2);
+    expect(result.data?.get('opt-1')).toEqual({
+      id: 'opt-1',
+      questionId: 'q-1',
+      optionText: 'Expert Haircut',
+      emojiAnchor: '✂️',
+      sentimentLabel: 'positive',
+      isNeutralNa: false,
+    });
+  });
+
+  it('returns error when loading survey options fails', async () => {
+    const mockEq = vi.fn().mockResolvedValue({ data: null, error: { message: 'Network failed' } });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchSurveyOptionsMap();
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Network failed');
+  });
+
+  it('loads survey questions map and respects categoryId filter', async () => {
+    const mockRows = [
+      { id: 'q-1', question_text: 'How was the service?', display_order: 1 },
+      { id: 'q-2', question_text: 'How was the hygiene?', display_order: 2 },
+    ];
+
+    const mockEqCategory = vi.fn().mockResolvedValue({ data: mockRows, error: null });
+    const mockEqActive = vi.fn().mockReturnValue({ eq: mockEqCategory });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEqActive });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const questionsMap = await fetchSurveyQuestionsMap('salon');
+
+    expect(supabase.from).toHaveBeenCalledWith('survey_questions');
+    expect(mockSelect).toHaveBeenCalledWith('id, question_text, display_order');
+    expect(mockEqActive).toHaveBeenCalledWith('is_active', true);
+    expect(mockEqCategory).toHaveBeenCalledWith('category_id', 'salon');
+    expect(questionsMap.size).toBe(2);
+    expect(questionsMap.get('q-1')?.questionText).toBe('How was the service?');
+  });
+});
+
+describe('deriveResponseSentiment', () => {
+  const optionsMap = new Map<string, SurveyQuestionOptionMeta>([
+    [
+      'opt-pos',
+      {
+        id: 'opt-pos',
+        questionId: 'q1',
+        optionText: 'Masterful cut',
+        emojiAnchor: '✂️',
+        sentimentLabel: 'positive',
+        isNeutralNa: false,
+      },
+    ],
+    [
+      'opt-neg',
+      {
+        id: 'opt-neg',
+        questionId: 'q2',
+        optionText: 'Rushed service',
+        emojiAnchor: '⏳',
+        sentimentLabel: 'negative',
+        isNeutralNa: false,
+      },
+    ],
+    [
+      'opt-na',
+      {
+        id: 'opt-na',
+        questionId: 'q3',
+        optionText: 'Not Applicable',
+        emojiAnchor: '➖',
+        sentimentLabel: 'neutral',
+        isNeutralNa: true,
+      },
+    ],
+  ]);
+
+  it('classifies feedback as positive when all applicable selections are positive', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-1',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [{ questionId: 'q1', optionId: 'opt-pos' }],
+      affirmedFactsSnapshot: ['Masterful cut'],
+      optionalNote: null,
+      sessionUuid: 's-1',
+      purgedAt: null,
+      createdAt: '2026-10-25T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback, optionsMap);
+    expect(sentiment).toBe('positive');
+  });
+
+  it('classifies feedback as critical if any selection has negative sentiment', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-2',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [
+        { questionId: 'q1', optionId: 'opt-pos' },
+        { questionId: 'q2', optionId: 'opt-neg' },
+      ],
+      affirmedFactsSnapshot: ['Masterful cut', 'Rushed service'],
+      optionalNote: null,
+      sessionUuid: 's-2',
+      purgedAt: null,
+      createdAt: '2026-10-25T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback, optionsMap);
+    expect(sentiment).toBe('critical');
+  });
+
+  it('classifies feedback as neutral when all selections are neutral/NA', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-3',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [{ questionId: 'q3', optionId: 'opt-na' }],
+      affirmedFactsSnapshot: ['Not Applicable'],
+      optionalNote: null,
+      sessionUuid: 's-3',
+      purgedAt: null,
+      createdAt: '2026-10-25T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback, optionsMap);
+    expect(sentiment).toBe('neutral');
+  });
+
+  it('falls back to affirmedFactsSnapshot when optionsMap is missing', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-4',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [],
+      affirmedFactsSnapshot: [
+        { questionId: 'q2', optionText: 'Long wait', sentimentLabel: 'negative' },
+      ],
+      optionalNote: null,
+      sessionUuid: 's-4',
+      purgedAt: null,
+      createdAt: '2026-10-25T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback);
+    expect(sentiment).toBe('critical');
+  });
+
+  it('defaults to positive safely when no facts or options exist', () => {
+    const feedback: CustomerFeedback = {
+      id: 'f-5',
+      businessId: 'b-1',
+      categoryId: 'salon',
+      selectedOptions: [],
+      affirmedFactsSnapshot: [],
+      optionalNote: null,
+      sessionUuid: 's-5',
+      purgedAt: null,
+      createdAt: '2026-10-25T10:00:00Z',
+      authenticityConfirmed: true,
+    };
+
+    const sentiment = deriveResponseSentiment(feedback);
+    expect(sentiment).toBe('positive');
+  });
+});
+
 
 
