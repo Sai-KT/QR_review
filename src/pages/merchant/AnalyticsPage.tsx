@@ -303,7 +303,7 @@ export function AnalyticsPage(): React.JSX.Element {
                   {metrics.qrVisits.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  100% initial visits
+                  {metrics.qrVisits > 0 ? '100% baseline' : '—'}
                 </p>
               </CardContent>
             </Card>
@@ -320,7 +320,9 @@ export function AnalyticsPage(): React.JSX.Element {
                   {metrics.surveysCompleted.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  {formatPercentage(metrics.surveyCompletionRate)} completion
+                  {metrics.qrVisits > 0
+                    ? `${formatPercentage(metrics.surveyCompletionRate)} completion`
+                    : '—'}
                 </p>
               </CardContent>
             </Card>
@@ -337,7 +339,9 @@ export function AnalyticsPage(): React.JSX.Element {
                   {metrics.reviewsDrafted.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  {formatPercentage(metrics.draftSuccessRate)} draft rate
+                  {metrics.surveysCompleted > 0
+                    ? `${formatPercentage(metrics.draftSuccessRate)} draft rate`
+                    : '—'}
                 </p>
               </CardContent>
             </Card>
@@ -354,7 +358,9 @@ export function AnalyticsPage(): React.JSX.Element {
                   {metrics.clipboardCopies.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  {formatPercentage(metrics.copyRate)} copy rate
+                  {metrics.reviewsDrafted > 0
+                    ? `${formatPercentage(metrics.copyRate)} copy rate`
+                    : '—'}
                 </p>
               </CardContent>
             </Card>
@@ -371,7 +377,9 @@ export function AnalyticsPage(): React.JSX.Element {
                   {metrics.googleHandoffClicks.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  {formatPercentage(metrics.handoffRate)} of copies
+                  {metrics.clipboardCopies > 0
+                    ? `${formatPercentage(metrics.handoffRate)} of copies`
+                    : '—'}
                 </p>
               </CardContent>
             </Card>
@@ -388,7 +396,9 @@ export function AnalyticsPage(): React.JSX.Element {
                   {metrics.directBypassClicks.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  {formatPercentage(metrics.directBypassRate)} of QR visits
+                  {metrics.qrVisits > 0
+                    ? `${formatPercentage(metrics.directBypassRate)} of QR visits`
+                    : '—'}
                 </p>
               </CardContent>
             </Card>

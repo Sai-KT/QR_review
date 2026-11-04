@@ -181,14 +181,15 @@ export async function handler(
         : process.env.SUPABASE_SERVICE_ROLE_KEY ||
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
 
-    const supabase =
-      injectedSupabase ??
-      createClient(supabaseUrl!, supabaseServiceKey!, {
-        auth: { persistSession: false },
-      });
+    const supabaseAdmin =
+      injectedSupabase && typeof (injectedSupabase as SupabaseClient).from === 'function'
+        ? injectedSupabase
+        : createClient(supabaseUrl!, supabaseServiceKey!, {
+            auth: { persistSession: false },
+          });
 
     // Verify token validity
-    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !authData?.user) {
       return buildErrorResponse(
         401,
@@ -200,7 +201,7 @@ export async function handler(
     const userId = authData.user.id;
 
     // 5. Verify Tenant Ownership (RLS boundary)
-    const { data: business, error: bizError } = await supabase
+    const { data: business, error: bizError } = await supabaseAdmin
       .from('businesses')
       .select('id, owner_id')
       .eq('id', businessId)
@@ -237,7 +238,7 @@ export async function handler(
     }
 
     // 7. Query analytics_events for business and period
-    let eventsQuery = supabase
+    let eventsQuery = supabaseAdmin
       .from('analytics_events')
       .select('event_name')
       .eq('business_id', businessId);
@@ -258,7 +259,7 @@ export async function handler(
     }
 
     // 8. Query tenant_quotas for latest quota ledger
-    const { data: quotaRow, error: quotaErr } = await supabase
+    const { data: quotaRow, error: quotaErr } = await supabaseAdmin
       .from('tenant_quotas')
       .select('billing_cycle, max_limit, used_count, reserved_count, reset_at')
       .eq('business_id', businessId)
@@ -387,5 +388,7 @@ export async function handler(
 
 // Start Deno runtime server if executed as standalone script
 if (typeof Deno !== 'undefined' && 'serve' in Deno) {
-  (Deno as unknown as { serve: (h: (req: Request) => Promise<Response>) => void }).serve(handler);
+  (Deno as unknown as { serve: (h: (req: Request) => Promise<Response>) => void }).serve(
+    (req: Request) => handler(req),
+  );
 }
