@@ -13,8 +13,15 @@
 import { supabase, getSupabaseUrl, getSupabaseAnonKey } from '../supabase';
 import { toBusinessDto, toBusinessUpdateRow } from '../adapters/business';
 import { toFeedbackDto } from '../adapters/feedback';
+import { toOwnerDashboardResponse } from '../adapters/analytics';
 import type { BusinessRow, SurveyResponseRow } from '../../types/database';
-import type { Business, BusinessProfileUpdate, CustomerFeedback } from '../../types/domain';
+import type {
+  Business,
+  BusinessProfileUpdate,
+  CustomerFeedback,
+  DashboardAnalyticsPeriod,
+  OwnerDashboardResponse,
+} from '../../types/domain';
 
 export interface FetchMerchantBusinessResult {
   data: Business | null;
@@ -580,6 +587,117 @@ export function deriveResponseSentiment(
 
   // Safe non-fabricated default: 'neutral' (never fabricate positive praise)
   return 'neutral';
+}
+
+export interface FetchOwnerDashboardParams {
+  businessId: string;
+  period?: DashboardAnalyticsPeriod;
+}
+
+export interface FetchOwnerDashboardResult {
+  data: OwnerDashboardResponse | null;
+  error: Error | null;
+}
+
+/**
+ * Fetches conversion funnel metrics and quota indicators for an authenticated merchant owner.
+ *
+ * Endpoint: GET /functions/v1/get-owner-dashboard?businessId=:id&period=:period (API-OWN-04)
+ * Trust Boundary: OWNER_AUTHENTICATED
+ * Security: Enforces valid session JWT and verifies businesses.owner_id = auth.uid() on backend.
+ */
+export async function fetchOwnerDashboard(
+  params: FetchOwnerDashboardParams,
+): Promise<FetchOwnerDashboardResult> {
+  const { businessId, period = '30d' } = params;
+
+  if (!businessId || typeof businessId !== 'string' || businessId.trim() === '') {
+    return {
+      data: null,
+      error: new Error('A valid business ID is required.'),
+    };
+  }
+
+  try {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session?.access_token) {
+      return {
+        data: null,
+        error: new Error('Authentication session required to view funnel analytics.'),
+      };
+    }
+
+    const supabaseUrl = getSupabaseUrl();
+    const anonKey = getSupabaseAnonKey();
+
+    if (!supabaseUrl) {
+      return {
+        data: null,
+        error: new Error('Supabase URL configuration is missing.'),
+      };
+    }
+
+    const cleanBase = supabaseUrl.replace(/\/+$/, '');
+    const query = new URLSearchParams({
+      businessId: businessId.trim(),
+      period: period,
+    });
+    const endpoint = `${cleanBase}/functions/v1/get-owner-dashboard?${query.toString()}`;
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.access_token}`,
+    };
+
+    if (anonKey) {
+      headers['apikey'] = anonKey;
+    }
+
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers,
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const serverMessage = json?.error?.message;
+      const serverCode = json?.error?.code;
+
+      if (serverCode === 'ERR_FORBIDDEN') {
+        return {
+          data: null,
+          error: new Error(serverMessage || 'Access denied: You do not own this business.'),
+        };
+      }
+      if (serverCode === 'ERR_NOT_FOUND') {
+        return {
+          data: null,
+          error: new Error(serverMessage || 'Business not found.'),
+        };
+      }
+      return {
+        data: null,
+        error: new Error(serverMessage || `Failed to fetch owner dashboard (${res.status})`),
+      };
+    }
+
+    return {
+      data: toOwnerDashboardResponse(json),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error:
+        err instanceof Error
+          ? err
+          : new Error('An unexpected error occurred while fetching funnel analytics.'),
+    };
+  }
 }
 
 export {

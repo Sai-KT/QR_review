@@ -312,6 +312,8 @@ export interface QuotaReservation {
 /* Frontend Analytics Summary & Merchant Metrics (FR-OWNER-005 / API-OWN-04)  */
 /* -------------------------------------------------------------------------- */
 
+export type DashboardAnalyticsPeriod = '7d' | '30d' | '90d' | 'all';
+
 /**
  * Frontend analytics funnel summary aggregated from analytics_events (API-OWN-04).
  * Denominators and rates adhere strictly to API_SPEC §15.2.
@@ -336,6 +338,60 @@ export interface OwnerDashboardMetrics extends AnalyticsSummary {
   monthlyQuotaLimit: number;
   generationsUsed: number;
   generationsRemaining: number;
+}
+
+/**
+ * Funnel conversion metrics returned by API-OWN-04 (/functions/v1/get-owner-dashboard).
+ * Conforms to API_SPEC §11.4 with aliases for normalized client consumption.
+ */
+export interface OwnerDashboardFunnelMetrics {
+  qrVisits: number;
+  qrPageViews?: number;
+  surveysCompleted: number;
+  surveyCompletionRate: number;
+  completionRate?: number;
+  reviewsDrafted: number;
+  generationsSuccess?: number;
+  generationsRequested?: number;
+  draftSuccessRate: number;
+  clipboardCopies: number;
+  copySuccess?: number;
+  copyRate: number;
+  googleHandoffClicks: number;
+  googleRedirectClicks?: number;
+  handoffRate: number;
+  assistedHandoffRate?: number;
+  directBypassClicks: number;
+  directBypassRate: number;
+  totalHandoffRate: number;
+}
+
+/**
+ * Monthly quota summary embedded in API-OWN-04 response.
+ */
+export interface OwnerDashboardQuota {
+  billingCycle: string;
+  monthlyQuotaLimit: number;
+  /** Alias for monthlyQuotaLimit */
+  maxLimit?: number;
+  generationsUsed: number;
+  /** Alias for generationsUsed */
+  usedCount?: number;
+  generationsRemaining: number;
+  resetDate: string;
+}
+
+/**
+ * Canonical JSON response from API-OWN-04 Edge Function.
+ */
+export interface OwnerDashboardResponse {
+  businessId: string;
+  period: DashboardAnalyticsPeriod;
+  metrics: OwnerDashboardFunnelMetrics;
+  /** Alias for metrics matching API wire documentation */
+  funnel: OwnerDashboardFunnelMetrics;
+  quota?: OwnerDashboardQuota;
+  disclaimer: string;
 }
 
 /* -------------------------------------------------------------------------- */

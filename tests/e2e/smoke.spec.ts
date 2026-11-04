@@ -67,7 +67,11 @@ test.describe('M1-T06 Batch B: Core Route Shells & Navigation Smoke Suite', () =
     await expect(page).toHaveURL(/\/dashboard\/analytics\?period=30d#trend$/);
 
     // Verify merchant shell renders
-    await expect(page.getByText(/Conversion Funnel & Analytics Trends/i)).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        name: /Funnel Analytics|Conversion Funnel & Analytics Trends/i,
+      }),
+    ).toBeVisible();
   });
 
   // ── Phase 8: Test E — Admin route ─────────────────────────────────────────

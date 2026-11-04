@@ -60,7 +60,11 @@ test.describe('M5-T02: Merchant Portal Navigation Shell & Auth Guard', () => {
 
     // 4. Verify return to the originally requested authorized route (/dashboard/analytics)
     await expect(page).toHaveURL(/\/dashboard\/analytics$/);
-    await expect(page.getByRole('heading', { name: /Conversion Funnel & Analytics Trends/i })).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        name: /Funnel Analytics|Conversion Funnel & Analytics Trends/i,
+      }),
+    ).toBeVisible();
   });
 
   test('Scenario 2c: Open-redirect attempt to external URL falls back safely to /dashboard', async ({

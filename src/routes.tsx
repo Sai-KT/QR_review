@@ -70,7 +70,7 @@ const MerchantPages = {
     })),
   ),
   Analytics: React.lazy(() =>
-    import('./pages/merchant/MerchantPageShells.tsx').then((m) => ({
+    import('./pages/merchant/AnalyticsPage.tsx').then((m) => ({
       default: m.AnalyticsPage,
     })),
   ),

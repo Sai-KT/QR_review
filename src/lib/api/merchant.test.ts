@@ -7,6 +7,7 @@ import {
   fetchSurveyOptionsMap,
   fetchSurveyQuestionsMap,
   deriveResponseSentiment,
+  fetchOwnerDashboard,
   type SurveyQuestionOptionMeta,
 } from './merchant';
 import type { CustomerFeedback } from '../adapters/feedback';
@@ -801,6 +802,152 @@ describe('deriveResponseSentiment', () => {
     expect(sentiment).toBe('neutral');
   });
 });
+
+describe('fetchOwnerDashboard (API-OWN-04)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({
+      data: {
+        session: {
+          access_token: 'mock-access-token',
+        } as unknown,
+      },
+      error: null,
+    } as unknown as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+  });
+
+  it('rejects empty or missing businessId with error', async () => {
+    const result = await fetchOwnerDashboard({ businessId: '' });
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('A valid business ID is required.');
+  });
+
+  it('rejects when active authentication session is missing', async () => {
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({
+      data: { session: null },
+      error: null,
+    } as unknown as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+
+    const result = await fetchOwnerDashboard({ businessId: 'b0000000-0000-4000-8000-000000000001' });
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Authentication session required to view funnel analytics.');
+  });
+
+  it('successfully fetches owner dashboard metrics from Edge Function', async () => {
+    const mockApiResponse = {
+      business_id: 'b0000000-0000-4000-8000-000000000001',
+      period: '30d',
+      start_date: '2026-10-01T00:00:00Z',
+      end_date: '2026-10-31T23:59:59Z',
+      funnel: {
+        qr_visits: 100,
+        surveys_completed: 70,
+        reviews_drafted: 50,
+        clipboard_copies: 40,
+        google_handoff_clicks: 30,
+        direct_bypass_clicks: 10,
+        survey_completion_rate: 70.0,
+        review_draft_rate: 71.43,
+        clipboard_copy_rate: 80.0,
+        google_handoff_rate: 75.0,
+        direct_bypass_rate: 10.0,
+        total_google_handoff_rate: 40.0,
+      },
+      quota: {
+        billing_cycle: '2026-10',
+        max_limit: 150,
+        used_count: 50,
+        reserved_count: 2,
+        reset_at: '2026-11-01T00:00:00Z',
+      },
+      attribution_disclaimer:
+        'Google Maps does not notify third-party platforms when reviews are published. Outbound clicks represent high-intent customer handoffs, not confirmed reviews.',
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockApiResponse,
+    } as Response);
+
+    const result = await fetchOwnerDashboard({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+      period: '30d',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://test.supabase.co/functions/v1/get-owner-dashboard?businessId=b0000000-0000-4000-8000-000000000001&period=30d',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer mock-access-token',
+          apikey: 'mock-anon-key',
+        }),
+      }),
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.data).not.toBeNull();
+    expect(result.data?.businessId).toBe('b0000000-0000-4000-8000-000000000001');
+    expect(result.data?.funnel.qrVisits).toBe(100);
+    expect(result.data?.funnel.surveysCompleted).toBe(70);
+    expect(result.data?.funnel.surveyCompletionRate).toBe(70.0);
+    expect(result.data?.funnel.googleHandoffClicks).toBe(30);
+    expect(result.data?.quota?.maxLimit).toBe(150);
+  });
+
+  it('handles 403 forbidden error from Edge Function gracefully', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: {
+          code: 'ERR_FORBIDDEN',
+          message: 'Access denied: You do not own this business.',
+        },
+      }),
+    } as Response);
+
+    const result = await fetchOwnerDashboard({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toContain('Access denied');
+  });
+
+  it('handles 404 not found error from Edge Function gracefully', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({
+        error: {
+          code: 'ERR_NOT_FOUND',
+          message: 'Business not found.',
+        },
+      }),
+    } as Response);
+
+    const result = await fetchOwnerDashboard({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toContain('Business not found');
+  });
+
+  it('handles network or fetch exception gracefully', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network offline'));
+
+    const result = await fetchOwnerDashboard({
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Network offline');
+  });
+});
+
 
 
 
