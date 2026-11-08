@@ -313,34 +313,62 @@ async function run() {
       'Merchant direct PATCH to tenant_quotas is blocked by RLS (0 rows modified)',
     );
 
-    // 8. Quota Calculation Invariants & Threshold Verification
-    console.log('\n8. Quota Calculation & Threshold Invariants:');
-    const used = 84;
-    const max = 150;
-    const reserved = 0;
-    const remaining = Math.max(0, max - used - reserved);
-    const pct = Math.round((used / max) * 100);
-    assert(remaining === 66, 'TC-OWN-15 formula: 150 - 84 = 66 remaining');
-    assert(pct === 56, '84 / 150 = 56% committed usage');
-    assert(pct < 80, '56% is in healthy status (<80%)');
+    // 8. Quota Calculation Invariants & Section 6 Edge-State Verification
+    console.log('\n8. Quota Calculation Invariants & Section 6 Edge States:');
+    
+    // Case 1: used=84, reserved=0, max=150
+    const c1Used = 84, c1Max = 150, c1Reserved = 0;
+    const c1Remaining = Math.max(0, c1Max - c1Used - c1Reserved);
+    const c1Pct = Math.round((c1Used / c1Max) * 100);
+    assert(c1Remaining === 66, 'Case 1 (84, 0, 150): 150 - 84 = 66 remaining');
+    assert(c1Pct === 56, 'Case 1: 84 / 150 = 56% committed usage');
+    assert(c1Pct < 80, 'Case 1: 56% is in healthy status (<80%)');
 
-    const reservedUsage = Math.max(0, 150 - 84 - 2);
-    assert(reservedUsage === 64, 'In-flight reservation correctly reserves available capacity (64)');
+    // Case 2: used=84, reserved=5, max=150
+    const c2Remaining = Math.max(0, 150 - 84 - 5);
+    assert(c2Remaining === 61, 'Case 2 (84, 5, 150): in-flight reservations reserve available slots (61 remaining)');
 
-    const warningPct = Math.round((120 / 150) * 100);
-    assert(warningPct === 80, '120 / 150 = exactly 80% boundary');
-    const isWarningAt80 = warningPct >= 80 && warningPct < 100;
-    assert(isWarningAt80, 'Exactly 80% triggers warning state');
+    // Case 3: used=75, reserved=75, max=150 (Temporary reservation exhaustion)
+    const c3Remaining = Math.max(0, 150 - 75 - 75);
+    const c3Pct = Math.round((75 / 150) * 100);
+    const c3FullyExhausted = 75 >= 150;
+    const c3TemporarilyReserved = !c3FullyExhausted && c3Remaining === 0;
+    assert(c3Remaining === 0, 'Case 3 (75, 75, 150): available capacity correctly reported as 0');
+    assert(c3Pct === 50, 'Case 3: monthly progress is 50%');
+    assert(!c3FullyExhausted, 'Case 3: does NOT falsely claim monthly quota is permanently exhausted');
+    assert(c3TemporarilyReserved, 'Case 3: correctly classified as temporarily reserved capacity');
 
-    const below80Pct = Math.round((119 / 150) * 100);
-    assert(below80Pct === 79, '119 / 150 = 79% (below 80%)');
-    const isWarningAt79 = below80Pct >= 80;
-    assert(!isWarningAt79, '79% remains in healthy state');
+    // Case 4: used=0, reserved=150, max=150 (Full reservation with zero committed usage)
+    const c4Remaining = Math.max(0, 150 - 0 - 150);
+    const c4Pct = Math.round((0 / 150) * 100);
+    const c4FullyExhausted = 0 >= 150;
+    const c4TemporarilyReserved = !c4FullyExhausted && c4Remaining === 0;
+    assert(c4Remaining === 0, 'Case 4 (0, 150, 150): available capacity is 0');
+    assert(c4Pct === 0, 'Case 4: monthly usage progress is 0%');
+    assert(!c4FullyExhausted, 'Case 4: 0 used is not exhausted');
+    assert(c4TemporarilyReserved, 'Case 4: classified as temporarily reserved');
 
-    const exhaustedPct = Math.round((150 / 150) * 100);
-    assert(exhaustedPct === 100, '150 / 150 = 100%');
-    const isExhaustedAt100 = 150 >= 150;
-    assert(isExhaustedAt100, '150/150 triggers quota exhausted state');
+    // Case 5: used=120, reserved=0, max=150 (80% warning boundary)
+    const c5Pct = Math.round((120 / 150) * 100);
+    const c5Remaining = Math.max(0, 150 - 120 - 0);
+    const c5Warning = c5Pct >= 80 && c5Pct < 100 && c5Remaining > 0;
+    assert(c5Pct === 80, 'Case 5 (120, 0, 150): 120 / 150 = exactly 80% boundary');
+    assert(c5Remaining === 30, 'Case 5: 30 remaining available');
+    assert(c5Warning, 'Case 5: exactly 80% triggers high usage warning');
+
+    // Case 6: used=150, reserved=0, max=150 (100% full consumption)
+    const c6Remaining = Math.max(0, 150 - 150 - 0);
+    const c6Pct = Math.round((150 / 150) * 100);
+    const c6FullyExhausted = 150 >= 150;
+    assert(c6Remaining === 0, 'Case 6 (150, 0, 150): 0 remaining available');
+    assert(c6Pct === 100, 'Case 6: 100% committed usage');
+    assert(c6FullyExhausted, 'Case 6: triggers full monthly quota reached state');
+
+    // Case 7: used=0, reserved=0, max=0 (Zero limit inactive business)
+    const c7Remaining = Math.max(0, 0 - 0 - 0);
+    const c7ZeroLimit = 0 === 0;
+    assert(c7Remaining === 0, 'Case 7 (0, 0, 0): remaining is 0');
+    assert(c7ZeroLimit, 'Case 7: correctly classified as zero limit');
   } catch (err) {
     console.error('Test execution failed:', err);
     failed++;

@@ -167,6 +167,8 @@ describe('SubscriptionPage (SCR-OWN-10)', () => {
     // Payment Settlement Info
     expect(screen.getByTestId('sub-payment-amount')).toHaveTextContent('₹399.00');
     expect(screen.getByTestId('sub-payment-ref')).toHaveTextContent('UPI-REF-LUXE-001');
+    expect(screen.getByText(/Recorded on/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Verified on/i)).not.toBeInTheDocument();
 
     // 2. Quota Meter Bar (TC-OWN-15)
     // used_count (84) + remaining (66) = 150
@@ -296,7 +298,7 @@ describe('SubscriptionPage (SCR-OWN-10)', () => {
     expect(merchantApi.fetchMerchantSubscription).toHaveBeenCalledTimes(2);
   });
 
-  it('opens and closes manual renewal inquiry modal', async () => {
+  it('opens and closes manual renewal inquiry modal with clean guidance and no placeholder contacts', async () => {
     render(<SubscriptionPage />);
 
     await waitFor(() => {
@@ -313,8 +315,37 @@ describe('SubscriptionPage (SCR-OWN-10)', () => {
     expect(screen.getByText('Manual Renewal & Upgrades')).toBeInTheDocument();
     expect(screen.getByText(/Luxe Studio Unisex Salon/)).toBeInTheDocument();
 
-    // Close modal
-    fireEvent.click(screen.getByTestId('close-inquiry-modal'));
+    // Verify no nonfunctional mailto button or placeholder email exists
+    expect(screen.queryByTestId('send-inquiry-email-btn')).not.toBeInTheDocument();
+    expect(screen.getByTestId('close-inquiry-modal-footer')).toBeInTheDocument();
+
+    // Close modal via footer button
+    fireEvent.click(screen.getByTestId('close-inquiry-modal-footer'));
     expect(screen.queryByTestId('inquiry-modal')).not.toBeInTheDocument();
+  });
+
+  it('strictly prohibits unverified placeholder support emails and phone numbers from appearing in UI', async () => {
+    render(<SubscriptionPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('subscription-page')).toBeInTheDocument();
+    });
+
+    // Check on page content
+    const pageHtml = document.body.innerHTML;
+    expect(pageHtml).not.toContain('support@local.test');
+    expect(pageHtml).not.toContain('support@qrreview.in');
+    expect(pageHtml).not.toContain('support@example.com');
+    expect(pageHtml).not.toContain('+91 98765 43210');
+    expect(pageHtml).not.toContain('mailto:');
+
+    // Open inquiry modal and check modal content too
+    fireEvent.click(screen.getByTestId('contact-founder-upgrade-btn'));
+    const modalHtml = screen.getByTestId('inquiry-modal').innerHTML;
+    expect(modalHtml).not.toContain('support@local.test');
+    expect(modalHtml).not.toContain('support@qrreview.in');
+    expect(modalHtml).not.toContain('support@example.com');
+    expect(modalHtml).not.toContain('+91 98765 43210');
+    expect(modalHtml).not.toContain('mailto:');
   });
 });

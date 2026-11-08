@@ -69,33 +69,41 @@ export function QuotaMeterBar({
     safeMax > 0 ? Math.min(100 - percentUsed, Math.round((safeReserved / safeMax) * 100)) : 0;
 
   // Determine threshold states
-  // Warning triggers at >= 80% and < 100% committed usage
-  // Exhausted triggers at >= 100% committed usage OR 0 remaining capacity
-  const isExhausted = safeMax > 0 ? safeUsed >= safeMax || remainingCount === 0 : true;
-  const isWarning = safeMax > 0 && percentUsed >= 80 && !isExhausted;
+  // 1. Zero Limit: safeMax === 0
+  // 2. Fully Exhausted: safeUsed >= safeMax (monthly quota completely consumed by committed generations)
+  // 3. Temporarily Reserved: safeUsed < safeMax && remainingCount === 0 (all remaining capacity locked by in-flight reservations)
+  // 4. High Usage Warning: safeUsed < safeMax && remainingCount > 0 && percentUsed >= 80 (approaching limit)
+  // 5. Healthy: safeUsed < safeMax && remainingCount > 0 && percentUsed < 80
+  const isZeroLimit = safeMax === 0;
+  const isFullyExhausted = safeMax > 0 && safeUsed >= safeMax;
+  const isTemporarilyReserved = safeMax > 0 && !isFullyExhausted && remainingCount === 0;
+  const isWarning = safeMax > 0 && !isFullyExhausted && !isTemporarilyReserved && percentUsed >= 80;
 
   const formattedReset = formatResetDate(resetAt);
 
   // Status badge details
   const statusBadge = React.useMemo(() => {
-    if (safeMax === 0) {
+    if (isZeroLimit) {
       return { variant: 'outline' as const, label: 'Zero Limit' };
     }
-    if (isExhausted) {
+    if (isFullyExhausted) {
       return { variant: 'destructive' as const, label: 'Quota Reached' };
+    }
+    if (isTemporarilyReserved) {
+      return { variant: 'warning' as const, label: 'Capacity Reserved' };
     }
     if (isWarning) {
       return { variant: 'warning' as const, label: 'High Usage (≥80%)' };
     }
     return { variant: 'success' as const, label: 'Healthy' };
-  }, [safeMax, isExhausted, isWarning]);
+  }, [isZeroLimit, isFullyExhausted, isTemporarilyReserved, isWarning]);
 
   // Color classes for progress indicator bar
   const progressBarColor = React.useMemo(() => {
-    if (isExhausted) return 'bg-rose-600 dark:bg-rose-500';
-    if (isWarning) return 'bg-amber-500 dark:bg-amber-400';
+    if (isFullyExhausted) return 'bg-rose-600 dark:bg-rose-500';
+    if (isWarning || isTemporarilyReserved) return 'bg-amber-500 dark:bg-amber-400';
     return 'bg-primary';
-  }, [isExhausted, isWarning]);
+  }, [isFullyExhausted, isWarning, isTemporarilyReserved]);
 
   return (
     <div
@@ -142,9 +150,9 @@ export function QuotaMeterBar({
           <span
             className={cn(
               'font-semibold tabular-nums text-sm',
-              isExhausted
+              isFullyExhausted
                 ? 'text-rose-600 dark:text-rose-400'
-                : isWarning
+                : isWarning || isTemporarilyReserved
                   ? 'text-amber-600 dark:text-amber-400'
                   : 'text-foreground',
             )}
@@ -220,8 +228,8 @@ export function QuotaMeterBar({
       {/* Contextual Warning & Guidance Banners */}
       {showWarningBanner && (
         <>
-          {/* Quota Exhausted Banner */}
-          {isExhausted && safeMax > 0 && (
+          {/* Quota Exhausted Banner (Committed usage reaches ceiling) */}
+          {isFullyExhausted && (
             <div
               role="alert"
               className="flex items-start gap-2.5 rounded-md border border-rose-200 dark:border-rose-900/50 bg-rose-50/80 dark:bg-rose-950/30 p-3 text-xs text-rose-900 dark:text-rose-200"
@@ -249,6 +257,41 @@ export function QuotaMeterBar({
                   All {safeMax} AI review generations have been used for this billing cycle. Customer
                   QR scans will safely route directly to your Google review link so customer feedback
                   is never interrupted. Quota resets on {formattedReset}.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Temporarily Reserved Banner (Reservations consume all remaining slots, but monthly quota is NOT permanently exhausted) */}
+          {isTemporarilyReserved && (
+            <div
+              role="status"
+              className="flex items-start gap-2.5 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50/80 dark:bg-amber-950/30 p-3 text-xs text-amber-900 dark:text-amber-200"
+              data-testid="quota-reserved-banner"
+            >
+              <svg
+                className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <div className="space-y-0.5">
+                <p className="font-semibold text-amber-950 dark:text-amber-100">
+                  Capacity Temporarily Reserved
+                </p>
+                <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+                  All remaining generation slots ({safeReserved} in flight) are currently reserved by
+                  active customer review sessions. If drafting is not completed within 60 seconds,
+                  reservations release automatically back into available quota. Customer scans during
+                  this window route safely to Google Reviews.
                 </p>
               </div>
             </div>

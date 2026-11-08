@@ -295,7 +295,7 @@ export function SubscriptionPage(): React.JSX.Element {
                 </div>
                 {subscription.lastPaymentRecordedAt && (
                   <p className="text-[11px] text-muted-foreground">
-                    Verified on {formatDateTime(subscription.lastPaymentRecordedAt)}
+                    Recorded on {formatDateTime(subscription.lastPaymentRecordedAt)}
                   </p>
                 )}
               </div>
@@ -481,11 +481,11 @@ export function SubscriptionPage(): React.JSX.Element {
 
             <div className="space-y-3 text-xs leading-relaxed text-foreground/90">
               <p>
-                To maintain strict security and avoid third-party payment aggregator fees for local Indian SMBs, subscription plans and AI generation quota expansions are coordinated directly with the platform administrator.
+                Subscription plans, renewals, and monthly AI generation quota expansions are coordinated directly with platform administration via manual UPI settlement during the pilot phase.
               </p>
 
               <div className="rounded-md border border-border bg-surface-subtle p-3 space-y-1.5">
-                <span className="font-semibold text-foreground block">Merchant Details:</span>
+                <span className="font-semibold text-foreground block">Venue Details:</span>
                 <p className="text-[11px]">
                   <strong>Business:</strong> {business?.name || 'Local Venue'}
                 </p>
@@ -494,37 +494,29 @@ export function SubscriptionPage(): React.JSX.Element {
                 </p>
                 {business?.whatsappNumber && (
                   <p className="text-[11px]">
-                    <strong>Contact WhatsApp:</strong> {business.whatsappNumber}
+                    <strong>Registered WhatsApp:</strong> {business.whatsappNumber}
                   </p>
                 )}
               </div>
 
               <div className="rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 p-2.5 text-[11px] text-amber-900 dark:text-amber-200">
-                Authorized payment QR / UPI VPA is delivered upon verification of inquiry to prevent unauthorized payments.
+                Official destination UPI VPA details are provided directly by platform administration upon verified request. No automated card debits or third-party gateways are active.
               </div>
+
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Note: Dedicated platform support channels (support email and WhatsApp hotline) are pending founder configuration prior to pilot rollout. To request plan adjustments or quota additions, coordinate directly with your designated onboarding administrator.
+              </p>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
               <Button
-                variant="outline"
+                variant="default"
                 size="sm"
                 onClick={() => setShowInquiryModal(false)}
                 className="text-xs"
+                data-testid="close-inquiry-modal-footer"
               >
                 Close
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => {
-                  window.location.href = `mailto:support@local.test?subject=Subscription%20Renewal%20Inquiry%20-%20${encodeURIComponent(
-                    business?.name || '',
-                  )}`;
-                }}
-                className="text-xs"
-                data-testid="send-inquiry-email-btn"
-              >
-                Send Inquiry Email
               </Button>
             </div>
           </div>

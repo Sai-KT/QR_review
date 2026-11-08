@@ -107,11 +107,12 @@ describe('QuotaMeterBar (CMP-12)', () => {
     expect(screen.getByTestId('quota-warning-banner')).toBeInTheDocument();
   });
 
-  it('triggers exhausted alert at 100% capacity (150 of 150)', () => {
+  it('triggers exhausted alert only when monthly quota is fully committed (used=150, reserved=0, max=150)', () => {
     render(
       <QuotaMeterBar
         usedCount={150}
         maxLimit={150}
+        reservedCount={0}
         resetAt="2026-12-01T00:00:00Z"
       />,
     );
@@ -120,18 +121,60 @@ describe('QuotaMeterBar (CMP-12)', () => {
     expect(screen.getByTestId('quota-exhausted-banner')).toBeInTheDocument();
     expect(screen.getByText(/Monthly AI Review Quota Reached/)).toBeInTheDocument();
     expect(screen.getByTestId('quota-remaining-count')).toHaveTextContent('0 available');
+    expect(screen.queryByTestId('quota-reserved-banner')).not.toBeInTheDocument();
   });
 
-  it('triggers exhausted alert when remaining count reaches 0 due to reservations', () => {
-    render(<QuotaMeterBar usedCount={149} maxLimit={150} reservedCount={1} />);
+  it('distinguishes temporary reservation exhaustion from permanent monthly exhaustion (used=75, reserved=75, max=150)', () => {
+    render(<QuotaMeterBar usedCount={75} maxLimit={150} reservedCount={75} />);
 
-    // 150 - 149 - 1 = 0 remaining
-    expect(screen.getByText('Quota Reached')).toBeInTheDocument();
+    // Capacity is not available (0 available)
     expect(screen.getByTestId('quota-remaining-count')).toHaveTextContent('0 available');
+    expect(screen.getByTestId('quota-used-count')).toHaveTextContent('75');
+    expect(screen.getByTestId('quota-reserved-count')).toHaveTextContent('(+75 reserved)');
+    expect(screen.getByText('(50%)')).toBeInTheDocument();
+
+    // Badge indicates capacity reserved, NOT quota reached
+    expect(screen.getByText('Capacity Reserved')).toBeInTheDocument();
+    expect(screen.queryByText('Quota Reached')).not.toBeInTheDocument();
+
+    // Shows temporary reservation banner, NOT permanent exhausted banner
+    expect(screen.getByTestId('quota-reserved-banner')).toBeInTheDocument();
+    expect(screen.getByText(/Capacity Temporarily Reserved/)).toBeInTheDocument();
+    expect(screen.queryByTestId('quota-exhausted-banner')).not.toBeInTheDocument();
   });
 
-  it('handles zero maximum limit gracefully without NaN or Infinity', () => {
-    render(<QuotaMeterBar usedCount={0} maxLimit={0} />);
+  it('handles full reservation with zero committed usage (used=0, reserved=150, max=150)', () => {
+    render(<QuotaMeterBar usedCount={0} maxLimit={150} reservedCount={150} />);
+
+    // 0 committed, 0 remaining, 150 reserved
+    expect(screen.getByTestId('quota-remaining-count')).toHaveTextContent('0 available');
+    expect(screen.getByTestId('quota-used-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('quota-reserved-count')).toHaveTextContent('(+150 reserved)');
+    expect(screen.getByText('(0%)')).toBeInTheDocument();
+
+    expect(screen.getByText('Capacity Reserved')).toBeInTheDocument();
+    expect(screen.getByTestId('quota-reserved-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('quota-exhausted-banner')).not.toBeInTheDocument();
+  });
+
+  it('handles active reservation in healthy state (used=84, reserved=5, max=150)', () => {
+    render(<QuotaMeterBar usedCount={84} maxLimit={150} reservedCount={5} />);
+
+    // 150 - 84 - 5 = 61 remaining
+    expect(screen.getByTestId('quota-used-count')).toHaveTextContent('84');
+    expect(screen.getByTestId('quota-reserved-count')).toHaveTextContent('(+5 reserved)');
+    expect(screen.getByTestId('quota-remaining-count')).toHaveTextContent('61 available');
+    expect(screen.getByText('(56%)')).toBeInTheDocument();
+
+    // 84 / 150 = 56% committed -> Healthy
+    expect(screen.getByText('Healthy')).toBeInTheDocument();
+    expect(screen.queryByTestId('quota-warning-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('quota-reserved-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('quota-exhausted-banner')).not.toBeInTheDocument();
+  });
+
+  it('handles zero maximum limit gracefully without NaN or Infinity (used=0, reserved=0, max=0)', () => {
+    render(<QuotaMeterBar usedCount={0} maxLimit={0} reservedCount={0} />);
 
     expect(screen.getByText('Zero Limit')).toBeInTheDocument();
     expect(screen.getByTestId('quota-zero-limit-banner')).toBeInTheDocument();

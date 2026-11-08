@@ -158,10 +158,17 @@ test.describe('M5-T09: Merchant Subscription Plan & AI Quota Monitor', () => {
     const modal = page.getByTestId('inquiry-modal');
     await expect(modal).toBeVisible();
     await expect(modal.getByText('Manual Renewal & Upgrades')).toBeVisible();
-    await expect(modal.getByTestId('send-inquiry-email-btn')).toBeVisible();
+    await expect(modal.getByTestId('close-inquiry-modal-footer')).toBeVisible();
 
-    // 5. Close Modal
-    await page.getByTestId('close-inquiry-modal').click();
+    // Verify absence of unverified placeholder contacts and mailto links
+    const modalText = await modal.innerText();
+    expect(modalText).not.toContain('support@local.test');
+    expect(modalText).not.toContain('support@qrreview.in');
+    expect(modalText).not.toContain('+91 98765 43210');
+    await expect(page.locator('a[href^="mailto:"]')).toHaveCount(0);
+
+    // 5. Close Modal via footer button
+    await page.getByTestId('close-inquiry-modal-footer').click();
     await expect(modal).not.toBeVisible();
   });
 
