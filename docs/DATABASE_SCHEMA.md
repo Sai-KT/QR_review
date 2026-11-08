@@ -26,7 +26,8 @@
 | Revision | Date | Author | Summary of Changes | Status |
 | :---: | :---: | :--- | :--- | :---: |
 | **1.0** | Oct 17, 2026 | Principal Architect | Initial schema specification draft. | Superseded |
-| **1.1** | Oct 17, 2026 | Principal Architect | **Stage 3 Security & Consistency Audit Applied:**<br/>1. **Entity Inventory Correction:** Corrected table count to exactly 12 application tables (including `public.admin_audit_logs`).<br/>2. **Business Field Protection:** Separated merchant-editable profile fields from privileged administrative fields (`owner_id`, `public_qr_id`, `account_status`, `is_active`); specified column-level grants, RLS `WITH CHECK`, and trigger-level immutability enforcement.<br/>3. **Hardened Super-Admin MFA:** Removed the `mfa_enforced = FALSE` bypass in `is_super_admin()`; strictly mandated verified `aal2` assurance level via TOTP.<br/>4. **Controlled Public QR API Boundary:** Restricted `get_public_business_by_qr` execution strictly to `service_role` via Edge Function gateway; handled missing subscription rows via `LEFT JOIN`, unknown QRs, suspended tenants, and lapsed subscriptions gracefully.<br/>5. **Server-Boundary Quota Semantics:** Formally defined quota deduction commit at the server response boundary; established idempotent retry handling, stale 60s TTL sweeps, and late-response COGS absorption without unfair merchant penalties.<br/>6. **Authoritative Survey Answer Validation:** Replaced raw text matching with structured foreign keys (`question_id`, `option_id`), active status checks, and historical question snapshot preservation.<br/>7. **Analytics Event Deduplication & Attribution:** Added server-side composite hash deduplication; reinforced that Google redirect clicks never equal confirmed published reviews.<br/>8. **Weighted Sliding-Window Rate Limiting:** Corrected fixed-window boundary burst flaw to a weighted sliding-window algorithm; restricted rate-limiting RPCs to `service_role`.<br/>9. **Data Integrity & Immutability Realities:** Documented subscription payment history, non-reuse of deleted QR tokens, and realistic trigger vs root operator audit limitations.<br/>10. **Privacy & Retention Classification:** Classified customer notes as pseudonymous data; preserved PRD 90-day baseline while flagging 30-day minimization for founder sign-off.<br/>11. **Official Backup Realities:** Corrected Supabase Free (zero automated daily backups; GitHub Actions `pg_dump` proposed with testing requirements) vs Pro (7 days standard; PITR paid add-on).<br/>12. **Storage Recalculation:** Recalculated 12-month analytics volume (exceeds 500 MB at 50+ merchants; requires Pro upgrade or 90-day rollup purge).<br/>13. **Status Standardization:** Replaced misleading "VERIFIED" labels with `SPECIFIED`, `REVIEWED`, and `REQUIRES VALIDATION`. | **Under Review** |
+| **1.1** | Oct 17, 2026 | Principal Architect | **Stage 3 Security & Consistency Audit Applied:**<br/>1. **Entity Inventory Correction:** Corrected table count to exactly 12 application tables (including `public.admin_audit_logs`).<br/>2. **Business Field Protection:** Separated merchant-editable profile fields from privileged administrative fields (`owner_id`, `public_qr_id`, `account_status`, `is_active`); specified column-level grants, RLS `WITH CHECK`, and trigger-level immutability enforcement.<br/>3. **Hardened Super-Admin MFA:** Removed the `mfa_enforced = FALSE` bypass in `is_super_admin()`; strictly mandated verified `aal2` assurance level via TOTP.<br/>4. **Controlled Public QR API Boundary:** Restricted `get_public_business_by_qr` execution strictly to `service_role` via Edge Function gateway; handled missing subscription rows via `LEFT JOIN`, unknown QRs, suspended tenants, and lapsed subscriptions gracefully.<br/>5. **Server-Boundary Quota Semantics:** Formally defined quota deduction commit at the server response boundary; established idempotent retry handling, stale 60s TTL sweeps, and late-response COGS absorption without unfair merchant penalties.<br/>6. **Authoritative Survey Answer Validation:** Replaced raw text matching with structured foreign keys (`question_id`, `option_id`), active status checks, and historical question snapshot preservation.<br/>7. **Analytics Event Deduplication & Attribution:** Added server-side composite hash deduplication; reinforced that Google redirect clicks never equal confirmed published reviews.<br/>8. **Weighted Sliding-Window Rate Limiting:** Corrected fixed-window boundary burst flaw to a weighted sliding-window algorithm; restricted rate-limiting RPCs to `service_role`.<br/>9. **Data Integrity & Immutability Realities:** Documented subscription payment history, non-reuse of deleted QR tokens, and realistic trigger vs root operator audit limitations.<br/>10. **Privacy & Retention Classification:** Classified customer notes as pseudonymous data; preserved PRD 90-day baseline while flagging 30-day minimization for founder sign-off.<br/>11. **Official Backup Realities:** Corrected Supabase Free (zero automated daily backups; GitHub Actions `pg_dump` proposed with testing requirements) vs Pro (7 days standard; PITR paid add-on).<br/>12. **Storage Recalculation:** Recalculated 12-month analytics volume (exceeds 500 MB at 50+ merchants; requires Pro upgrade or 90-day rollup purge).<br/>13. **Status Standardization:** Replaced misleading "VERIFIED" labels with `SPECIFIED`, `REVIEWED`, and `REQUIRES VALIDATION`. | Superseded |
+| **1.2** | Nov 8, 2026 | Principal Architect | **Post-MVP Architectural Integration: Milestone M10 (Google Review Replies Schema):**<br/>1. **Proposed Post-MVP Schema (§24):** Specified 2 extension tables: `public.google_business_connections` and `public.google_review_replies`.<br/>2. **Option A Approval Integrity:** Integrated `revision`, `approved_reply_hash`, `approved_revision`, `last_fetched_at`, `existing_google_reply_detected`, and `google_published_update_time`. Added database trigger invalidating approval upon draft mutation.<br/>3. **Column-Level Privileges:** Revoked client mutation of approval and published fields, and revoked client `SELECT` on encrypted token columns.<br/>4. **Compliance Purge Worker:** Updated `purge_stale_google_reviews_text()` to key purge off `last_fetched_at < NOW() - 30d` and anonymize reviewer names. (Planning baseline approved; implementation strictly not authorized). | **Planning Baseline Approved** |
 
 > [!IMPORTANT]
 > **Specification Notice (Non-Executable):**
@@ -1189,6 +1190,10 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
 | `FR-BILLING-002`| Fair-Use Monthly 150 AI Quota | `tenant_quotas(max_limit = 150, reset_at)` | `SPECIFIED` |
 | `SEC-001` | PostgreSQL Row Level Security | RLS enabled on all 12 tables with explicit role matrix | `SPECIFIED` |
 | `SEC-003` | Pseudonymous Note Storage | Automated daily purge job on `survey_responses` | `SPECIFIED` |
+| `FR-REPLY-001..003` | Google Connection & Location Vault | `public.google_business_connections`, AES-GCM-256 tokens | `PLANNED (M10)` |
+| `FR-REPLY-004..006` | AI Review Reply Drafts & Tones | `public.google_review_replies(ai_draft_text, draft_tone)` | `PLANNED (M10)` |
+| `FR-REPLY-007..010` | Option A Mandatory Human Approval | `public.google_review_replies` check constraints & audit fields | `PLANNED (M10)` |
+| `FR-REPLY-011..012` | Reply RLS Isolation & Purge | Tenant RLS policies & 30-day `pg_cron` content purge worker | `PLANNED (M10)` |
 
 ---
 
@@ -1238,10 +1243,230 @@ In v1.0, storage was erroneously projected to stay under 250 MB at 100 merchants
    - [ ] PENDING: Approve rolling up raw analytics events into daily summaries after 90 days to conserve storage on Free tier.
 8. **Database Schema Amendments 1–5 (Decision M0-06):**
    - [x] **FOUNDER APPROVED (SCHEMA DESIGN ONLY):** Approve five schema design amendments (`quota_reservations.quota_id`, `quota_reservations.payload_hash`, `admin_users.is_active`, `admin_audit_logs.actor_user_id` / `actor_role`, and `survey_options.is_active`) with documented safeguards. Implementation, DDL migrations, and runtime verification remain subject to subsequent gates (M0-09, M0-10, M0-12, M0-13, M2).
+9. **Post-MVP AI Review Reply Assistant Schema (Decision 10):**
+   - [x] **FOUNDER APPROVED (PLANNING & DESIGN ONLY):** Adopt Option A mandatory human approval schema design for Milestone M10 (`google_business_connections`, `google_review_replies`, 30-day raw review purge worker). Implementation strictly deferred post-MVP.
 
 ---
 
-## 24. Approval Checklist
+## 24. Proposed Post-MVP Relational Schema: Google Business Profile & AI Review Replies (Milestone M10)
+
+> [!NOTE]
+> **Planning-Only Design Specification:**
+> The following schema extensions define the relational structure for Milestone M10 (Post-MVP). These tables are not part of the initial MVP migration sequence and will be migrated only upon explicit founder authorization post-pilot.
+
+### 24.1 Entity Specifications
+
+#### 1. `public.google_business_connections`
+Stores encrypted OAuth credentials and verified location metadata connecting a merchant tenant to Google Business Profile.
+
+```sql
+CREATE TABLE public.google_business_connections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+    google_account_id TEXT NOT NULL,
+    google_location_id TEXT NOT NULL,
+    location_name TEXT NOT NULL,
+    encrypted_refresh_token BYTEA NOT NULL,
+    token_encryption_iv BYTEA NOT NULL,
+    token_encryption_tag BYTEA NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'https://www.googleapis.com/auth/business.manage',
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    last_synced_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT uq_google_connection_business UNIQUE (business_id),
+    CONSTRAINT uq_google_connection_location UNIQUE (google_location_id)
+);
+
+-- RLS Enforcement
+ALTER TABLE public.google_business_connections ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "google_connections_owner_all"
+    ON public.google_business_connections
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = google_business_connections.business_id
+              AND b.owner_id = auth.uid()
+        )
+    );
+
+-- Revoke direct PostgREST access to encrypted token columns from client roles
+REVOKE ALL (encrypted_refresh_token, token_encryption_iv, token_encryption_tag)
+    ON public.google_business_connections FROM authenticated, anon, public;
+```
+
+#### 2. `public.google_review_replies`
+Manages synchronized Google reviews, AI-generated drafts, merchant edits, revision counters, and cryptographic approval digests.
+
+```sql
+CREATE TABLE public.google_review_replies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+    google_review_id TEXT NOT NULL,
+    reviewer_name TEXT NOT NULL,
+    star_rating SMALLINT NOT NULL CHECK (star_rating BETWEEN 1 AND 5),
+    review_text_snippet TEXT, -- Set to NULL after 30 days per Google Content Policy
+    review_created_at TIMESTAMPTZ NOT NULL,
+    last_fetched_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    existing_google_reply_detected BOOLEAN NOT NULL DEFAULT FALSE,
+    ai_draft_text TEXT,
+    draft_tone TEXT CHECK (draft_tone IN ('professional', 'warm', 'direct', 'apologetic')),
+    final_reply_text TEXT CHECK (octet_length(final_reply_text) <= 4096),
+    revision INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'unreplied'
+        CHECK (status IN ('unreplied', 'drafted', 'approved', 'submitting', 'pending_moderation', 'published', 'rejected_by_google', 'outcome_unknown', 'archived')),
+    attempt_id UUID,
+    attempted_at TIMESTAMPTZ,
+    google_moderation_state TEXT CHECK (google_moderation_state IN ('PENDING', 'APPROVED', 'REJECTED')),
+    reconciliation_required BOOLEAN NOT NULL DEFAULT FALSE,
+    sensitive_flag BOOLEAN NOT NULL DEFAULT FALSE,
+    approved_by_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMPTZ,
+    approved_revision INTEGER,
+    approved_reply_hash TEXT,
+    published_by_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    published_at TIMESTAMPTZ,
+    google_published_update_time TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT uq_google_review_tenant UNIQUE (business_id, google_review_id),
+    -- Inviolable Option A constraint: Published or pending moderation replies require full cryptographic approval proof
+    CONSTRAINT chk_option_a_mandatory_human_approval CHECK (
+        status NOT IN ('published', 'pending_moderation') OR (
+            approved_by_user_id IS NOT NULL
+            AND approved_reply_hash IS NOT NULL
+            AND approved_revision IS NOT NULL
+            AND approved_revision = revision
+        )
+    )
+);
+
+-- RLS Enforcement
+ALTER TABLE public.google_review_replies ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "google_replies_owner_all"
+    ON public.google_review_replies
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = google_review_replies.business_id
+              AND b.owner_id = auth.uid()
+        )
+    );
+
+CREATE INDEX idx_google_replies_biz_status
+    ON public.google_review_replies(business_id, status);
+CREATE INDEX idx_google_replies_last_fetched
+    ON public.google_review_replies(last_fetched_at);
+
+-- Column-Level Privilege Hardening: Disallow direct client tampering with approval or publishing status
+REVOKE INSERT, DELETE ON public.google_review_replies FROM authenticated, anon, public;
+REVOKE UPDATE ON public.google_review_replies FROM authenticated, anon, public;
+-- Allow authenticated merchants to update draft text and tone only via PostgREST
+GRANT UPDATE (final_reply_text, draft_tone) ON public.google_review_replies TO authenticated;
+
+-- Automatic Approval Invalidation Trigger: Editing draft increments revision and invalidates prior approval
+CREATE OR REPLACE FUNCTION public.trg_fn_invalidate_reply_approval_on_edit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.final_reply_text IS DISTINCT FROM NEW.final_reply_text THEN
+        NEW.revision := OLD.revision + 1;
+        NEW.approved_reply_hash := NULL;
+        NEW.approved_revision := NULL;
+        NEW.approved_by_user_id := NULL;
+        NEW.approved_at := NULL;
+        IF NEW.status IN ('approved', 'rejected_by_google') THEN
+            NEW.status := 'drafted';
+        END IF;
+    END IF;
+    NEW.updated_at := timezone('utc'::text, now());
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_invalidate_reply_approval
+BEFORE UPDATE ON public.google_review_replies
+FOR EACH ROW
+EXECUTE FUNCTION public.trg_fn_invalidate_reply_approval_on_edit();
+```
+
+### 24.2 Google Content Policy Compliance Purge Worker
+Per Google Business Profile API policies, raw review text cached on third-party servers must not be retained beyond 30 days. The purge is keyed on `last_fetched_at` (representing when the Google content was retrieved or refreshed) rather than row creation date.
+
+```sql
+CREATE OR REPLACE FUNCTION public.purge_stale_google_reviews_text()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_purged_count INTEGER;
+BEGIN
+    UPDATE public.google_review_replies
+    SET review_text_snippet = NULL,
+        reviewer_name = 'Google User',
+        updated_at = timezone('utc'::text, now())
+    WHERE last_fetched_at < (timezone('utc'::text, now()) - INTERVAL '30 days')
+      AND review_text_snippet IS NOT NULL;
+
+    GET DIAGNOSTICS v_purged_count = ROW_COUNT;
+    RETURN v_purged_count;
+END;
+$$;
+
+-- Revoke execute from public; grant to service_role and pg_cron only
+REVOKE EXECUTE ON FUNCTION public.purge_stale_google_reviews_text() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.purge_stale_google_reviews_text() TO service_role;
+```
+
+### 24.3 Four-Level Data Retention & Compliance Taxonomy
+
+```
++----------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                           GOOGLE REVIEW DATA RETENTION & COMPLIANCE TAXONOMY (4 LEVELS)                                            |
++----------------------------------------------------------------------------------------------------------------------------------------------------+
+| Level & Classification  | Database Field(s)                     | Purpose & Justification        | Retention Policy Ceiling   | Tenant Disconnect  |
+|-------------------------+---------------------------------------+--------------------------------+----------------------------+--------------------|
+| 1. Verified Permitted   | final_reply_text, approved_reply_hash,| Merchant-authored statement &  | Permanent business record  | Retained in audit  |
+|                         | approved_revision, approved_by_user_id| Option A audit trail           | (Merchant IP & compliance) | trail              |
+|                         | approved_at, published_by_user_id,    |                                |                            |                    |
+|                         | published_at, attempt_id              |                                |                            |                    |
+|-------------------------+---------------------------------------+--------------------------------+----------------------------+--------------------|
+| 2. Conditionally        | google_review_id, reviewer_name,      | Review sync, UI display, and   | Max 30 days from           | Hard delete row or |
+|    Permitted            | star_rating, review_text_snippet,     | prompt context                 | last_fetched_at; daily     | anonymize reviewer |
+|                         | ai_draft_text                         |                                | pg_cron purge worker       | name               |
+|-------------------------+---------------------------------------+--------------------------------+----------------------------+--------------------|
+| 3. Unverified (Blocker) | review_text_snippet passed to         | Gemini AI reply draft          | Feasibility Blocker:       | N/A (Blocked until |
+|                         | Google Gemini API                     | generation                     | Requires Google written    | policy approved)   |
+|                         |                                       |                                | Developer confirmation     |                    |
+|-------------------------+---------------------------------------+--------------------------------+----------------------------+--------------------|
+| 4. Prohibited           | Permanent review text caching,        | Unauthorized data mining,      | STRICTLY PROHIBITED        | Immediate hard     |
+|                         | indexing, external syndication, or    | AI model training, or          | Zero persistence allowed   | purge              |
+|                         | cross-merchant aggregation            | permanent third-party store    |                            |                    |
++----------------------------------------------------------------------------------------------------------------------------------------------------+
+```
+
+> [!IMPORTANT]
+> **24-Hour Cron Jitter & Query-Time Filter Defense:**
+> Because `pg_cron` jobs in managed serverless environments are subject to execution delays, scheduling jitter, or transient maintenance windows, the application layer MUST enforce a query-time filter guard:
+> ```sql
+> WHERE (last_fetched_at >= (timezone('utc'::text, now()) - INTERVAL '30 days') OR review_text_snippet IS NULL)
+> ```
+> This ensures that even if the daily purge cron experiences a 24-hour delay, unpurged stale review text is never returned to the merchant UI or passed to any downstream processing.
+
+> [!CAUTION]
+> **Third-Party AI Processing Feasibility Gate:**
+> Passing Google review text to the Google Gemini API for draft generation constitutes third-party processing. Google Business Profile API Additional Terms §Data Use restrictions must be authoritatively resolved with Google Developer Support prior to executing database migrations or deploying production sync workers.
+
+---
+
+## 25. Approval Checklist
 
 - [ ] All 12 tables reviewed and verified against PRD requirements.
 - [ ] Safe profile field separation and privilege escalation triggers approved.

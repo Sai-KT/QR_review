@@ -390,6 +390,7 @@ The merchant dashboard must present an honest, transparent analytics funnel.
 | **AI Model: Supported Gemini Flash via Edge Function** | `PROVISIONAL` | Using `gemini-2.5-flash` or `gemini-3.5-flash-lite` via `@google/genai` SDK. |
 | **Fair-Use AI Quota (100–150 gens/mo per business)** | `REQUIRES VALIDATION` | To be calibrated against actual pilot monthly generation data. |
 | **Conversion Superiority Over Free Google QR** | `REQUIRES VALIDATION` | Requires empirical A/B baseline testing during pilot before claiming superiority. |
+| **AI Google Review Reply Assistant** | `DEFERRED — POST-MVP (OPTION A)` | Milestone M10. Mandatory merchant review and human approval prior to Google publication. Zero auto-publishing; 30-day raw review purge (DOC-REPLY-01). |
 
 ---
 
@@ -400,6 +401,7 @@ The merchant dashboard must present an honest, transparent analytics funnel.
 3. **Direct-to-Google QR Baseline Comparison:** Does the AI draft experience generate a statistically significant increase in completed Google reviews compared to a standard, free Google Review QR standee?
 4. **WhatsApp Feedback Channel Utilization:** How frequently do customers utilize the universal WhatsApp feedback link, and do merchants find this side-channel operationally valuable?
 5. **Subscription Conversion at Day 30:** What percentage of pilot merchants will transition from the setup package to the recurring ₹399/month subscription without extensive manual founder intervention?
+6. **Google Business Profile API Approval Timing:** When will the developer account reach 60 days of verified business profile management to submit the GBP API Basic Access Application for Milestone M10?
 
 ---
 

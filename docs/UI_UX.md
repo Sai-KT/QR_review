@@ -27,7 +27,8 @@
 | Revision | Date | Author | Summary of Changes | Status |
 | :---: | :---: | :--- | :--- | :---: |
 | **1.0** | Oct 17, 2026 | Principal Product Designer | Initial comprehensive UI/UX specification spanning Public Customer Experience (`/q/:qrId`), Business Owner Portal (`/dashboard`), and Super-Admin Console (`/admin`). | Superseded |
-| **1.1** | Oct 17, 2026 | Principal UI/UX Auditor | **Stage 5 Quality & Consistency Audit Applied:**<br/>1. **Cross-Document Alignment:** Aligned optional customer note limit to 150 chars to match `DATABASE_SCHEMA.md`; reconciled merchant profile fields; mapped analytics to approved event taxonomy with explicit denominators.<br/>2. **Configurable Privacy Notice:** Documented 3 pending note-retention models (Ephemeral vs 30d vs 90d) without premature hardcoding; clarified pseudonymous PII nature.<br/>3. **Grounded AI Examples:** Replaced sample review containing invented staff names/services with 3 strictly grounded examples (positive, neutral, negative) preserving authentic sentiment.<br/>4. **Accessible Color System (WCAG 2.2 AA):** Recalculated text contrast ratios on white surfaces; introduced accessible replacement tokens (`text-muted`, `state-warning`, `state-success`); clarified 24px minimum vs 48px ergonomic touch target.<br/>5. **Customer Journey Reliability:** Added explicit Back/Next navigation; removed mandatory auto-advance; added offline first-scan clarity; reframed 30s journey as unverified design target.<br/>6. **Complete Screen Specifications:** Delivered structured, implementation-ready specifications for all 15 customer screens, 11 owner screens, and 7 admin screens.<br/>7. **Dashboard & Metric Integrity:** Corrected conversion rate definitions; removed unverified publisher claims; restricted customer review text display to approved stored data.<br/>8. **Standee Print Specification:** Clarified vector layout vs 300 DPI raster logo requirements; specified A6 preferred size, bleed, quiet zone, and neutral anti-gating copy.<br/>9. **Ethical Copy Audit:** Removed all unsupported claims ("guaranteed 30-sec", "verified status", "guaranteed growth").<br/>10. **Pilot Usability Testing Plan:** Separated design hypotheses from measured results; established privacy-safe, voluntary usability drill protocol.<br/>11. **Stage 6 Dependencies:** Cataloged 6 technical dependencies requiring API specification. | **Under Review** |
+| **1.1** | Oct 17, 2026 | Principal UI/UX Auditor | **Stage 5 Quality & Consistency Audit Applied:**<br/>1. **Cross-Document Alignment:** Aligned optional customer note limit to 150 chars to match `DATABASE_SCHEMA.md`; reconciled merchant profile fields; mapped analytics to approved event taxonomy with explicit denominators.<br/>2. **Configurable Privacy Notice:** Documented 3 pending note-retention models (Ephemeral vs 30d vs 90d) without premature hardcoding; clarified pseudonymous PII nature.<br/>3. **Grounded AI Examples:** Replaced sample review containing invented staff names/services with 3 strictly grounded examples (positive, neutral, negative) preserving authentic sentiment.<br/>4. **Accessible Color System (WCAG 2.2 AA):** Recalculated text contrast ratios on white surfaces; introduced accessible replacement tokens (`text-muted`, `state-warning`, `state-success`); clarified 24px minimum vs 48px ergonomic touch target.<br/>5. **Customer Journey Reliability:** Added explicit Back/Next navigation; removed mandatory auto-advance; added offline first-scan clarity; reframed 30s journey as unverified design target.<br/>6. **Complete Screen Specifications:** Delivered structured, implementation-ready specifications for all 15 customer screens, 11 owner screens, and 7 admin screens.<br/>7. **Dashboard & Metric Integrity:** Corrected conversion rate definitions; removed unverified publisher claims; restricted customer review text display to approved stored data.<br/>8. **Standee Print Specification:** Clarified vector layout vs 300 DPI raster logo requirements; specified A6 preferred size, bleed, quiet zone, and neutral anti-gating copy.<br/>9. **Ethical Copy Audit:** Removed all unsupported claims ("guaranteed 30-sec", "verified status", "guaranteed growth").<br/>10. **Pilot Usability Testing Plan:** Separated design hypotheses from measured results; established privacy-safe, voluntary usability drill protocol.<br/>11. **Stage 6 Dependencies:** Cataloged 6 technical dependencies requiring API specification. | Superseded |
+| **1.2** | Nov 8, 2026 | Principal Product Designer | **Post-MVP Design Integration: Milestone M10 (Google Review Replies Inbox & Reply Center):**<br/>1. **New Planned Screen (§9.12):** Added `SCR-OWN-12` (`/dashboard/replies`) spanning 21 distinct UI states under Task `M10-T06`.<br/>2. **Option A Governance Hardening:** Designed interactive Reply Editor Modal with tone customizer, live byte counter (`x / 4,096 bytes`), revision tracking, and explicit Publish Confirmation Modal with existing Google reply warning state. Zero auto-publishing interface controls.<br/>3. **Design-to-PRD Traceability (§20):** Mapped `SCR-OWN-12` across requirements `FR-REPLY-001` through `FR-REPLY-012`. | **Planning Baseline Approved** |
 
 ### 1.2 Cross-Document Reconciliation Table
 The following table documents the resolution of technical discrepancies across project baselines:
@@ -680,6 +681,46 @@ The Business Owner Portal (`/dashboard`) is designed for non-technical retail pr
 
 ---
 
+### 9.12 SCR-OWN-12: Google Review Replies Inbox & Reply Center (Planned Post-MVP — Milestone M10)
+
+- **Stable Screen ID:** `SCR-OWN-12`
+- **Associated Milestone Task:** `M10-T06` (Merchant Reply Center & Approval Interface)
+- **Screen Title:** Google Review Management & AI Reply Assistant
+- **Target Route:** `/dashboard/replies`
+- **Target Device Viewports:** Desktop (1440px), Tablet (768px), Mobile (320px–375px)
+- **Primary Personas:** Business Owner (Aarav, Cafe Owner; Priya, Salon Owner)
+- **Screen Purpose:** Provide a unified operational inbox to monitor published Google reviews, generate tone-tailored Gemini Flash reply drafts, edit draft text with live character budgeting, and explicitly approve and publish replies to Google via the Google Business Profile API.
+- **Governing Architecture:** Strictly governed by **Option A (Mandatory Merchant Review & Explicit Human Approval Prior to Google Publication)**. Zero automated background publishing.
+- **Latency Benchmark Target:** AI reply generation targets P50 < 2.5s, P95 < 4.0s (to be benchmarked in real deployment).
+
+#### Comprehensive 21-State UI Matrix:
+1. **State 1 (`UNCONNECTED`):** Google Connect card displayed with benefits list, Google OAuth badge, and primary action *"Connect Google Business Profile"*.
+2. **State 2 (`CONNECTING`):** Spinner with *"Redirecting to Google Consent..."* and OAuth CSRF validation state.
+3. **State 3 (`SYNCING`):** Shimmer skeleton over review inbox feed with *"Synchronizing reviews from Google Business Profile..."*.
+4. **State 4 (`EMPTY_NO_REVIEWS`):** Empty state illustration: *"No Google reviews found for this location yet. Distribute your QR standees to start gathering reviews!"*.
+5. **State 5 (`FEED_ALL`):** Paginated review cards sorted by date (newest first). Each card displays reviewer avatar, reviewer name, star rating (1–5 gold stars), relative timestamp, truncated review snippet, and reply status pill.
+6. **State 6 (`FILTER_CRITICAL`):** Segmented filter tab *"Critical (1–2 ★)"* displaying only negative reviews requiring urgent owner attention.
+7. **State 7 (`FILTER_NEUTRAL`):** Segmented filter tab *"Neutral (3 ★)"* focusing on mixed experiences.
+8. **State 8 (`FILTER_POSITIVE`):** Segmented filter tab *"Positive (4–5 ★)"* displaying praising reviews.
+9. **State 9 (`FILTER_UNREPLIED`):** Filter tab showing only reviews that have not yet received an owner response.
+10. **State 10 (`DRAFTING_INLINE`):** Inline shimmer animation on review card while `API-REP-04` invokes Gemini Flash.
+11. **State 11 (`DRAFT_READY`):** Review card expands to show AI reply preview, tone badge (e.g. *"Tone: Warm"*), and dual actions: *"Edit Draft"* (secondary) and *"Approve & Publish"* (primary). Modifying the draft increments revision counter and invalidates any prior approval.
+12. **State 12 (`SENSITIVE_WARNING`):** Prominent warning callout above review text: *"⚠️ Sensitive Topic Flagged: Review mentions potential health, safety, or billing dispute. Generic pleasantries suppressed. Please review carefully before publishing."*
+13. **State 13 (`EDITOR_MODAL`):** Responsive modal displaying original review context, tone pill switcher (Warm, Professional, Direct, Apologetic), editable text area, live byte counter (`x / 4,096 bytes` via `new TextEncoder().encode(text).length` with Devanagari regional language character guidance: ~1,300 chars for Hindi/Marathi at 3 bytes/char), and Google publication disclaimer: *"Replies represent your public business on Google Maps. Antigravity will never publish without your explicit approval."*
+14. **State 14 (`TONE_REGENERATING`):** Shimmer overlay within Editor Modal while Gemini Flash regenerates draft for newly selected tone.
+15. **State 15 (`PUBLISH_CONFIRM`):** Explicit human-in-the-loop approval confirmation dialog: *"Confirm Publication to Google Maps: You are about to publish this response publicly under your business name. Responses can be edited later, but will immediately be visible on Google Search and Maps."* If an existing Google reply is detected, displays prominent warning: *"⚠️ A reply is already published on Google for this review. Confirming will overwrite the existing public response."* Actions: *"Cancel"* and *"Confirm & Publish Now"*.
+16. **State 16 (`PUBLISHING_SPINNER`):** Modal button transitions to disabled spinner with *"Publishing to Google Business Profile..."* (short atomic claim transaction <5ms, followed by bounded external network dispatch outside locks).
+17. **State 17 (`PENDING_MODERATION`):** Review card transitions to amber badge with *"⏳ Pending Google Policy Moderation"* badge, indicating Google Business Profile accepted the reply and is running automated policy verification.
+18. **State 18 (`PUBLISHED_SUCCESS`):** Review card transitions to green border with *"✓ Published on Google Maps"* badge, verified Google publication timestamp, and published response snippet.
+19. **State 19 (`REJECTED_BY_GOOGLE`):** Review card transitions to red alert state with *"✕ Rejected by Google Policy"* badge and reason summary. Unlocks editor modal for merchant correction and fresh approval.
+20. **State 20 (`OUTCOME_UNKNOWN`):** Review card displays warning banner *"⚠️ Publication Outcome Unknown"* due to network timeout, notifying the merchant that status will be automatically reconciled on the next sync without double-posting.
+21. **State 21 (`ERROR_DISCONNECT`):** Amber persistent alert banner: *"Google Business Profile connection expired or permissions revoked. Reconnect your account to sync and publish reviews."* CTA: *"Reconnect Google Account"*.
+
+- **Authorization Dependency:** Authenticated merchant session with verified ownership of `business_id`.
+- **Traceability:** `FR-REPLY-001` through `FR-REPLY-012`, `API-REP-01` through `API-REP-07`, `TC-REP-01` through `TC-REP-15`.
+
+---
+
 ## 10. Super-Admin Experience (Console UX)
 
 The Super-Admin Console (`/admin`) is a specialized, desktop-first operational dashboard for the solo founder. It is protected by mandatory multi-factor authentication (`aal2`).
@@ -1193,6 +1234,7 @@ The following three examples demonstrate the AI prompt grounding pipeline across
 | **SEC-001 / TC-02**| Revoke direct merchant UPDATE on review destination | `SCR-OWN-05` routes to Edge Function | Destination Edge Function with URL whitelist |
 | **SEC-003 / PC-02**| DPDPA customer disclosure & note retention tag | `SCR-CUST-05`, `CMP-08`, `SCR-OWN-08` | Scheduled purge maintenance procedure |
 | **NFR-A11Y-001**| WCAG 2.2 AA compliance and 48px touch targets | Design System tokens, all components | Purely frontend CSS/layout implementation |
+| **FR-REPLY-001..012** | Google Review Replies Inbox & Editor | `SCR-OWN-12` (21 UI states) | `API-REP-01` through `API-REP-07` gateways |
 
 ---
 
@@ -1248,6 +1290,8 @@ Before launching the commercial pilot, the founder will conduct voluntary on-sit
    - [x] **FOUNDER APPROVED:** Digital QR distribution for MVP (dashboard preview, high-res PNG export, copyable first-party link). Physical standees, A6/4x6" artwork, and print-ready PDFs are DEFERRED TO POST-MVP. Active MVP screens: 32 active states/screens, 1 deferred (`SCR-OWN-07`).
 6. **WhatsApp Support Placement:**
    - [x] Retain direct WhatsApp manager link as a subtle, neutral footer link on customer survey screens.
+7. **Google Review Management & AI Reply Assistant (Decision 10):**
+   - [x] **FOUNDER APPROVED (PLANNING & DESIGN ONLY):** Adopt Option A mandatory merchant review and explicit human approval prior to Google publication. Zero automated publishing permitted; `SCR-OWN-12` designed with 21 UI states and explicit publish confirmation modal; implementation deferred to Post-MVP Milestone M10.
 
 ---
 

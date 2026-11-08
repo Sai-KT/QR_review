@@ -23,7 +23,8 @@
 | Revision | Date | Author | Summary of Changes | Status |
 | :---: | :---: | :--- | :--- | :---: |
 | **1.0** | Oct 17, 2026 | Principal Architect | Initial system architecture baseline specification. | Superseded |
-| **1.1** | Oct 17, 2026 | Principal Architect | **Stage 2 Correction Audit Applied:**<br/>1. **Public Business Lookup Hardening:** Fully secured `get_public_business_by_qr` with `SET search_path = ''`, schema-qualified tables, restricted `EXECUTE` grants, and explicit documentation of `SECURITY DEFINER` RLS-bypass implications. Suspended businesses return safe status without leaking owner or billing data (Task 1).<br/>2. **Three-Tier Database Access & Privilege Management:** Explicitly distinguished Browser Anon client, Authenticated Owner client with RLS, and Backend `service_role` operations. Enforced imperative server-side tenant authorization to prevent horizontal privilege escalation. Mandated Supabase Auth `aal2` MFA for admin operations (Task 2).<br/>3. **Distributed Rate Limiting:** Removed reliance on ephemeral Deno local memory. Defined distributed database-backed atomic counters (`rate_limit_buckets` table and sliding-window RPC) with optional managed Redis. Addressed shared salon/cafe Wi-Fi NATs using hashed IP keys (`SHA-256(IP + daily_salt)`) and per-session quotas (Task 3).<br/>4. **Atomic Quota State Machine:** Specified two-phase atomic reservation (`reserve_quota`, `commit_quota`, `release_quota`, idempotency keys, and 60-second stale TTL sweeps). Separated customer quota usage, actual API token billing, and failure accounting (Task 4).<br/>5. **Gemini Model Alignment:** Updated model evaluation to `gemini-3.5-flash-lite` and `gemini-3.8-flash`, noting Gemini 2.5 access restrictions for new projects. Added configurable model binding via environment variables (Task 5).<br/>6. **Token Cost Modeling:** Integrated official Google per-million token rates with input, output, thinking token, and retry margins (Task 6).<br/>7. **Platform Cost Alignment:** Re-verified Cloudflare Pages, Supabase tiers, domain fees, and gateway costs without double-counting (Task 7).<br/>8. **Finalized Routing Architecture:** Formally adopted Option A (React SPA route `/q/:qrId` on Cloudflare Pages) with detailed SPA fallback routing, edge asset caching, and outage/malformed URL resilience (Task 8).<br/>9. **Privacy & Feedback Storage:** Removed absolute "zero PII" claims; classified customer notes as pseudonymous data; evaluated MVP ephemeral vs. persisted trade-offs; specified 30-day automated rolling purge, backup retention, and privacy disclosures (Task 9).<br/>10. **Frontend Session Security:** Documented SPA `localStorage` XSS vectors and mitigations (strict CSP headers via Cloudflare `_headers`, DOMPurify, short token lifetimes, server-side RLS enforcement, and `aal2` admin MFA) (Task 10).<br/>11. **Framework Versions:** Verified compatibility for React 19, Vite 6, TypeScript 5, Tailwind CSS v4, React Router v7, and `@google/genai` (Task 11).<br/>12. **Resolved Technical Contradictions:** Cleared contradictions regarding session deduplication, SPA vs. Edge routing, RLS vs. service-role bypass, suspended business safe status vs. 404, serverless cold starts (100–300ms), and clipboard/popup browser realities (Task 12). | **Under Review** |
+| **1.1** | Oct 17, 2026 | Principal Architect | **Stage 2 Correction Audit Applied:**<br/>1. **Public Business Lookup Hardening:** Fully secured `get_public_business_by_qr` with `SET search_path = ''`, schema-qualified tables, restricted `EXECUTE` grants, and explicit documentation of `SECURITY DEFINER` RLS-bypass implications. Suspended businesses return safe status without leaking owner or billing data (Task 1).<br/>2. **Three-Tier Database Access & Privilege Management:** Explicitly distinguished Browser Anon client, Authenticated Owner client with RLS, and Backend `service_role` operations. Enforced imperative server-side tenant authorization to prevent horizontal privilege escalation. Mandated Supabase Auth `aal2` MFA for admin operations (Task 2).<br/>3. **Distributed Rate Limiting:** Removed reliance on ephemeral Deno local memory. Defined distributed database-backed atomic counters (`rate_limit_buckets` table and sliding-window RPC) with optional managed Redis. Addressed shared salon/cafe Wi-Fi NATs using hashed IP keys (`SHA-256(IP + daily_salt)`) and per-session quotas (Task 3).<br/>4. **Atomic Quota State Machine:** Specified two-phase atomic reservation (`reserve_quota`, `commit_quota`, `release_quota`, idempotency keys, and 60-second stale TTL sweeps). Separated customer quota usage, actual API token billing, and failure accounting (Task 4).<br/>5. **Gemini Model Alignment:** Updated model evaluation to `gemini-3.5-flash-lite` and `gemini-3.8-flash`, noting Gemini 2.5 access restrictions for new projects. Added configurable model binding via environment variables (Task 5).<br/>6. **Token Cost Modeling:** Integrated official Google per-million token rates with input, output, thinking token, and retry margins (Task 6).<br/>7. **Platform Cost Alignment:** Re-verified Cloudflare Pages, Supabase tiers, domain fees, and gateway costs without double-counting (Task 7).<br/>8. **Finalized Routing Architecture:** Formally adopted Option A (React SPA route `/q/:qrId` on Cloudflare Pages) with detailed SPA fallback routing, edge asset caching, and outage/malformed URL resilience (Task 8).<br/>9. **Privacy & Feedback Storage:** Removed absolute "zero PII" claims; classified customer notes as pseudonymous data; evaluated MVP ephemeral vs. persisted trade-offs; specified 30-day automated rolling purge, backup retention, and privacy disclosures (Task 9).<br/>10. **Frontend Session Security:** Documented SPA `localStorage` XSS vectors and mitigations (strict CSP headers via Cloudflare `_headers`, DOMPurify, short token lifetimes, server-side RLS enforcement, and `aal2` admin MFA) (Task 10).<br/>11. **Framework Versions:** Verified compatibility for React 19, Vite 6, TypeScript 5, Tailwind CSS v4, React Router v7, and `@google/genai` (Task 11).<br/>12. **Resolved Technical Contradictions:** Cleared contradictions regarding session deduplication, SPA vs. Edge routing, RLS vs. service-role bypass, suspended business safe status vs. 404, serverless cold starts (100–300ms), and clipboard/popup browser realities (Task 12). | Superseded |
+| **1.2** | Nov 8, 2026 | Principal Architect | **Post-MVP Architectural Integration: Milestone M10 (Google Review Management & AI Reply Assistant):**<br/>1. **Integration Architecture (§21):** Defined end-to-end integration architecture for Google Business Profile API v4, OAuth 2.0 token management, AES-GCM-256 token encryption vault, on-demand review synchronization, and Gemini review reply generation.<br/>2. **Option A Governance Invariant:** Enforced mandatory merchant review, cryptographic approval digest binding, revision invalidation on edit, and explicit human approval prior to Google publishing. Strictly prohibited automated or scheduled background reply publishing.<br/>3. **30-Day Content Retention Ceiling:** Incorporated Google API Content Policy compliance: review snippets cached for max 30 days keyed on `last_fetched_at`; audit metadata retained permanently.<br/>4. **Traceability (§19 & §21):** Mapped `FR-REPLY-001` through `FR-REPLY-012` to architecture layers with zero cross-tenant bleed. | **Planning Baseline Approved** |
 
 ---
 
@@ -827,6 +828,7 @@ graph LR
 | **Permanent QR Engine** | `FR-BILLING-001`, `FR-BILLING-002`, `FR-CUST-001` | Section 7 (Permanent QR Architecture) | `VERIFIED` |
 | **Security & Privacy** | `SEC-001` through `SEC-005` | Section 8, Section 9, Section 13, Section 14 | `VERIFIED` |
 | **Non-Functional Requirements** | `NFR-001` through `NFR-008` | Section 5, Section 12, Section 15, Section 17 | `VERIFIED` |
+| **Planned Post-MVP: Google Review Replies** | `FR-REPLY-001` through `FR-REPLY-012` | Section 21 (Planned Post-MVP Integration) | `PLANNED (M10)` |
 
 ---
 
@@ -871,8 +873,230 @@ DECISION AREA                   STATUS                 WORKING SPECIFICATION & N
 20. Google Policy Compliance    APPROVED (TECH DESIGN) Design B customer consent checkbox & disclosure (M0-16).
 21. Pre-Implementation Sign-Off FOUNDER SIGNED OFF     Formal closure: M0 — COMPLETE: PLANNING & DESIGN ONLY.
                                                         Approved Oct 23, 2026 (commit aafb588); M1 requires directive (M0-17).
+22. Google Review Reply Assist. OPTION A APPROVED      Post-MVP Milestone M10. Mandatory merchant review and
+                                (PLANNING ONLY)        explicit human approval prior to Google publication. Zero
+                                                       auto-publishing; 30-day raw review purge (DOC-REPLY-01).
 ===================================================================================================
 ```
+
+---
+
+## 21. Planned Post-MVP Integration: Google Business Profile & AI Reply Assistant (Milestone M10)
+
+### 21.1 Overview & System Boundaries
+The **QR_Review AI Review Reply Assistant** is a planned Post-MVP capability (Milestone M10) designed to close the merchant operational loop: after patrons write Google reviews via the customer survey flow, the merchant manages published Google reviews and publishes tailored responses directly from the Merchant Owner Portal.
+
+> [!IMPORTANT]
+> **Inviolable Architectural Invariant — Option A Mandatory Human Approval:**
+> The reply engine operates strictly under **Option A: Mandatory Merchant Review and Explicit Approval Prior to Google Publication**.
+> 1. No reply may ever be submitted to the Google Business Profile API automatically.
+> 2. Zero background cron jobs or automated webhook handlers may dispatch replies.
+> 3. Every reply published to Google must be accompanied by an authenticated merchant owner session, an optional manual edit, an explicit approval confirmation action, and an immutable audit log row (`published_at`, `approved_by_user_id`, `payload_hash`).
+
+### 21.2 Architectural System Context & Trust Boundaries
+
+```mermaid
+flowchart TD
+    subgraph GoogleEcosystem["Google Ecosystem"]
+        GBP["Google Business Profile API v4"]
+        GMap["Google Maps Public Listing"]
+        GAuth["Google OAuth 2.0 Auth Server"]
+    end
+
+    subgraph MerchantPortal["Merchant Owner Portal (SCR-OWN-12)"]
+        Browser["Merchant Browser (Vite + React)"]
+    end
+
+    subgraph BackendEngine["Supabase Backend (Post-MVP Extension)"]
+        OAuthFn["google-oauth-callback (Edge Function)"]
+        SyncFn["sync-google-reviews (Edge Function)"]
+        GenFn["generate-review-reply (Edge Function)"]
+        PubFn["publish-review-reply (Edge Function)"]
+        Gemini["Google Gemini Flash API"]
+        DB[(PostgreSQL 16 Multi-Tenant)]
+        Vault["Encrypted Token Vault (AES-GCM-256)"]
+        PurgeCron["pg_cron (30-Day Raw Review Purge)"]
+    end
+
+    Browser -->|1. OAuth Connect Request| GAuth
+    GAuth -->|2. Authorization Code| OAuthFn
+    OAuthFn -->|3. Store Encrypted Refresh Token| Vault
+    OAuthFn -->|4. Store Verified Location ID| DB
+
+    Browser -->|5. Sync Reviews Request| SyncFn
+    SyncFn -->|6. Decrypt Token & Fetch Reviews| GBP
+    SyncFn -->|7. Upsert Review Records| DB
+
+    Browser -->|8. Generate Reply Draft| GenFn
+    GenFn -->|9. Escaped Review Prompt| Gemini
+    Gemini -->|10. Contextual Reply Draft| GenFn
+    GenFn -->|11. Store Draft| DB
+
+    Browser -->|12. Explicit Human Approval & Publish| PubFn
+    PubFn -->|13. Decrypt Token & PUT Reply| GBP
+    PubFn -->|14. Immutably Record Audit Metadata| DB
+
+    GBP -->|15. Public Reply Displays on Maps| GMap
+    PurgeCron -->|Daily Hard Purge of review_text > 30d| DB
+```
+
+### 21.3 End-to-End Sequence Diagrams
+
+#### Sequence 1: Merchant OAuth 2.0 Connection & Token Vaulting
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Merchant as Merchant Owner
+    participant UI as SCR-OWN-12 (React)
+    participant OAuthFn as google-oauth-callback (Edge Fn)
+    participant GAuth as Google OAuth 2.0
+    participant GBP as Google Business Profile API
+    participant DB as PostgreSQL (Vault & RLS)
+
+    Merchant->>UI: Click "Connect Google Business Profile"
+    UI->>OAuthFn: GET /api/v1/owner/google/auth-url (API-REP-01)
+    OAuthFn-->>UI: Return Google OAuth URL + state nonce
+    UI->>GAuth: Redirect to Google Consent (scope: business.manage)
+    Merchant->>GAuth: Grant permissions
+    GAuth-->>OAuthFn: Redirect with auth code & state (API-REP-02)
+    OAuthFn->>GAuth: Exchange code for refresh token & access token
+    OAuthFn->>GBP: GET /v4/accounts (Discover accounts & locations)
+    OAuthFn->>OAuthFn: Encrypt refresh_token via AES-GCM-256
+    OAuthFn->>DB: INSERT INTO google_business_connections (business_id, encrypted_token, location_id)
+    OAuthFn-->>UI: Redirect to /dashboard/replies?connected=true
+    UI-->>Merchant: Show "Google Business Profile Connected" badge
+```
+
+#### Sequence 2: On-Demand Review Synchronization & 30-Day Purge
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Merchant as Merchant Owner
+    participant UI as SCR-OWN-12 (React)
+    participant SyncFn as sync-google-reviews (Edge Fn)
+    participant GBP as Google Business Profile API
+    participant DB as PostgreSQL
+    participant Cron as pg_cron Purge Worker
+
+    Merchant->>UI: Click "Sync Reviews" (or load /dashboard/replies)
+    UI->>SyncFn: POST /api/v1/owner/google/sync-reviews (API-REP-03)
+    SyncFn->>DB: Fetch encrypted refresh token for business_id
+    SyncFn->>SyncFn: Decrypt token & refresh ephemeral access token
+    SyncFn->>GBP: GET /v4/accounts/{acc}/locations/{loc}/reviews
+    GBP-->>SyncFn: Return list of reviews (stars, author, snippet, date)
+    SyncFn->>DB: UPSERT INTO google_review_replies (google_review_id, reviewer_name, star_rating, review_text_snippet, status='unreplied')
+    SyncFn-->>UI: Return synchronized review list
+    UI-->>Merchant: Render updated review feed with "Unreplied" badges
+
+    Note over DB,Cron: Enforce Google 30-Day Content Retention Policy
+    Cron->>DB: Daily EXECUTE purge_stale_google_reviews_text()
+    DB->>DB: UPDATE google_review_replies SET review_text_snippet = NULL, reviewer_name = 'Google User' WHERE last_fetched_at < NOW() - INTERVAL '30 days'
+```
+
+#### Sequence 3: Contextual AI Reply Draft Generation (Option A)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Merchant as Merchant Owner
+    participant UI as SCR-OWN-12 (React)
+    participant GenFn as generate-review-reply (Edge Fn)
+    participant Gemini as Google Gemini Flash
+    participant DB as PostgreSQL
+
+    Merchant->>UI: Click "Generate AI Draft" on review card
+    UI->>GenFn: POST /api/v1/owner/google/generate-reply (API-REP-04)
+    GenFn->>DB: Fetch review details (star rating, text snippet, business category)
+    GenFn->>GenFn: Sanitize & XML-escape review text (<USER_REVIEW>...</USER_REVIEW>)
+    GenFn->>GenFn: Detect sensitive topics (food safety, billing disputes, hygiene)
+    GenFn->>Gemini: GenerateContent(prompt with selected tone: Warm, Professional, Direct, Apologetic)
+    Gemini-->>GenFn: Return grounded reply draft (<= 4096 UTF-8 bytes)
+    GenFn->>DB: UPDATE google_review_replies SET ai_draft_text = draft, status = 'drafted'
+    GenFn-->>UI: Return draft text, tone, and sensitive topic flags
+    UI-->>Merchant: Open Reply Editor with draft, tone switcher, and byte counter (<= 4096 bytes)
+```
+
+#### Sequence 4: Merchant Explicit Review, Approval & Authorized Google Publication (Bounded Attempt)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Merchant as Merchant Owner
+    participant UI as SCR-OWN-12 (React)
+    participant PubFn as publish-review-reply (Edge Fn)
+    participant GBP as Google Business Profile API
+    participant DB as PostgreSQL
+
+    Note over Merchant,DB: Phase 1: Draft Review & Optional Edit (Invalidates Prior Approval)
+    Merchant->>UI: Review & edit draft in Reply Editor Modal (<= 4096 UTF-8 bytes)
+    UI->>DB: PATCH /rest/v1/google_review_replies (API-REP-05: final_reply_text)
+    DB->>DB: Trigger: revision = revision + 1, approved_reply_hash = NULL, status = 'drafted'
+
+    Note over Merchant,DB: Phase 2: Explicit Human Approval Confirmation
+    Merchant->>UI: Click "Approve & Publish to Google"
+    UI->>UI: Display Confirmation Modal with Public Business Disclaimer & Review Context
+    Merchant->>UI: Confirm explicit approval
+    UI->>PubFn: POST /functions/v1/publish-review-reply (API-REP-06: replyId, revision, approvedReplyText)
+
+    Note over PubFn,DB: Phase 3: Atomic Attempt Claim (Short DB Transaction < 5ms)
+    PubFn->>DB: BEGIN; SELECT ... FOR UPDATE;
+    PubFn->>PubFn: Assert revision matches AND approved_reply_hash matches
+    PubFn->>DB: UPDATE status = 'submitting', attempt_id = gen_random_uuid(), attempted_at = NOW(); COMMIT;
+    Note over DB: Database row lock released immediately! No long-held transaction.
+
+    Note over PubFn,GBP: Phase 4: External Google API Dispatch (Outside DB Lock)
+    PubFn->>DB: Fetch encrypted refresh token for business_id
+    PubFn->>PubFn: Decrypt token & obtain ephemeral Google access token
+    PubFn->>GBP: GET /v4/accounts/{acc}/locations/{loc}/reviews/{reviewId} (Check existing reply)
+    alt Review already has a published reply and overwrite not confirmed
+        PubFn->>DB: Revert status = 'approved', attempt_id = NULL
+        PubFn-->>UI: HTTP 409 Conflict (ERR_REPLY_ALREADY_EXISTS: confirm overwrite)
+    else No reply or overwrite explicitly confirmed
+        PubFn->>GBP: PUT /v4/accounts/{acc}/locations/{loc}/reviews/{reviewId}/reply (comment: approvedReplyText)
+        alt Google Returns HTTP 200 OK (Inspecting ReviewReply moderation state)
+            PubFn->>DB: UPDATE status = 'published' (or 'pending_moderation'), published_at = NOW(), google_published_update_time = updateTime
+            PubFn-->>UI: HTTP 200 OK (Truthful status: published or pending_moderation)
+            UI-->>Merchant: Display appropriate status badge on review card
+        else Google Moderation Policy Rejection (HTTP 400/422)
+            PubFn->>DB: UPDATE status = 'rejected_by_google'
+            PubFn-->>UI: HTTP 422 Unprocessable (ERR_GOOGLE_POLICY_REJECTED)
+        else Network Timeout / 5xx
+            PubFn->>DB: UPDATE status = 'outcome_unknown', reconciliation_required = true
+            PubFn-->>UI: HTTP 504 Gateway Timeout (ERR_PUBLISH_OUTCOME_UNKNOWN)
+        end
+    end
+```
+
+### 21.4 Data Retention & Privacy Compliance Invariant
+
+To comply strictly with the Google Business Profile API Content Policy and the Indian Digital Personal Data Protection Act (DPDPA):
+
+#### Seven-Field Data Classification & Retention Taxonomy:
+
+| Field Name | Category / Provenance | Purpose | Google Policy Status | Maximum Retention | Disconnection Behavior |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `google_review_id` | Resource Identifier / Metadata | Review deduplication, threading, and status tracking | **Conditionally Permitted** | Active connection lifecycle | Deleted upon disconnect (`API-REP-07`) |
+| `reviewer_name` | Google API Content (User PII) | Merchant context and display in review card | **Conditionally Permitted** | **Max 30 days** from `last_fetched_at` | Set to `'Google User'` or deleted |
+| `star_rating` | Google API Content / Metadata | Review sentiment categorization and filtering | **Conditionally Permitted** | Active connection / Refreshed | Erased on disconnect (`API-REP-07`) |
+| `review_text_snippet` | Google API Content (User Comments) | Drafting context for Gemini Flash and merchant inspection | **Conditionally Permitted** | **Max 30 days** from `last_fetched_at` | Hard-purged via `pg_cron`; purged on disconnect |
+| `ai_draft_text` | Derived Content (AI Generation) | Working draft proposed by Gemini Flash | **Conditionally Permitted** | Until replaced, published, or purged | Deleted upon disconnect (`API-REP-07`) |
+| `final_reply_text` | Merchant-Authored Content | Merchant's public commercial reply posted to Google | **Verified Permitted** | Permanent merchant business record | Preserved as merchant audit history |
+| `approved_reply_hash` + audit | Operational / Audit Metadata | Cryptographic proof of human approval and audit trail | **Verified Permitted** | Retained for merchant account lifecycle | Preserved for regulatory compliance |
+| Review text to Gemini | API-to-API Ingestion | Contextual reply generation via LLM | **UNVERIFIED (BLOCKER)** | Gated on Google support confirmation | Blocked pending confirmation |
+| Permanent raw user text | Google Content | Indefinite caching / secondary indexing | **PROHIBITED** | Zero permanent storage permitted | N/A (Forbidden) |
+
+1. **30-Day Raw Review Content Purge:** Full review text snippets retrieved from Google are cached strictly for performance and drafting convenience. A daily `pg_cron` worker sets `review_text_snippet = NULL` and anonymizes `reviewer_name = 'Google User'` for all records where `last_fetched_at < NOW() - INTERVAL '30 days'`.
+2. **24-Hour Cron Jitter & Query-Time Guard:** Because `pg_cron` runs on a daily cadence, database records may transiently persist up to 30 days + 24 hours. Application queries enforce `WHERE last_fetched_at >= NOW() - INTERVAL '30 days'` so stale review text is never returned or displayed.
+3. **Permanent Audit Trail:** The audit metadata (`google_review_id`, `star_rating`, `status`, `approved_by_user_id`, `approved_reply_hash`, `approved_revision`, `published_at`, `published_by_user_id`) is preserved permanently to maintain merchant business records and regulatory accountability.
+4. **Token Revocation on Disconnect:** Disconnecting Google Business Profile (`API-REP-07`) immediately calls Google's OAuth revocation endpoint (`https://oauth2.googleapis.com/revoke`), deletes the stored encrypted refresh token from `google_business_connections`, and archives associated review records.
+
+### 21.5 Column-Level Security, Concurrency & Feasibility Gates
+
+1. **Column Privilege Hardening:**
+   - Authenticated client sessions are granted `UPDATE (final_reply_text, draft_tone)` on `public.google_review_replies` only. Direct PostgREST mutation of `status`, `approved_by_user_id`, `approved_at`, `approved_reply_hash`, `approved_revision`, `published_at`, `published_by_user_id`, `google_published_update_time`, `attempt_id`, or `attempted_at` is revoked.
+   - Column `SELECT` on `google_business_connections(encrypted_refresh_token, token_encryption_iv, token_encryption_tag)` is revoked from `authenticated`, `anon`, and `public`.
+2. **Lock-Safe Bounded Publication Attempt:**
+   - Publication avoids long-held database transaction locks by claiming the attempt in a sub-5ms transaction (`status = 'submitting'`), dispatching to Google over the network outside of any transaction, and reconciling the response in a follow-up transaction.
+3. **Third-Party AI Processing Feasibility Blocker:**
+   - Ingesting Google Business Profile review comments into the Google Gemini Flash API crosses API contractual boundaries. While Gemini paid tiers guarantee zero training or persistent data logging, whether GBP API Additional Terms permit third-party LLM processing of customer reviews must be authoritatively validated with Google Developer Support prior to production pilot implementation.
 
 ---
 

@@ -30,7 +30,8 @@
 | Revision | Date | Author | Summary of Changes | Status |
 | :---: | :---: | :--- | :--- | :---: |
 | **1.0** | Oct 19, 2026 | Principal QA Architect | Initial comprehensive QA and test plan covering all PRD functional requirements, NFRs, security baselines, API operations, internal RPCs, and UI screens. All tests marked `NOT EXECUTED`. | Superseded |
-| **1.1** | Oct 19, 2026 | Principal QA Architect | **Final QA Audit & Hardened Baseline:**<br>1. **Authentication Architecture (§17):** Corrected `TC-SEC-01..08` to reflect deployed Supabase Gateway rules (`verify_jwt = false` public with app-level `apikey` checks; `verify_jwt = true` for owner/admin JWTs with `aal2` TOTP checks).<br>2. **Quota State Invariants (§15):** Replaced flawed `GREATEST(0, reserved_count - 1)` reliance with strictly atomic, exactly-once state transitions, duplicate release protection, and DB-level underflow constraints (`TC-QTA-10`).<br>3. **Google Destination Verification (§19):** Added `TC-DST-09` & `TC-DST-10` distinguishing approved Google hostnames from verified destinations for the specific merchant (shortlink redirect unfurling, matching Place ID, interactive test link verification).<br>4. **Requirement Traceability (§30):** Unbundled `NFR-001..008` into individual mappings; mapped `FR-CUST-008` (universal WhatsApp channel across all sentiments) and `FR-ADMIN-003` (standee fulfillment tracking pipeline: Requested $\to$ In Print $\to$ Dispatched $\to$ Delivered).<br>5. **Canonical Analytics Names (§16):** Standardized on exact canonical 8-event taxonomy (`EVENT_SURVEY_COMPLETED`, `EVENT_GENERATION_SUCCESS`, `EVENT_GOOGLE_REDIRECT_CLICK`); clarified conversion denominators.<br>6. **AI Grounding Fidelity (§14):** Tested with affirmed facts and explicitly forbidden claims without hardcoded sentences; strictly preserved truthful critical feedback without laundering.<br>7. **Accessibility Criteria (§20):** Corrected units to CSS px; distinguished WCAG 2.2 Level AA requirements from preferred 44×44 CSS px touch target design standards.<br>8. **Physical Print & Mobile Realities (§21, §23):** Disclaimed return from Maps as review publication; clarified vector PDF resolution independence with $\ge 300$ DPI embedded raster logos; clarified Google Cloud budget alert realities vs application-level rate limits.<br>9. **Deno Edge Mock Boundary (§7):** Specified local HTTP mock server for server-side Deno Edge Functions via `GEMINI_API_ENDPOINT`.<br>10. **Updated Inventory:** 196 unique traceable test cases, all explicitly labeled `NOT EXECUTED`. | **Under Review** |
+| **1.1** | Oct 19, 2026 | Principal QA Architect | **Final QA Audit & Hardened Baseline:**<br>1. **Authentication Architecture (§17):** Corrected `TC-SEC-01..08` to reflect deployed Supabase Gateway rules (`verify_jwt = false` public with app-level `apikey` checks; `verify_jwt = true` for owner/admin JWTs with `aal2` TOTP checks).<br>2. **Quota State Invariants (§15):** Replaced flawed `GREATEST(0, reserved_count - 1)` reliance with strictly atomic, exactly-once state transitions, duplicate release protection, and DB-level underflow constraints (`TC-QTA-10`).<br>3. **Google Destination Verification (§19):** Added `TC-DST-09` & `TC-DST-10` distinguishing approved Google hostnames from verified destinations for the specific merchant (shortlink redirect unfurling, matching Place ID, interactive test link verification).<br>4. **Requirement Traceability (§30):** Unbundled `NFR-001..008` into individual mappings; mapped `FR-CUST-008` (universal WhatsApp channel across all sentiments) and `FR-ADMIN-003` (standee fulfillment tracking pipeline: Requested $\to$ In Print $\to$ Dispatched $\to$ Delivered).<br>5. **Canonical Analytics Names (§16):** Standardized on exact canonical 8-event taxonomy (`EVENT_SURVEY_COMPLETED`, `EVENT_GENERATION_SUCCESS`, `EVENT_GOOGLE_REDIRECT_CLICK`); clarified conversion denominators.<br>6. **AI Grounding Fidelity (§14):** Tested with affirmed facts and explicitly forbidden claims without hardcoded sentences; strictly preserved truthful critical feedback without laundering.<br>7. **Accessibility Criteria (§20):** Corrected units to CSS px; distinguished WCAG 2.2 Level AA requirements from preferred 44×44 CSS px touch target design standards.<br>8. **Physical Print & Mobile Realities (§21, §23):** Disclaimed return from Maps as review publication; clarified vector PDF resolution independence with $\ge 300$ DPI embedded raster logos; clarified Google Cloud budget alert realities vs application-level rate limits.<br>9. **Deno Edge Mock Boundary (§7):** Specified local HTTP mock server for server-side Deno Edge Functions via `GEMINI_API_ENDPOINT`.<br>10. **Updated Inventory:** 196 unique traceable test cases, all explicitly labeled `NOT EXECUTED`. | Superseded |
+| **1.2** | Nov 8, 2026 | Principal QA Architect | **Post-MVP QA Integration: Milestone M10 (Google Review Reply Suite):**<br>1. **Post-MVP Test Suite (§25.1):** Specified 15 planned tests (`TC-REP-01` through `TC-REP-15`) covering Google OAuth, AES-GCM token vaulting, review synchronization, Gemini reply drafting, tone variations, sensitive topic alerts, approval invalidation on draft edit (`TC-REP-09`), cryptographic approval hash verification (`TC-REP-10`), existing-reply conflict protection (`TC-REP-12`), GBP API publishing (`TC-REP-13`), 30-day purge keyed on `last_fetched_at` (`TC-REP-04`), and controlled pilot acceptance (`TC-REP-15`).<br>2. **Option A Enforcement:** Automated tests verifying hard failure on revision mismatch, stale approval hash, or unconfirmed existing-reply overwrite.<br>3. **Coverage (§30):** Mapped `FR-REPLY-001` through `FR-REPLY-012` to `TC-REP-01..15`. | **Planning Baseline Approved** |
 
 > [!IMPORTANT]
 > **Specification-Only Deliverable Notice:**
@@ -1025,6 +1026,74 @@ Testing against the three founder options under India's Digital Personal Data Pr
 
 ---
 
+## 25.1 Planned Post-MVP Test Suite: Google Review Replies (`TC-REP`) (Milestone M10)
+
+> [!NOTE]
+> **Planning-Only Test Suite:**
+> The following 15 test cases (`TC-REP-01` through `TC-REP-15`) define the quality assurance requirements for Milestone M10 (Post-MVP). These tests are strictly deferred until milestone authorization and are marked `NOT EXECUTED`.
+
+```
++---------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                            POST-MVP GOOGLE REVIEW REPLIES TEST SUITE (TC-REP)                                                 |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Test ID     | Category             | Test Scenario                          | Execution Method & Expected Assertion            | Level / Type   | Status          |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-01` | OAuth Initialization | Generate Google OAuth URL & state      | Invoke API-REP-01; assert valid Google OAuth URL | Integration /  | `NOT EXECUTED`  |
+|             |                      |                                        | with scope 'business.manage' and HMAC state nonce| Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-02` | Token Vaulting       | Exchange code & encrypt refresh token  | Post valid auth code to API-REP-02; assert token | Integration /  | `NOT EXECUTED`  |
+|             |                      |                                        | stored as AES-GCM ciphertext, never plaintext.   | Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-03` | Review Sync          | Fetch Google reviews for location      | Invoke API-REP-03; assert reviews upserted to    | Integration /  | `NOT EXECUTED`  |
+|             |                      |                                        | google_review_replies with status='unreplied'.   | Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-04` | 30-Day Content Purge | Execute purge_stale_google_reviews_text| Seed reviews where last_fetched_at > 30d; run    | Database RPC / | `NOT EXECUTED`  |
+|             |                      |                                        | purge RPC; assert review_text_snippet=NULL and   | Automated      |                 |
+|             |                      |                                        | reviewer_name='Google User'; metadata intact.   |                |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-05` | AI Reply Generation  | Draft reply from review snippet        | Invoke API-REP-04 on 5-star review; assert reply | AI Evaluation /| `NOT EXECUTED`  |
+|             |                      |                                        | generated targeting P50 < 2.5s, length <=4096 B. | Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-06` | Prompt Injection Def.| Review contains adversarial prompt     | Seed review with "Ignore previous instructions"; | Security /     | `NOT EXECUTED`  |
+|             |                      |                                        | assert model ignores instruction, drafts reply.  | Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-07` | Sensitive Topic Flag | Review mentions "food poisoning"       | Invoke API-REP-04 on health claim; assert        | AI Safety /    | `NOT EXECUTED`  |
+|             |                      |                                        | sensitive_flag=true; tone adjusted; owner warned.| Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-08` | Tone & Multi-byte UTF8| Generate draft across 4 tones & Devanag| Request draft in Professional/Warm/Direct/Apolog;| Functional /   | `NOT EXECUTED`  |
+|             |                      |                                        | test Hindi/Marathi text (3 bytes/char) and emoji | Automated      |                 |
+|             |                      |                                        | (4 bytes/char); assert accurate byte counting.   |                |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-09` | Draft Editing & Byte | Merchant edits draft text via PostgREST| Send PATCH to API-REP-05; assert text <= 4096 B  | API Contract / | `NOT EXECUTED`  |
+|             | Limit Boundary       |                                        | succeeds, text > 4096 B rejected without silent  | Automated      |                 |
+|             |                      |                                        | truncation; revision incremented; hash reset.    |                |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-10` | Bounded Approval     | Lock-safe atomic claim & approval check| Call API-REP-06; assert DB transaction claims    | Security /     | `NOT EXECUTED`  |
+|             | Claim & Lock Safety  |                                        | attempt in <5ms releasing lock; assert mismatched| Automated      |                 |
+|             |                      |                                        | revision rejected (ERR_APPROVAL_REVISION_MISMATCH)|               |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-11` | Tenant RLS Isolation | Cross-tenant access to reviews/tokens  | Tenant A queries Tenant B reviews & tokens;      | Database RLS / | `NOT EXECUTED`  |
+|             |                      |                                        | assert 0 rows returned under PostgREST RLS.      | Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-12` | Conflict & Idempotency| Detect existing reply & repeat sync    | Verify API-REP-06 rejects existing reply overwrite| Integration /  | `NOT EXECUTED`  |
+|             |                      |                                        | with HTTP 409 without confirmation; repeat sync  | Automated      |                 |
+|             |                      |                                        | produces 0 duplicate rows.                       |                |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-13` | Google API Dispatch &| Authorized publish to Google GBP API   | Call API-REP-06 with valid approval outside lock;| Edge Function /| `NOT EXECUTED`  |
+|             | Moderation States    | with moderation state handling         | assert PENDING maps to pending_moderation,       | Automated      |                 |
+|             |                      |                                        | APPROVED to published, REJECTED to rejected_by_gg|                |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-14` | Google Disconnect    | Revoke credentials & delete connection | Call API-REP-07; assert token revoked at Google, | Security /     | `NOT EXECUTED`  |
+|             |                      |                                        | row deleted from google_business_connections.    | Automated      |                 |
+|-------------+----------------------+----------------------------------------+--------------------------------------------------+----------------+-----------------|
+| `TC-REP-15` | Controlled Pilot & QA| Supervised merchant pilot & E2E audit  | Execute 7–14 day controlled pilot with 2–3 stores| E2E /          | `NOT EXECUTED`  |
+|             |                      |                                        | in SCR-OWN-12; verify zero unapproved publishes; | Pilot / Manual |                 |
+|             |                      |                                        | record founder commercial decision.              |                |                 |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------+
+```
+
+---
+
 ## 26. CI/CD Quality Gates & Pipeline Progression
 
 ```
@@ -1198,6 +1267,21 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
 | `SEC-003`       | DPDPA Pseudonymous Note Storage & Purge     | `TC-PRV-01` to `TC-PRV-06`         | TEST MAPPED  |
 | `SEC-004`       | Storage Boundary & Logo Magic Bytes Check   | `TC-UPL-01` to `TC-UPL-08`         | TEST MAPPED  |
 | `SEC-005`       | Automated Disaster Recovery & Backup Drill  | `TC-BKP-01` to `TC-BKP-05`         | TEST MAPPED  |
+|=================+=============================================+===================================+==============|
+| PLANNED POST-MVP REQUIREMENTS (MILESTONE M10: AI GOOGLE REVIEW REPLY ASSISTANT — OPTION A GOVERNANCE)            |
+|-----------------+---------------------------------------------+-----------------------------------+--------------|
+| `FR-REPLY-001`  | Google Business Profile OAuth Connection    | `TC-REP-01`, `TC-REP-02`          | TEST MAPPED  |
+| `FR-REPLY-002`  | Verified Location Binding & Token Vault     | `TC-REP-02`, `TC-REP-11`          | TEST MAPPED  |
+| `FR-REPLY-003`  | On-Demand Review Sync & 30-Day Retention    | `TC-REP-03`, `TC-REP-04`, `TC-REP-12`| TEST MAPPED|
+| `FR-REPLY-004`  | Gemini Review Reply Draft Generation        | `TC-REP-05`, `TC-REP-06`          | TEST MAPPED  |
+| `FR-REPLY-005`  | Negative & Sensitive Review Detection       | `TC-REP-07`                       | TEST MAPPED  |
+| `FR-REPLY-006`  | Multi-Tone Reply Customization (4 Tones)    | `TC-REP-08`                       | TEST MAPPED  |
+| `FR-REPLY-007`  | Mandatory Merchant Review & Draft Editor    | `TC-REP-08`, `TC-REP-09`          | TEST MAPPED  |
+| `FR-REPLY-008`  | Explicit Approval Confirmation Modal        | `TC-REP-10`, `TC-REP-15`          | TEST MAPPED  |
+| `FR-REPLY-009`  | Authorized Google API Reply Publishing      | `TC-REP-10`, `TC-REP-13`          | TEST MAPPED  |
+| `FR-REPLY-010`  | Disallow Automated Background Publishing    | `TC-REP-10`                       | TEST MAPPED  |
+| `FR-REPLY-011`  | Multi-Tenant Reply Isolation (Postgres RLS) | `TC-REP-11`                       | TEST MAPPED  |
+| `FR-REPLY-012`  | Google Disconnect & Token Invalidation      | `TC-REP-14`                       | TEST MAPPED  |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -1284,6 +1368,8 @@ End-to-end user acceptance criteria for the initial 3–5 salon and cafe merchan
     - [x] **FOUNDER APPROVED (TECHNICAL DESIGN ONLY):** Approved Design B enhanced authenticity & customer consent; strictly <60 words; neutral experience confirmation checkbox; universal direct Google link; zero fabricated facts or praise; abstention when facts insufficient; zero Google certification claims.
 17. **Master Governance Audit & Sign-Off (Gate M0-17):**
     - [x] **M0-17 — FOUNDER SIGNED OFF (M0 — COMPLETE: PLANNING AND TECHNICAL DESIGN ONLY):** Formally approved by founder on October 23, 2026 (anchored to commit `aafb588`). Test cases (196 total) remain conceptual specifications and are labeled `NOT EXECUTED`. Milestone M1 development remains UNAUTHORIZED until a separate directive is issued.
+18. **Google Review Management & AI Reply Assistant (Decision 10):**
+    - [x] **FOUNDER APPROVED (PLANNING & DESIGN ONLY):** Adopt Option A mandatory merchant review and explicit human approval prior to Google publication. Zero automated publishing permitted; 15 test cases (`TC-REP-01` through `TC-REP-15`) specified for Post-MVP Milestone M10.
 
 ---
 

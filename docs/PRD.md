@@ -26,7 +26,8 @@
 | :---: | :---: | :--- | :--- | :---: |
 | **0.1** | Oct 17, 2026 | Principal PM | Initial synthesis of Phase 0 research (`MVP_DECISIONS.md`, `PRODUCT_OPPORTUNITIES.md`). | Superseded |
 | **1.0** | Oct 17, 2026 | Principal PM | Comprehensive baseline PRD: 25 structured sections, complete requirements traceability (FR/NFR). | Superseded |
-| **1.1** | Oct 17, 2026 | Principal PM & Architect | **Independent Audit Corrections Applied:**<br/>1. Decoupled immutable public QR identifiers (`/q/[qr_id]`) from editable business slugs, guaranteeing printed standees never break.<br/>2. Defined lapsed subscription and quota exhaustion behavior (graceful degradation to direct Google review handoff; zero 404 dead ends).<br/>3. Replaced "zero PII" claims with realistic privacy rules for optional customer notes (pseudonymous storage, 30-day retention purge via automated pg_cron per Founder Decision M0-01, strict access controls).<br/>4. Eliminated misleading automatic fallback templates; defined safe alternatives (retry, manual edit, direct bypass, factual-only affirmed draft).<br/>5. Overhauled mobile clipboard handoff for iOS Safari/Android Chrome popup blockers; separated copy attempt from copy success tracking.<br/>6. Clarified Google URL types and added destination validation.<br/>7. Strengthened multi-tenant RLS, safe public view projections, and admin MFA recommendations.<br/>8. Relaxed rigid "scroll-free" UI constraints for WCAG 2.1 AA a11y compliance (text zoom up to 200%, 320px viewports).<br/>9. Replaced destructive input stripping with server-side Zod validation, safe HTML encoding, and structured prompt separation.<br/>10. Expanded analytics event taxonomy (8 distinct events) with client-side deduplication.<br/>11. Layered abuse controls for shared cafe/salon customer Wi-Fi networks (ephemeral hashed IP keys; no raw IP logging).<br/>12. Corrected revenue math and financial milestones (distinguishing MRR, setup revenue, direct costs, fixed costs, founder time, and taxes).<br/>13. Focused MVP owner dashboard on aggregated feedback insights, deferring complex individual logs.<br/>14. Replaced unsupported absolute claims with measurable engineering targets and verified evidence. | **Under Review** |
+| **1.1** | Oct 17, 2026 | Principal PM & Architect | **Independent Audit Corrections Applied:**<br/>1. Decoupled immutable public QR identifiers (`/q/[qr_id]`) from editable business slugs, guaranteeing printed standees never break.<br/>2. Defined lapsed subscription and quota exhaustion behavior (graceful degradation to direct Google review handoff; zero 404 dead ends).<br/>3. Replaced "zero PII" claims with realistic privacy rules for optional customer notes (pseudonymous storage, 30-day retention purge via automated pg_cron per Founder Decision M0-01, strict access controls).<br/>4. Eliminated misleading automatic fallback templates; defined safe alternatives (retry, manual edit, direct bypass, factual-only affirmed draft).<br/>5. Overhauled mobile clipboard handoff for iOS Safari/Android Chrome popup blockers; separated copy attempt from copy success tracking.<br/>6. Clarified Google URL types and added destination validation.<br/>7. Strengthened multi-tenant RLS, safe public view projections, and admin MFA recommendations.<br/>8. Relaxed rigid "scroll-free" UI constraints for WCAG 2.1 AA a11y compliance (text zoom up to 200%, 320px viewports).<br/>9. Replaced destructive input stripping with server-side Zod validation, safe HTML encoding, and structured prompt separation.<br/>10. Expanded analytics event taxonomy (8 distinct events) with client-side deduplication.<br/>11. Layered abuse controls for shared cafe/salon customer Wi-Fi networks (ephemeral hashed IP keys; no raw IP logging).<br/>12. Corrected revenue math and financial milestones (distinguishing MRR, setup revenue, direct costs, fixed costs, founder time, and taxes).<br/>13. Focused MVP owner dashboard on aggregated feedback insights, deferring complex individual logs.<br/>14. Replaced unsupported absolute claims with measurable engineering targets and verified evidence. | **Superseded** |
+| **1.2** | Nov 8, 2026 | Antigravity (DOC-REPLY-01) | **Planned Post-MVP Expansion Integration (Option A):**<br/>1. Defined Section 26 for Milestone M10: Google Review Management & AI Reply Assistant.<br/>2. Locked Option A workflow: Mandatory merchant review and explicit human approval prior to Google publication (zero auto-publish).<br/>3. Added 12 new Post-MVP functional requirements (`FR-REPLY-001` through `FR-REPLY-012`).<br/>4. Established strict product boundary separating customer QR survey drafting from published Google review reply drafting.<br/>5. Documented Google Business Profile API prerequisites (60-day active profile, Basic Access Application). | **Under Review** |
 
 ### 1.3 Precedence & Research Hierarchy
 In the event of ambiguities or conflicting statements across planning documents, the following strict hierarchy of authority applies:
@@ -1078,5 +1079,43 @@ Before proceeding to Phase 1 — Stage 2 (Technical & Architecture Specification
 
 ---
 
+## 26. Planned Post-MVP Expansion: Google Review Management & AI Reply Assistant (Option A)
+
+> [!IMPORTANT]
+> **Implementation Scope: POST-MVP (Milestone M10) — PLANNED ONLY.**
+> This section introduces the functional and nonfunctional requirements for the planned post-MVP extension: **QR_Review AI Review Reply Assistant**. It remains strictly decoupled from the core MVP (M0–M9). The existing MVP three-question customer survey, permanent QR routing, and customer draft flows remain completely unchanged.
+
+### 26.1 Merchant Problem & Value Proposition
+Local Indian SMB owners struggle to find the time and professional wording to respond to public Google reviews. Responding promptly boosts Google Maps local rankings and signals attentive customer service, but manual drafting creates fatigue, and unvetted automated bots risk brand reputation and legal liability.
+
+The **AI Review Reply Assistant** allows merchants to connect their verified Google Business Profile, review published reviews in a centralized inbox, generate polished context-aware replies via Google Gemini Flash, edit/regenerate drafts, and publish directly to Google Maps **only upon explicit human approval (Option A)**.
+
+### 26.2 Core Product Invariant: Option A Mandatory Human Approval
+Under no circumstances shall the platform automatically post or publish a review reply to Google Maps without the merchant reviewing the exact text and executing an individual, explicit approval action. Batch "auto-publish all" mechanisms and background publishing cron jobs are strictly prohibited.
+
+### 26.3 Post-MVP Functional Requirements (`FR-REPLY-*`)
+
+| Requirement ID | Title | Description | Priority | Release Scope |
+| :--- | :--- | :--- | :---: | :---: |
+| **`FR-REPLY-001`** | Google OAuth Connection | Merchant initiates Google OAuth 2.0 flow granting `https://www.googleapis.com/auth/business.manage` permissions with server-side token encryption. | Must | Post-MVP (M10) |
+| **`FR-REPLY-002`** | Verified Location Binding | Merchant selects from verified Google Business Profile locations, creating an immutable 1:1 binding to their QR_Review business tenant. | Must | Post-MVP (M10) |
+| **`FR-REPLY-003`** | On-Demand Review Retrieval | Platform retrieves genuine published reviews for the bound location via official Google API (`GET .../reviews`) with pagination and 30-day retention ceiling. | Must | Post-MVP (M10) |
+| **`FR-REPLY-004`** | Grounded AI Reply Drafting | System generates a professional, context-aware reply draft (<100 words, <= 4,096 UTF-8 bytes) using Google Gemini Flash strictly grounded in review content. | Must | Post-MVP (M10) |
+| **`FR-REPLY-005`** | Draft Inspection & Editing | Merchant can edit the draft inline in an accessible `<textarea>`, discard the draft, or regenerate with tone adjustments (concise, warm, formal). | Must | Post-MVP (M10) |
+| **`FR-REPLY-006`** | Mandatory Individual Approval | System requires an explicit, separate merchant approval click for the specific review before initiating any Google publication dispatch. | Must | Post-MVP (M10) |
+| **`FR-REPLY-007`** | Authorized Google Publication | Server validates cryptographic approval token, re-verifies location authorization, executes bounded publication attempt releasing DB locks, and submits reply via official Google API (`PUT .../reply`). | Must | Post-MVP (M10) |
+| **`FR-REPLY-008`** | Status Feedback & Error Recovery | System displays real-time publication status (submitting, pending moderation, published, rejected by Google, outcome unknown) reflecting Google moderation states without false confirmations. | Must | Post-MVP (M10) |
+| **`FR-REPLY-009`** | Connection Revocation & Cleanup | Merchant can revoke Google OAuth connection, triggering token revocation and deletion of cached reviews. | Must | Post-MVP (M10) |
+| **`FR-REPLY-010`** | Cross-Location Isolation | Database and API enforce complete tenant isolation, preventing any merchant from accessing reviews or posting replies to another business location. | Must | Post-MVP (M10) |
+| **`FR-REPLY-011`** | Prompt Injection Defense | Customer review text is sanitized and encapsulated in `<REVIEW_CONTENT>` delimiters; system prompt prohibits unauthorized financial or liability claims. | Must | Post-MVP (M10) |
+| **`FR-REPLY-012`** | Google Content Policy Compliance | Platform adheres strictly to Google Business Profile API Content Storage policies, hard-purging cached review text after maximum 30 days. | Must | Post-MVP (M10) |
+
+### 26.4 Traceability Matrix
+- **Detailed Feature Specification:** [AI Review Reply Assistant Specification](features/AI_REVIEW_REPLY_ASSISTANT.md)
+- **Feasibility & API Policy Assessment:** [Google Review Reply Feasibility Study](research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md)
+- **Proposed Milestone:** [Milestone Roadmap](ROADMAP.md) Milestone `M10` (Tasks `M10-T01` through `M10-T09`)
+
+---
+
 *End of Product Requirements Document (PRD).*
-*Status: Milestone M0 Signed Off (Planning & Design Only). Ready for Phase 2 implementation upon separate founder task directive.*
+*Status: Milestone M0 Signed Off (Planning & Design Only). Milestone M10 Planned Post-MVP.*

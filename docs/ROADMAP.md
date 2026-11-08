@@ -31,7 +31,8 @@
 | Revision | Date | Author | Summary of Changes | Status |
 | :---: | :---: | :--- | :--- | :---: |
 | **1.0** | Oct 19, 2026 | Principal Delivery Architect | Initial master engineering roadmap and delivery plan. Established 10 structured milestones (M0 through M9), 70 granular tasks with explicit test and contract mappings, dependency DAG, effort estimation ranges, operational cost models (3, 5, 25, 50 merchants), risk register, release quality gates, and AI agent execution workflow. All implementation deferred pending founder approval. | Superseded |
-| **1.1** | Oct 19, 2026 | Principal Delivery Architect | **Comprehensive Stage 8 Master Implementation Delivery Plan:**<br/>1. **Detailed Work Breakdown Structure (§10):** Expanded all 73 atomic tasks across M0–M9 with full engineering specifications: target file paths, prerequisite dependencies, complexity ratings, referenced API endpoints (`API-*`), database tables (`public.*`), UI screens (`SCR-*`), test IDs (`TC-*`), and verifiable acceptance criteria.<br/>2. **Comprehensive Milestone Profiles (§9):** Fully articulated all 10 milestones with goals, deliverables, prerequisites, 3-point effort estimates, test suites, quality gates, milestone DoD, technical risks/fallbacks, and concrete Antigravity agent instructions.<br/>3. **Development Workflow & Tooling (§6):** Specified toolchain versions, TDD vs test-after boundaries, multi-environment secrets matrix (Local vs Staging vs Prod), and dual data seeding architecture separating production reference data (`007_reference_data.sql`) from synthetic local test fixtures (`local_seed.sql`).<br/>4. **AI Agent Implementation Protocol (§17):** Established 13-step Antigravity execution protocol, context-loading document matrix, strict scope guardrails, and human-in-the-loop checkpoints.<br/>5. **Risk Contingency Blueprints (§13):** Added trigger conditions, immediate recovery actions, and fallback architectures for the top 8 technical risks.<br/>6. **100% Traceability & Coverage (§21):** Mapped all 28 FRs, 8 NFRs, 5 SECs, and 18 test suites (`TC-*`), confirming complete coverage with zero orphaned requirements. | **Under Review** |
+| **1.1** | Oct 19, 2026 | Principal Delivery Architect | **Comprehensive Stage 8 Master Implementation Delivery Plan:**<br/>1. **Detailed Work Breakdown Structure (§10):** Expanded all 73 atomic tasks across M0–M9 with full engineering specifications: target file paths, prerequisite dependencies, complexity ratings, referenced API endpoints (`API-*`), database tables (`public.*`), UI screens (`SCR-*`), test IDs (`TC-*`), and verifiable acceptance criteria.<br/>2. **Comprehensive Milestone Profiles (§9):** Fully articulated all 10 milestones with goals, deliverables, prerequisites, 3-point effort estimates, test suites, quality gates, milestone DoD, technical risks/fallbacks, and concrete Antigravity agent instructions.<br/>3. **Development Workflow & Tooling (§6):** Specified toolchain versions, TDD vs test-after boundaries, multi-environment secrets matrix (Local vs Staging vs Prod), and dual data seeding architecture separating production reference data (`007_reference_data.sql`) from synthetic local test fixtures (`local_seed.sql`).<br/>4. **AI Agent Implementation Protocol (§17):** Established 13-step Antigravity execution protocol, context-loading document matrix, strict scope guardrails, and human-in-the-loop checkpoints.<br/>5. **Risk Contingency Blueprints (§13):** Added trigger conditions, immediate recovery actions, and fallback architectures for the top 8 technical risks.<br/>6. **100% Traceability & Coverage (§21):** Mapped all 28 FRs, 8 NFRs, 5 SECs, and 18 test suites (`TC-*`), confirming complete coverage with zero orphaned requirements. | Superseded |
+| **1.2** | Nov 8, 2026 | Principal Delivery Architect | **Post-MVP Architectural Integration: Milestone M10 (AI Google Review Reply Assistant):**<br/>1. **Milestone M10 Definition (§9.11 & §10.11):** Formally incorporated planned Post-MVP Milestone M10 comprising 9 atomic tasks (`M10-T01` through `M10-T09`) governed strictly by **Option A (Mandatory Merchant Review & Manual Approval Prior to Google Publication)**.<br/>2. **Traceability & Coverage (§21):** Mapped requirements `FR-REPLY-001` through `FR-REPLY-012`, API contracts `API-REP-01` through `API-REP-07`, and test suite `TC-REP-01` through `TC-REP-15`.<br/>3. **Effort & Risk Integration (§11 & §23):** Reconciled active engineering effort estimates (23.0 / 37.0 / 56.0 hrs) separated from external calendar dependencies (1–4+ weeks Google API review wait; 7–14 days controlled pilot runtime). Planning baseline approved; implementation strictly not authorized. | **Planning Baseline Approved** |
 
 > [!IMPORTANT]
 > **Planning-Only Deliverable Notice:**
@@ -66,6 +67,8 @@ This roadmap bridges our eight comprehensive architectural specifications into a
 |  [ M8 ] STAGING & OPS         • Cloudflare Pages preview, Supabase staging, backup restore drill  |
 |           |                                                                                       |
 |  [ M9 ] CONTROLLED PILOT      • 14-day live pilot across 3–5 salons/cafes with physical standees  |
+|           |                                                                                       |
+|  [ M10] POST-MVP EXPANSION    • Google Review Management & AI Reply Assistant (Option A Approved) |
 +---------------------------------------------------------------------------------------------------+
 ```
 
@@ -533,7 +536,49 @@ The absolute critical path governing delivery timeline is:
 - **Antigravity Execution Guidance:** Maintain daily operational log; do not apply production code changes during the pilot without formal change management approval.
 
 ---
-## 10. Detailed Work Breakdown Structure (WBS) & Task Register (73 Tasks)
+
+### 9.11 Milestone M10: Google Review Management & AI Reply Assistant (Post-MVP Planned Extension)
+- **Milestone Identifier:** `M10`
+- **Goals & Strategic Objectives:** Expand the merchant value proposition beyond review generation into end-to-end Google review management and AI-assisted reply drafting. Connect merchant Google Business Profiles securely via OAuth 2.0, retrieve genuine customer reviews, generate contextual, tone-tailored reply drafts via Gemini Flash, and support mandatory merchant review, editing, and explicit one-click publishing back to Google via the Google Business Profile APIs.
+- **Governing Architecture:** Strictly governed by **Option A (Mandatory Merchant Review and Manual Approval Prior to Google Publication)**. Zero automated background publishing. Every single reply must be reviewed, optionally edited, and explicitly triggered by an authenticated merchant owner.
+- **Deliverables:**
+  - Official Google API feasibility & Basic Access application verification (`M10-T01`).
+  - Hardened technical architecture, wire schemas, and approval binding specification (`M10-T02`).
+  - Secure Google Business Profile OAuth 2.0 onboarding workflow with state verification and AES-GCM-256 token vault (`SCR-OWN-12`, `API-REP-01`, `API-REP-02`, `M10-T03`).
+  - On-demand Google review synchronization Edge Function (`sync-google-reviews`, `API-REP-03`) with strict 30-day raw text retention purge (`pg_cron`, `M10-T04`).
+  - Contextual AI reply drafting Edge Function (`generate-review-reply`, `API-REP-04`) supporting 4 tones and sensitive review detection (`M10-T05`).
+  - Merchant Review Inbox, Editor & Approval Interface (`SCR-OWN-12`, `/dashboard/replies`, `API-REP-05`, `M10-T06`).
+  - Authorized Google reply publishing with cryptographic approval verification and existing-reply conflict check (`publish-review-reply`, `API-REP-06`, `M10-T07`).
+  - Comprehensive multi-tenant security verification and test suite (`TC-REP-01` through `TC-REP-15`, `M10-T08`).
+  - Controlled merchant pilot & commercial validation (`M10-T09`).
+- **Prerequisites & Dependencies:**
+  - Pilot Milestone M9 successfully concluded with founder commercial rollout authorization.
+  - Google Cloud Console Project configured with Google Business Profile APIs enabled.
+  - Developer Google Account managing a verified Business Profile active for $\ge 60$ days.
+  - Google Business Profile Basic API Access Application approved by Google Developer Support (external calendar delay: 1–4+ weeks).
+  - Authoritative validation of Third-Party AI Processing compliance under GBP API Additional Terms.
+- **Estimated Effort:**
+  - **Active Engineering Hours:** Optimistic: 23.0 hrs | Expected: 37.0 hrs | Conservative: 56.0 hrs
+  - **External Calendar Dependencies:** Google Basic Access Application Review (1–4+ weeks waiting time); Controlled Merchant Pilot Live Supervision (7–14 days calendar duration).
+- **Test Suites to Validate:** `TC-REP-01..15` (15 test cases covering OAuth, sync, drafting, approval invalidation on edit, cryptographic hash verification, existing-reply conflict check, GBP publishing, token revocation, RLS isolation, and 30-day purge).
+- **Security & Quality Gates:**
+  - OAuth refresh tokens encrypted at rest with AES-GCM-256; columns revoked from PostgREST `authenticated` role.
+  - Strict tenant isolation enforced via PostgreSQL RLS on `google_business_connections` and `google_review_replies`.
+  - Cryptographic approval binding (`approved_reply_hash = SHA256(...)`); draft mutation automatically increments revision and invalidates prior approval.
+  - Server-side existing Google reply conflict check preventing accidental or silent overwriting.
+  - Zero raw review text retained beyond the mandatory 30-day Google content cache ceiling (keyed on `last_fetched_at`).
+  - Third-party AI processing compliance validated prior to production pilot.
+  - Zero auto-publishing invariant strictly enforced across database triggers, column permissions, and API layers.
+  - Prompt injection defense applied to untrusted customer review text via `<USER_REVIEW>` encapsulation and HTML-entity escaping.
+- **Definition of Done:** End-to-end OAuth connection -> review sync -> AI reply draft -> merchant review/edit -> explicit human publish workflow passing 100% on staging; verified publication appearing on live Google Maps test listing; zero automated publishing loopholes; controlled 7–14 day merchant pilot successfully concluded.
+- **Risks & Fallbacks:**
+  - GBP Basic Access approval delay $\to$ Fallback: Utilize local mock Google API server (`scripts/mock-google-business-server.ts`) for local/staging development.
+  - Expired OAuth tokens $\to$ Fallback: Proactive refresh workflow with clear merchant re-authentication banners.
+  - Third-party AI processing restrictions $\to$ Fallback: Require explicit merchant opt-in / proxy consent or abstain from AI drafting pending terms confirmation.
+- **Antigravity Execution Guidance:** This milestone is a **Post-MVP Planned Extension**. Antigravity must never execute code, migrations, or live API calls for M10 until Milestone M9 is signed off and explicit founder authorization for M10 is granted.
+
+---
+## 10. Detailed Work Breakdown Structure (WBS) & Task Register (73 MVP Tasks + 9 Planned Post-MVP Tasks)
 
 ### 10.1 Milestone M0: Pre-Implementation Alignment (6 Tasks)
 
@@ -1522,6 +1567,125 @@ The absolute critical path governing delivery timeline is:
 - **Associated Test Cases:** `TC-UAT-07`, `TC-UAT-08`.
 - **Acceptance Criteria:** Final Pilot Evaluation Report delivered; conversion funnel statistics documented; total pilot cloud opex verified within modeled operating range (~₹120–₹500/mo) and ratified spending limits; founder signs off on commercial Phase 3 plan.
 
+### 10.11 Milestone M10: Google Review Management & AI Reply Assistant (Post-MVP Planned Extension — 9 Tasks)
+
+#### Task M10-T01: Google API Feasibility & Integration Approval
+- **Task ID:** `M10-T01`
+- **Title:** Google API Feasibility & Integration Approval
+- **Description:** Verify official Google Business Profile API access prerequisites (including managing a verified Business Profile active for $\ge 60$ days). Submit the official Google Business Profile Basic Access application. Confirm API scope availability (`https://www.googleapis.com/auth/business.manage`), review operations, and Google content data-use restrictions. Authoritative sign-off on feasibility blocker.
+- **Target Files / Directories:** [`docs/research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md`](file:///Users/mrugmaythere/work/QRs/docs/research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md).
+- **Prerequisites:** Pilot Milestone M9 completed; Founder Google Cloud account active; Verified Business Profile active $\ge 60$ days.
+- **Complexity & Effort:** Medium | Optimistic: 2.0 hrs | Expected: 3.0 hrs | Conservative: 5.0 hrs (External calendar wait: 1–4+ weeks)
+- **API Endpoints Involved:** Google Business Profile API v4 (`accounts.locations.reviews`).
+- **Database Tables Involved:** None.
+- **Screens Involved:** None.
+- **Associated Test Cases:** `TC-REP-01`.
+- **Acceptance Criteria:** Google Business Profile Basic Access application submitted and approved; API scopes verified; third-party AI processing terms validated; founder signs off on gate 1.
+
+#### Task M10-T02: Technical Architecture, Security & Contract Design
+- **Task ID:** `M10-T02`
+- **Title:** Technical Architecture, Security & Contract Design
+- **Description:** Finalize proposed engineering specifications for Google Review Management & AI Reply Assistant. Author and sign off on database schema (`google_business_connections`, `google_review_replies`), API contracts (`API-REP-01` through `API-REP-07`), AES-GCM-256 token vault encryption specification, column-level security grants revoking client mutation of approval columns, and Option A multi-factor approval digest model (`approved_reply_hash`).
+- **Target Files / Directories:** [`docs/features/AI_REVIEW_REPLY_ASSISTANT.md`](file:///Users/mrugmaythere/work/QRs/docs/features/AI_REVIEW_REPLY_ASSISTANT.md), [`docs/DATABASE_SCHEMA.md`](file:///Users/mrugmaythere/work/QRs/docs/DATABASE_SCHEMA.md), [`docs/API_SPEC.md`](file:///Users/mrugmaythere/work/QRs/docs/API_SPEC.md), [`docs/SECURITY.md`](file:///Users/mrugmaythere/work/QRs/docs/SECURITY.md).
+- **Prerequisites:** M10-T01 complete.
+- **Complexity & Effort:** Medium | Optimistic: 2.0 hrs | Expected: 3.5 hrs | Conservative: 5.0 hrs
+- **API Endpoints Involved:** `API-REP-01` through `API-REP-07`.
+- **Database Tables Involved:** `public.google_business_connections`, `public.google_review_replies`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-02`, `TC-REP-11`.
+- **Acceptance Criteria:** Technical specifications complete and cross-verified across all core docs; Option A cryptographic approval binding and revision invalidation models ratified.
+
+#### Task M10-T03: Merchant Google Business Profile Connection
+- **Task ID:** `M10-T03`
+- **Title:** Merchant Google Business Profile Connection & Encrypted Token Vault
+- **Description:** Implement merchant OAuth 2.0 connection workflow. Edge Function initiates Google OAuth challenge with `business.manage` scope and cryptographic HMAC state parameter (`API-REP-01`). Callback function (`API-REP-02`) exchanges auth code for refresh token, encrypts token at rest via AES-GCM-256, stores record in `google_business_connections`, fetches verified location IDs for the merchant tenant, and supports secure disconnection (`API-REP-07`).
+- **Target Files / Directories:** `supabase/migrations/*_google_connections.sql`, `supabase/functions/google-oauth-callback/index.ts`, `supabase/functions/disconnect-google/index.ts`, `src/features/replies/components/GoogleConnectCard.tsx`.
+- **Prerequisites:** M10-T02 complete.
+- **Complexity & Effort:** High | Optimistic: 3.0 hrs | Expected: 4.5 hrs | Conservative: 6.5 hrs
+- **API Endpoints Involved:** `API-REP-01`, `API-REP-02`, `API-REP-07`.
+- **Database Tables Involved:** `public.google_business_connections`, `public.businesses`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-01`, `TC-REP-02`, `TC-REP-11`, `TC-REP-14`.
+- **Acceptance Criteria:** Merchant successfully links GBP; refresh tokens encrypted with isolated master key and column-level SELECT revoked from PostgREST; location ID bound to `business_id`; RLS strictly isolates connections between tenants.
+
+#### Task M10-T04: Published Google Review Retrieval & Synchronization
+- **Task ID:** `M10-T04`
+- **Title:** Published Google Review Retrieval & Synchronization
+- **Description:** Implement Edge Function (`sync-google-reviews`, `API-REP-03`) to fetch verified reviews from GBP API (`GET /v4/accounts/{accountId}/locations/{locationId}/reviews`) on merchant request. Upsert records into `google_review_replies` with pagination and status tracking. Implement daily `pg_cron` worker executing `purge_stale_google_reviews_text()` to hard-purge `review_text_snippet` and anonymize reviewer names where `last_fetched_at < NOW() - INTERVAL '30 days'` to enforce Google API Content Policy compliance.
+- **Target Files / Directories:** `supabase/functions/sync-google-reviews/index.ts`, `supabase/migrations/*_google_review_replies.sql`, `supabase/migrations/*_purge_google_reviews_cron.sql`.
+- **Prerequisites:** M10-T03 complete.
+- **Complexity & Effort:** High | Optimistic: 2.5 hrs | Expected: 4.0 hrs | Conservative: 6.0 hrs
+- **API Endpoints Involved:** `API-REP-03`.
+- **Database Tables Involved:** `public.google_review_replies`, `public.google_business_connections`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-03`, `TC-REP-04`, `TC-REP-12`.
+- **Acceptance Criteria:** Published reviews synchronized into tenant inbox; pagination supported; 30-day raw review purge worker keyed on `last_fetched_at` verified.
+
+#### Task M10-T05: Grounded AI Reply Draft Generation
+- **Task ID:** `M10-T05`
+- **Title:** Grounded AI Reply Draft Generation with Safety Guardrails
+- **Description:** Implement `generate-review-reply` Deno Edge Function (`API-REP-04`). Retrieves review details from DB, categorizes star rating and sentiment, detects sensitive topics (food safety, billing disputes, hygiene hazards), escapes untrusted review text within `<USER_REVIEW>` tags, and invokes Gemini Flash (`gemini-3.5-flash-lite`) to produce a personalized, tone-specific draft (Professional, Warm, Direct, Apologetic). Enforces 4,096 UTF-8 byte limit (not characters; accounting for 3 bytes/char in Devanagari script) and updates draft in `google_review_replies` in `drafted` state.
+- **Target Files / Directories:** `supabase/functions/generate-review-reply/index.ts`, `supabase/functions/_shared/reply-prompt.ts`.
+- **Prerequisites:** M10-T04 complete.
+- **Complexity & Effort:** High | Optimistic: 2.5 hrs | Expected: 4.0 hrs | Conservative: 6.0 hrs
+- **API Endpoints Involved:** `API-REP-04`.
+- **Database Tables Involved:** `public.google_review_replies`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-05`, `TC-REP-06`, `TC-REP-07`, `TC-REP-08`.
+- **Acceptance Criteria:** Grounded reply draft produced targeting P50 < 2.5s; untrusted review input safely escaped; sensitive review warnings flagged; draft saved in `drafted` state.
+
+#### Task M10-T06: Merchant Reply Center & Approval Interface
+- **Task ID:** `M10-T06`
+- **Title:** Merchant Reply Center & Approval Interface (`SCR-OWN-12`)
+- **Description:** Develop responsive Merchant Review Inbox & Reply Center (`SCR-OWN-12`, route `/dashboard/replies`). Displays synchronized Google reviews sorted by date with star rating, reviewer name, relative date, review snippet, reply status badge (Unreplied, Drafted, Approved, Published), and action buttons. Includes interactive Reply Editor modal with live byte counter (`x / 4,096 bytes`), Devanagari character guidance, draft preview, tone switcher (regeneration via `API-REP-04`), manual draft editing (`API-REP-05`), and explicit approval interface. Direct PostgREST PATCH updates `final_reply_text`, increments `revision`, and automatically invalidates prior approval via DB trigger.
+- **Target Files / Directories:** `src/pages/dashboard/GoogleRepliesPage.tsx`, `src/features/replies/components/ReviewInboxFeed.tsx`, `src/features/replies/components/ReviewCard.tsx`, `src/features/replies/components/ReplyEditorModal.tsx`, `src/features/replies/components/ToneSelector.tsx`.
+- **Prerequisites:** M10-T04, M10-T05 complete.
+- **Complexity & Effort:** High | Optimistic: 3.5 hrs | Expected: 5.5 hrs | Conservative: 8.0 hrs
+- **API Endpoints Involved:** `API-REP-03`, `API-REP-04`, `API-REP-05`.
+- **Database Tables Involved:** `public.google_review_replies`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-08`, `TC-REP-09`.
+- **Acceptance Criteria:** Responsive layout tested on desktop and mobile viewports; star ratings and review snippets rendered cleanly; manual editing functional with live counter; editing increments revision and invalidates previous approval; WCAG 2.2 AA accessible.
+
+#### Task M10-T07: Authorized Google Reply Publishing
+- **Task ID:** `M10-T07`
+- **Title:** Authorized Google Reply Publishing & Audit Verification
+- **Description:** Implement `publish-review-reply` Edge Function (`API-REP-06`). Enforces Option A invariant: verifies authenticated merchant session (`auth.uid = owner_id`), validates cryptographic approval digest (`approved_reply_hash = SHA256(...)`) matching current revision and draft text, checks whether Google review already has an existing reply (blocking silent overwriting without explicit overwrite confirmation), and dispatches `PUT .../reviews/{reviewId}/reply`. Executes two-phase bounded publication attempt: Phase 1 claims atomic attempt (<5ms) and releases DB locks; Phase 2 dispatches network call outside DB transaction; Phase 3 handles Google moderation states (PENDING -> pending_moderation, APPROVED -> published, REJECTED -> rejected_by_google, timeout -> outcome_unknown). Disallows automated publishing under all circumstances.
+- **Target Files / Directories:** `supabase/functions/publish-review-reply/index.ts`, `src/features/replies/components/PublishConfirmationModal.tsx`.
+- **Prerequisites:** M10-T06 complete.
+- **Complexity & Effort:** High | Optimistic: 2.5 hrs | Expected: 4.0 hrs | Conservative: 6.0 hrs
+- **API Endpoints Involved:** `API-REP-06`.
+- **Database Tables Involved:** `public.google_review_replies`, `public.google_business_connections`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-10`, `TC-REP-12`, `TC-REP-13`.
+- **Acceptance Criteria:** Specific cryptographic approval verified; existing Google reply detected and guarded; reply published to Google; audit metadata immutably recorded; status transitions to `published`.
+
+#### Task M10-T08: Comprehensive Security & Quality Verification
+- **Task ID:** `M10-T08`
+- **Title:** Comprehensive Security, Privacy & Quality Verification
+- **Description:** Execute dedicated Post-MVP test suite `TC-REP-01` through `TC-REP-15`. Validate OAuth state validation, AES-GCM token encryption, column-level privilege protection (revoking client mutation of approval columns and SELECT on encrypted refresh tokens), tenant isolation across multi-store simulations, Gemini draft quality, 4,096 UTF-8 byte boundary, prompt injection resistance, 30-day purge worker, approval invalidation on edit, and mock GBP API publishing.
+- **Target Files / Directories:** `tests/e2e/google-review-replies.spec.ts`, `tests/integration/google-reply-flow.test.ts`.
+- **Prerequisites:** Tasks M10-T01 through M10-T07 complete.
+- **Complexity & Effort:** High | Optimistic: 3.0 hrs | Expected: 4.5 hrs | Conservative: 7.0 hrs
+- **API Endpoints Involved:** `API-REP-01` through `API-REP-07`.
+- **Database Tables Involved:** `public.google_business_connections`, `public.google_review_replies`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-01` through `TC-REP-15`.
+- **Acceptance Criteria:** 100% pass rate across `TC-REP-01..15`; zero auto-publish regressions; approval tampering rejected; revision mismatch rejected; cross-tenant isolation verified.
+
+#### Task M10-T09: Controlled Merchant Pilot & Commercial Validation
+- **Task ID:** `M10-T09`
+- **Title:** Controlled Merchant Pilot & Commercial Validation
+- **Description:** Conduct controlled opt-in pilot with 2–3 merchants across 7–14 days of live operation. Evaluate merchant adoption, draft approval frequency, manual editing rates, tone preferences, failure rates, actual Gemini token costs, and commercial willingness to pay (e.g. ₹299–₹499/mo add-on). Author post-pilot commercial go/no-go recommendation.
+- **Target Files / Directories:** `docs/research/M10_PILOT_EVALUATION.md`.
+- **Prerequisites:** Task M10-T08 complete.
+- **Complexity & Effort:** Medium | Optimistic: 2.0 hrs | Expected: 4.0 hrs | Conservative: 6.5 hrs (Calendar duration: 7–14 days live supervision)
+- **API Endpoints Involved:** `API-REP-01` through `API-REP-07`.
+- **Database Tables Involved:** `public.google_business_connections`, `public.google_review_replies`.
+- **Screens Involved:** `SCR-OWN-12`.
+- **Associated Test Cases:** `TC-REP-15`.
+- **Acceptance Criteria:** 2–3 pilot merchants active; >=80% draft approval rate without unhandled exceptions; zero unauthorized publications; founder commercial decision recorded.
+
 ---
 ## 11. Effort & Timeline Estimates
 
@@ -1547,7 +1711,12 @@ Effort estimations account for AI-assisted development velocity tempered by the 
 | **M9: Controlled Merchant Pilot**   | 10 hrs active   | 16 hrs active  | 26 hrs active     | Merchant interviews, print   |
 | (14-day live supervision)           | (14d elapsed)   | (21d elapsed)  | (30d elapsed)     | Store cooperation & placement|
 |-------------------------------------+-----------------+----------------+-------------------+------------------------------|
-| **TOTAL ENGINEERING TIME**          | **104 hrs**     | **166 hrs**    | **264 hrs**       | ~3 to 5 weeks active build   |
+| **TOTAL MVP ENGINEERING TIME**      | **104 hrs**     | **166 hrs**    | **264 hrs**       | ~3 to 5 weeks active build   |
+|=====================================+=================+================+===================+==============================|
+| **PLANNED POST-MVP EXTENSION:**     |                 |                |                   |                              |
+| **M10: Google Review Reply Asst.**  | 23.0 hrs        | 37.0 hrs       | 56.0 hrs          | Google API turnaround (1–4+ wks wait), pilot (7–14d runtime) |
+|-------------------------------------+-----------------+----------------+-------------------+------------------------------|
+| **TOTAL COMBINED PORTFOLIO**        | **127.0 hrs**   | **203.0 hrs**  | **320.0 hrs**     | Full MVP + Reply Assistant   |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -1982,11 +2151,27 @@ Every requirement across our foundational documents is mapped to its implementin
 | `SEC-003`       | Signed HMAC Token Survey Session Integrity  | M3, M4    | `M3-T03`, `M4-T02`  | `TC-SEC-03, 04`     |
 | `SEC-004`       | Secure File Upload & Magic Bytes Inspection | M5, M7    | `M5-T05`, `M7-T01`  | `TC-UPL-01..08`     |
 | `SEC-005`       | Automated Logical Backup & Restore Drill    | M7, M8    | `M7-T08`, `M8-T05`  | `TC-BKP-01..05`     |
+|=================+=============================================+===========+=====================+====================|
+| **PLANNED POST-MVP EXTENSION REQUIREMENTS (MILESTONE M10 — OPTION A GOVERNANCE):**                                   |
+|-----------------+---------------------------------------------+-----------+---------------------+--------------------|
+| `FR-REPLY-001`  | Google Business Profile OAuth Connection    | M10       | `M10-T01..03`       | `TC-REP-01`, `TC-REP-02`          |
+| `FR-REPLY-002`  | Verified Location Binding & Token Vault     | M10       | `M10-T02, 03`       | `TC-REP-02`, `TC-REP-11`          |
+| `FR-REPLY-003`  | On-Demand Review Sync & 30-Day Retention    | M10       | `M10-T04`           | `TC-REP-03`, `TC-REP-04`, `TC-REP-12` |
+| `FR-REPLY-004`  | Grounded AI Reply Draft Generation          | M10       | `M10-T05`           | `TC-REP-05`, `TC-REP-06`          |
+| `FR-REPLY-005`  | Negative & Sensitive Review Detection       | M10       | `M10-T05, 06`       | `TC-REP-07`                       |
+| `FR-REPLY-006`  | Multi-Tone Reply Customization (4 Tones)    | M10       | `M10-T05, 06`       | `TC-REP-06`, `TC-REP-08`          |
+| `FR-REPLY-007`  | Mandatory Merchant Review & Draft Editor    | M10       | `M10-T06`           | `TC-REP-08`, `TC-REP-09`          |
+| `FR-REPLY-008`  | Explicit Approval Confirmation Modal        | M10       | `M10-T06, 07`       | `TC-REP-10`, `TC-REP-15`          |
+| `FR-REPLY-009`  | Authorized Google API Reply Publishing      | M10       | `M10-T07`           | `TC-REP-10`, `TC-REP-13`          |
+| `FR-REPLY-010`  | Disallow Automated Background Publishing    | M10       | `M10-T02, 07`       | `TC-REP-10`                       |
+| `FR-REPLY-011`  | Multi-Tenant Reply Isolation (Postgres RLS) | M10       | `M10-T02, 03, 08`   | `TC-REP-11`                       |
+| `FR-REPLY-012`  | Google Disconnect & Token Invalidation      | M10       | `M10-T03, 08`       | `TC-REP-14`                       |
 +----------------------------------------------------------------------------------------------------------------------+
 ```
 
 ### 21.1 Test Suite Coverage Mapping
-- All 18 test prefixes (`TC-API`, `TC-DB`, `TC-QTA`, `TC-AI`, `TC-CUST`, `TC-OWN`, `TC-ADM`, `TC-DST`, `TC-UPL`, `TC-PRT`, `TC-ANA`, `TC-PRF`, `TC-A11Y`, `TC-MOB`, `TC-PRV`, `TC-SEC`, `TC-BKP`, `TC-UAT`) are mapped to their validating milestones with 100% coverage.
+- All 18 MVP test prefixes (`TC-API`, `TC-DB`, `TC-QTA`, `TC-AI`, `TC-CUST`, `TC-OWN`, `TC-ADM`, `TC-DST`, `TC-UPL`, `TC-PRT`, `TC-ANA`, `TC-PRF`, `TC-A11Y`, `TC-MOB`, `TC-PRV`, `TC-SEC`, `TC-BKP`, `TC-UAT`) are mapped to their validating milestones with 100% coverage.
+- The planned Post-MVP test prefix `TC-REP` (`TC-REP-01` through `TC-REP-15`) covers all 12 `FR-REPLY-*` requirements for Milestone M10.
 
 ---
 
@@ -2028,6 +2213,10 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 +---------------------------------------------------------------------------------------------------+
 |                                 PHASE 3: COMMERCIAL SCALE ROADMAP                                 |
 +---------------------------------------------------------------------------------------------------+
+|  [ M10 ] AI REVIEW REPLIES    • Google Business Profile API OAuth integration (Option A Approved) |
+|           |                   • AI review reply drafting with mandatory merchant review & publish |
+|           |                   • Negative & sensitive review alerts & 30-day raw text purge        |
+|           |                                                                                       |
 |  [ Q1 ] AUTOMATED BILLING     • Razorpay Subscriptions & UPI Autopay integration                  |
 |           |                   • Automated invoice generation (GST compliant)                      |
 |           |                                                                                       |
@@ -2041,6 +2230,9 @@ Upon successful conclusion of the 14-day 3–5 merchant pilot (Milestone M9), th
 |           |                   • Weekly AI sentiment digests & executive audio summaries           |
 +---------------------------------------------------------------------------------------------------+
 ```
+
+> [!NOTE]
+> Detailed specifications for Milestone M10 are cataloged in [`docs/features/AI_REVIEW_REPLY_ASSISTANT.md`](file:///Users/mrugmaythere/work/QRs/docs/features/AI_REVIEW_REPLY_ASSISTANT.md) and [`docs/research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md`](file:///Users/mrugmaythere/work/QRs/docs/research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md). Implementation is strictly gated on founder authorization and Google Business Profile Basic Access approval.
 
 ---
 

@@ -147,6 +147,13 @@ Each identified opportunity is evaluated across research evidence, customer valu
 4. **Implementation Effort:** Low (direct WhatsApp deep link with pre-filled business identifier).
 5. **Validation Metric:** Equal availability verified across all customer flows; zero gating logic in codebase.
 
+### Opportunity 6: Google Review Management & AI Reply Assistant (Option A Approved)
+1. **Research Evidence:** Merchants frequently fail to respond to published Google reviews due to time constraints, language barriers, or lack of inspiration. Generic template replies read as robotic, while unaddressed critical reviews harm store reputation.
+2. **Proposed Solution:** Planned Post-MVP Milestone M10 (`QR_Review AI Review Reply Assistant`). Connects merchant Google Business Profile via OAuth 2.0, syncs reviews on-demand, generates tone-tailored reply drafts via Gemini Flash, and provides a responsive review inbox (`SCR-OWN-12`). Governed strictly by **Option A: Mandatory Merchant Review and Explicit Approval Prior to Google Publication**. Raw review snippets are automatically purged after 30 days per Google Content Policy.
+3. **Customer Value:** Merchants maintain an active, empathetic Google Maps presence in under 15 seconds per review; customers receive genuine acknowledgment.
+4. **Implementation Effort:** High (Google API Basic Access prerequisite, OAuth token vault with AES-GCM-256 encryption, Deno Edge Functions, interactive reply center UI).
+5. **Validation Metric:** Rate of merchant draft approvals, average response turnaround time, and commercial upsell conversion.
+
 ---
 
 ## 6. Decision Status
@@ -166,6 +173,7 @@ Each identified opportunity is evaluated across research evidence, customer valu
 | **Tech Stack: React + Vite + Cloudflare Pages + Supabase** | `PROVISIONAL` | Preferred architecture; subject to free-tier operational constraints validation. |
 | **Fair-Use Limit (100–150 generations/business/mo)** | `REQUIRES VALIDATION` | Needs empirical verification against actual pilot monthly scan volumes. |
 | **Conversion Superiority Over Free Google QR** | `REQUIRES VALIDATION` | Requires head-to-head empirical pilot testing before making marketing claims. |
+| **AI Google Review Reply Assistant (Option A)** | `DEFERRED — POST-MVP` | Milestone M10. Mandatory merchant review and human approval prior to Google publication. Zero auto-publishing; 30-day raw review purge (DOC-REPLY-01). |
 
 ---
 
@@ -176,6 +184,7 @@ Each identified opportunity is evaluated across research evidence, customer valu
 3. **Direct-to-Google QR Baseline Comparison:** In real-world cafe and salon settings, does the AI-assisted flow deliver a measurably higher Google review conversion rate and richer content compared to a simple, free Google Review QR standee?
 4. **WhatsApp Owner Channel Utilization:** Will customers use the universal WhatsApp link for operational feedback, or will they bypass it in favor of posting directly on Google Maps regardless of experience quality?
 5. **Merchant Willingness to Pay After Month 1:** Will pilot merchants transition from the initial setup package to the ₹399/month recurring subscription without intensive manual sales follow-up from the founder?
+6. **Google Business Profile API Basic Access Approval:** When will the developer account reach 60 days of verified business profile management to submit the GBP API Basic Access Application for Milestone M10?
 
 ---
 

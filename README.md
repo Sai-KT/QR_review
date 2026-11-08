@@ -40,6 +40,16 @@ Complete engineering specifications are maintained in the [`docs/`](docs/) direc
 | [`docs/API_SPEC.md`](docs/API_SPEC.md) | 23 REST endpoint contracts, 8 RPC signatures, RFC 7807 error envelopes |
 | [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) | Master test plan covering 196 test cases (`TC-*`) across unit, contract, and RLS suites |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 10 delivery milestones (M0–M9), 73 atomic tasks, pre-implementation gate |
+| [`docs/features/AI_REVIEW_REPLY_ASSISTANT.md`](docs/features/AI_REVIEW_REPLY_ASSISTANT.md) | *(Planned Post-MVP)* AI Google Review Reply Assistant specification (Option A workflow) |
+| [`docs/research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md`](docs/research/GOOGLE_REVIEW_REPLY_FEASIBILITY.md) | *(Research)* Google Business Profile API integration feasibility and policy assessment |
+
+---
+
+## Planned Post-MVP Expansion: AI Review Reply Assistant (Option A)
+
+The platform roadmap includes a planned post-MVP extension (**Milestone M10**): the **QR_Review AI Review Reply Assistant**.
+- **Approved Operating Model (Option A):** Generates grounded AI reply drafts for genuine reviews published on the merchant's Google Business Profile. **Mandatory merchant review and explicit human approval** are required before any response is submitted to Google Maps. Zero automated or mass publishing.
+- **Current Status:** Planning & technical design phase. Application implementation remains strictly blocked pending MVP pilot completion and official Google Business Profile API access approval.
 
 ---
 

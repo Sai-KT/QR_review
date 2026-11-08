@@ -23,7 +23,8 @@
 | Revision | Date | Author | Summary of Changes | Status |
 | :---: | :---: | :--- | :--- | :---: |
 | **1.0** | Oct 17, 2026 | Principal Architect | Initial baseline stack selection and cost projection. | Superseded |
-| **1.1** | Oct 17, 2026 | Principal Architect | **Stage 2 Correction Audit Applied:**<br/>1. Evaluated currently supported Gemini Flash models (`gemini-3.5-flash-lite` and `gemini-3.8-flash`), noting Gemini 2.5 access restrictions for new projects.<br/>2. Recomputed AI costs using official Google per-million token rates with explicit input, output, thinking token, and retry assumptions.<br/>3. Re-verified Cloudflare Pages, Supabase (free vs Pro $25/mo), domain, and Razorpay gateway fees without double-counting.<br/>4. Updated framework versions (React 19, Vite 6, TypeScript 5, Tailwind CSS v4, React Router v7, `@google/genai` v0.1+).<br/>5. Acknowledged backend serverless cold-start realities (100–300ms) on Edge Functions.<br/>6. Disaggregated financial milestones: gross MRR, setup revenue, direct fulfillment, fixed costs, founder time, operating surplus, and taxes. | **Under Review** |
+| **1.1** | Oct 17, 2026 | Principal Architect | **Stage 2 Correction Audit Applied:**<br/>1. Evaluated currently supported Gemini Flash models (`gemini-3.5-flash-lite` and `gemini-3.8-flash`), noting Gemini 2.5 access restrictions for new projects.<br/>2. Recomputed AI costs using official Google per-million token rates with explicit input, output, thinking token, and retry assumptions.<br/>3. Re-verified Cloudflare Pages, Supabase (free vs Pro $25/mo), domain, and Razorpay gateway fees without double-counting.<br/>4. Updated framework versions (React 19, Vite 6, TypeScript 5, Tailwind CSS v4, React Router v7, `@google/genai` v0.1+).<br/>5. Acknowledged backend serverless cold-start realities (100–300ms) on Edge Functions.<br/>6. Disaggregated financial milestones: gross MRR, setup revenue, direct fulfillment, fixed costs, founder time, operating surplus, and taxes. | Superseded |
+| **1.2** | Nov 8, 2026 | Principal Cloud Architect | **Post-MVP Technology Stack Evaluation: Milestone M10 (Google Review Replies):**<br/>1. **Integration Toolchain (§3 & §10):** Evaluated Google Business Profile API v4, Google OAuth 2.0 Web Client, Web Crypto AES-GCM-256 token vaulting, and Deno Edge Function execution.<br/>2. **Option A Governance Hardening:** Selected Option A mandatory human approval architecture over automated publishing.<br/>3. **Data Retention & Privacy Stack:** Standardized on Supabase `pg_cron` for automated 30-day Google Content Policy compliance purging. | **Planning Baseline Approved** |
 
 ---
 
@@ -304,6 +305,10 @@ DECISION AREA                   STATUS                 DECISION & RATIONALE
                                                        draft buffer with Auth A (10m submission token).
 18. Admin Security (M0-09/10)   APPROVED (TECH DESIGN) Separation of anon key vs service_role (M0-10) and
                                                        hardened admin gateway + aal2 MFA allowlist (M0-09).
+19. Review Replies Stack (M10)  OPTION A APPROVED      Post-MVP Milestone M10. Google Business Profile API v4,
+                                (PLANNING ONLY)        Google OAuth 2.0 Web Client, Web Crypto AES-GCM-256
+                                                       token encryption, Gemini Flash reply drafting, and
+                                                       pg_cron 30-day raw review purge worker (DOC-REPLY-01).
 ===================================================================================================
 ```
 
