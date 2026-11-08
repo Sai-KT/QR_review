@@ -75,8 +75,8 @@ const MerchantPages = {
     })),
   ),
   Subscription: React.lazy(() =>
-    import('./pages/merchant/MerchantPageShells.tsx').then((m) => ({
-      default: m.SubscriptionPlanPage,
+    import('./pages/merchant/SubscriptionPage.tsx').then((m) => ({
+      default: m.SubscriptionPage,
     })),
   ),
   Settings: React.lazy(() =>

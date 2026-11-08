@@ -91,19 +91,14 @@ export function AnalyticsPage(): React.JSX.Element {
   );
 }
 
+import { SubscriptionPage } from './SubscriptionPage';
+
 /**
- * SubscriptionPlanPage (/dashboard/subscription)
+ * SubscriptionPlanPage (/dashboard/subscription — SCR-OWN-10)
+ * Re-exports the full production SubscriptionPage.
  */
 export function SubscriptionPlanPage(): React.JSX.Element {
-  return (
-    <RoutePlaceholderCard
-      screenId="SCR-OWN-10"
-      screenName="Subscription Tier & Quota Meter"
-      routePath="/dashboard/subscription"
-      surface="Merchant"
-      description="Merchant plan and consumption monitor: Pilot tier status, monthly generation quota meter (default 150/month), billing cycle reset date, and manual upgrade requests."
-    />
-  );
+  return <SubscriptionPage />;
 }
 
 /**

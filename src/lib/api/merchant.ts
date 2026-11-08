@@ -13,14 +13,16 @@
 import { supabase, getSupabaseUrl, getSupabaseAnonKey } from '../supabase';
 import { toBusinessDto, toBusinessUpdateRow } from '../adapters/business';
 import { toFeedbackDto } from '../adapters/feedback';
-import { toOwnerDashboardResponse } from '../adapters/analytics';
-import type { BusinessRow, SurveyResponseRow } from '../../types/database';
+import { toOwnerDashboardResponse, toSubscriptionDto, toTenantQuotaDto } from '../adapters/analytics';
+import type { BusinessRow, SurveyResponseRow, SubscriptionRow, TenantQuotaRow } from '../../types/database';
 import type {
   Business,
   BusinessProfileUpdate,
   CustomerFeedback,
   DashboardAnalyticsPeriod,
   OwnerDashboardResponse,
+  Subscription,
+  TenantQuota,
 } from '../../types/domain';
 
 export interface FetchMerchantBusinessResult {
@@ -696,6 +698,137 @@ export async function fetchOwnerDashboard(
         err instanceof Error
           ? err
           : new Error('An unexpected error occurred while fetching funnel analytics.'),
+    };
+  }
+}
+
+export interface FetchMerchantSubscriptionResult {
+  data: Subscription | null;
+  error: Error | null;
+}
+
+/**
+ * Fetches the commercial subscription and billing status for the authenticated merchant's business.
+ *
+ * Endpoint: GET /rest/v1/subscriptions (API-OWN-09)
+ * Security: Enforced strictly by PostgreSQL RLS (`subscriptions_select_owner`).
+ *           Requires authenticated owner session. Returns 0 rows for other businesses.
+ */
+export async function fetchMerchantSubscription(
+  businessId: string,
+): Promise<FetchMerchantSubscriptionResult> {
+  if (!businessId || typeof businessId !== 'string' || businessId.trim() === '') {
+    return {
+      data: null,
+      error: new Error('A valid business ID is required to fetch subscription status.'),
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('business_id', businessId.trim())
+      .maybeSingle();
+
+    if (error) {
+      return {
+        data: null,
+        error: new Error(error.message || 'Failed to fetch subscription status.'),
+      };
+    }
+
+    if (!data) {
+      return {
+        data: null,
+        error: null,
+      };
+    }
+
+    return {
+      data: toSubscriptionDto(data as unknown as SubscriptionRow),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error:
+        err instanceof Error
+          ? err
+          : new Error('An unexpected error occurred while fetching subscription status.'),
+    };
+  }
+}
+
+export interface FetchMerchantQuotaLedgerResult {
+  data: TenantQuota[] | null;
+  activeQuota: TenantQuota | null;
+  error: Error | null;
+}
+
+/**
+ * Fetches the monthly AI generation quota consumption ledger for the authenticated merchant's business.
+ *
+ * Endpoint: GET /rest/v1/tenant_quotas (API-OWN-06)
+ * Security: Enforced strictly by PostgreSQL RLS (`tenant_quotas_select_owner`).
+ *           Requires authenticated owner session. Returns 0 rows for other businesses.
+ */
+export async function fetchMerchantQuotaLedger(
+  businessId: string,
+): Promise<FetchMerchantQuotaLedgerResult> {
+  if (!businessId || typeof businessId !== 'string' || businessId.trim() === '') {
+    return {
+      data: null,
+      activeQuota: null,
+      error: new Error('A valid business ID is required to fetch quota records.'),
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('tenant_quotas')
+      .select('*')
+      .eq('business_id', businessId.trim())
+      .order('billing_cycle', { ascending: false })
+      .limit(12);
+
+    if (error) {
+      return {
+        data: null,
+        activeQuota: null,
+        error: new Error(error.message || 'Failed to fetch quota ledger records.'),
+      };
+    }
+
+    if (!data || data.length === 0) {
+      return {
+        data: [],
+        activeQuota: null,
+        error: null,
+      };
+    }
+
+    const quotas = (data as unknown as TenantQuotaRow[]).map(toTenantQuotaDto);
+
+    // Determine activeQuota:
+    // 1. Look for ledger matching current calendar month in UTC/IST ('YYYY-MM')
+    // 2. If no record matches current calendar month, pick the most recent cycle (quotas[0])
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const activeQuota = quotas.find((q) => q.billingCycle === currentMonth) ?? quotas[0] ?? null;
+
+    return {
+      data: quotas,
+      activeQuota,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      data: null,
+      activeQuota: null,
+      error:
+        err instanceof Error
+          ? err
+          : new Error('An unexpected error occurred while fetching quota ledger records.'),
     };
   }
 }

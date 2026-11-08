@@ -8,6 +8,8 @@ import {
   fetchSurveyQuestionsMap,
   deriveResponseSentiment,
   fetchOwnerDashboard,
+  fetchMerchantSubscription,
+  fetchMerchantQuotaLedger,
   type SurveyQuestionOptionMeta,
 } from './merchant';
 import type { CustomerFeedback } from '../adapters/feedback';
@@ -947,6 +949,237 @@ describe('fetchOwnerDashboard (API-OWN-04)', () => {
     expect(result.error?.message).toBe('Network offline');
   });
 });
+
+describe('fetchMerchantSubscription (API-OWN-09)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects empty or whitespace-only businessId with error', async () => {
+    const result = await fetchMerchantSubscription('   ');
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('A valid business ID is required to fetch subscription status.');
+  });
+
+  it('successfully fetches and adapts raw subscription row into DTO', async () => {
+    const mockRow = {
+      id: 'sub-001',
+      business_id: 'b0000000-0000-4000-8000-000000000001',
+      plan_tier: 'standard_recurring',
+      subscription_status: 'active',
+      trial_ends_at: null,
+      current_period_starts_at: '2026-10-24',
+      current_period_ends_at: '2026-11-23',
+      billing_currency: 'INR',
+      last_payment_amount: 399.0,
+      last_payment_recorded_at: '2026-10-24T20:50:07Z',
+      payment_reference: 'UPI-REF-LUXE-001',
+      created_at: '2026-09-24T20:50:07Z',
+      updated_at: '2026-10-24T20:50:07Z',
+    };
+
+    const mockMaybeSingle = vi.fn().mockResolvedValue({ data: mockRow, error: null });
+    const mockEq = vi.fn().mockReturnValue({ maybeSingle: mockMaybeSingle });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantSubscription('b0000000-0000-4000-8000-000000000001');
+
+    expect(supabase.from).toHaveBeenCalledWith('subscriptions');
+    expect(mockSelect).toHaveBeenCalledWith('*');
+    expect(mockEq).toHaveBeenCalledWith('business_id', 'b0000000-0000-4000-8000-000000000001');
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({
+      id: 'sub-001',
+      businessId: 'b0000000-0000-4000-8000-000000000001',
+      planTier: 'standard_recurring',
+      subscriptionStatus: 'active',
+      trialEndsAt: null,
+      currentPeriodStartsAt: '2026-10-24',
+      currentPeriodEndsAt: '2026-11-23',
+      billingCurrency: 'INR',
+      lastPaymentAmount: 399.0,
+      lastPaymentRecordedAt: '2026-10-24T20:50:07Z',
+      paymentReference: 'UPI-REF-LUXE-001',
+      createdAt: '2026-09-24T20:50:07Z',
+      updatedAt: '2026-10-24T20:50:07Z',
+    });
+  });
+
+  it('returns null data when business has no subscription row', async () => {
+    const mockMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const mockEq = vi.fn().mockReturnValue({ maybeSingle: mockMaybeSingle });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantSubscription('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.error).toBeNull();
+    expect(result.data).toBeNull();
+  });
+
+  it('returns error when Supabase query fails', async () => {
+    const mockMaybeSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: 'Database query failed' },
+    });
+    const mockEq = vi.fn().mockReturnValue({ maybeSingle: mockMaybeSingle });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantSubscription('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Database query failed');
+  });
+
+  it('handles unexpected exceptions safely', async () => {
+    vi.mocked(supabase.from).mockImplementation(() => {
+      throw new Error('Supabase client offline');
+    });
+
+    const result = await fetchMerchantSubscription('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toBe('Supabase client offline');
+  });
+});
+
+describe('fetchMerchantQuotaLedger (API-OWN-06)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects empty or whitespace-only businessId with error', async () => {
+    const result = await fetchMerchantQuotaLedger('');
+    expect(result.data).toBeNull();
+    expect(result.activeQuota).toBeNull();
+    expect(result.error?.message).toBe('A valid business ID is required to fetch quota records.');
+  });
+
+  it('successfully fetches quota rows and resolves activeQuota', async () => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const mockRows = [
+      {
+        id: 'quota-002',
+        business_id: 'b0000000-0000-4000-8000-000000000001',
+        billing_cycle: currentMonth,
+        max_limit: 150,
+        used_count: 84,
+        reserved_count: 2,
+        reset_at: '2026-12-01T00:00:00Z',
+        created_at: '2026-11-01T00:00:00Z',
+        updated_at: '2026-11-02T00:00:00Z',
+      },
+      {
+        id: 'quota-001',
+        business_id: 'b0000000-0000-4000-8000-000000000001',
+        billing_cycle: '2026-10',
+        max_limit: 150,
+        used_count: 12,
+        reserved_count: 0,
+        reset_at: '2026-11-01T00:00:00Z',
+        created_at: '2026-10-01T00:00:00Z',
+        updated_at: '2026-10-31T00:00:00Z',
+      },
+    ];
+
+    const mockLimit = vi.fn().mockResolvedValue({ data: mockRows, error: null });
+    const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+    const mockEq = vi.fn().mockReturnValue({ order: mockOrder });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantQuotaLedger('b0000000-0000-4000-8000-000000000001');
+
+    expect(supabase.from).toHaveBeenCalledWith('tenant_quotas');
+    expect(mockSelect).toHaveBeenCalledWith('*');
+    expect(mockEq).toHaveBeenCalledWith('business_id', 'b0000000-0000-4000-8000-000000000001');
+    expect(mockOrder).toHaveBeenCalledWith('billing_cycle', { ascending: false });
+    expect(mockLimit).toHaveBeenCalledWith(12);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(2);
+    expect(result.activeQuota?.billingCycle).toBe(currentMonth);
+    expect(result.activeQuota?.maxLimit).toBe(150);
+    expect(result.activeQuota?.usedCount).toBe(84);
+    expect(result.activeQuota?.reservedCount).toBe(2);
+    // remainingCount: 150 - 84 - 2 = 64
+    expect(result.activeQuota?.remainingCount).toBe(64);
+  });
+
+  it('resolves first record as activeQuota if current month has no ledger row', async () => {
+    const mockRows = [
+      {
+        id: 'quota-old',
+        business_id: 'b0000000-0000-4000-8000-000000000001',
+        billing_cycle: '2025-01',
+        max_limit: 150,
+        used_count: 50,
+        reserved_count: 0,
+        reset_at: '2025-02-01T00:00:00Z',
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-31T00:00:00Z',
+      },
+    ];
+
+    const mockLimit = vi.fn().mockResolvedValue({ data: mockRows, error: null });
+    const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+    const mockEq = vi.fn().mockReturnValue({ order: mockOrder });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantQuotaLedger('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.error).toBeNull();
+    expect(result.activeQuota?.billingCycle).toBe('2025-01');
+    expect(result.activeQuota?.remainingCount).toBe(100);
+  });
+
+  it('returns empty array and null activeQuota when no quota records exist', async () => {
+    const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
+    const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+    const mockEq = vi.fn().mockReturnValue({ order: mockOrder });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantQuotaLedger('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([]);
+    expect(result.activeQuota).toBeNull();
+  });
+
+  it('returns error when Supabase query fails', async () => {
+    const mockLimit = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: 'Quota table query failed' },
+    });
+    const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+    const mockEq = vi.fn().mockReturnValue({ order: mockOrder });
+    const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+    vi.mocked(supabase.from).mockReturnValue({ select: mockSelect } as unknown as ReturnType<typeof supabase.from>);
+
+    const result = await fetchMerchantQuotaLedger('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.data).toBeNull();
+    expect(result.activeQuota).toBeNull();
+    expect(result.error?.message).toBe('Quota table query failed');
+  });
+
+  it('handles unexpected exceptions safely', async () => {
+    vi.mocked(supabase.from).mockImplementation(() => {
+      throw new Error('Database disconnected');
+    });
+
+    const result = await fetchMerchantQuotaLedger('b0000000-0000-4000-8000-000000000001');
+
+    expect(result.data).toBeNull();
+    expect(result.activeQuota).toBeNull();
+    expect(result.error?.message).toBe('Database disconnected');
+  });
+});
+
 
 
 
