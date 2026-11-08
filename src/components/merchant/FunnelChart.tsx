@@ -83,13 +83,13 @@ export function FunnelChart({
     {
       id: 'qr-visits',
       stageNumber: 1,
-      label: 'QR Landing Visits',
+      label: 'QR Link Visits',
       count: qrVisits,
       denominatorCount: qrVisits,
       stepRate: 1.0,
       dropOffRate: 0,
       denominatorLabel: 'Initial landing page visits',
-      helperText: 'Patrons who opened the QR landing page via physical scan or digital link',
+      helperText: 'Patrons who opened the landing page via QR scan or digital link',
       barColor: 'bg-blue-600 dark:bg-blue-500',
     },
     {
@@ -100,7 +100,7 @@ export function FunnelChart({
       denominatorCount: qrVisits,
       stepRate: metrics.surveyCompletionRate,
       dropOffRate: surveyDropOff,
-      denominatorLabel: 'of QR Landing Visits',
+      denominatorLabel: 'of QR Link Visits',
       helperText: 'Patrons who answered all 3 MCQs and submitted feedback',
       barColor: 'bg-indigo-600 dark:bg-indigo-500',
     },
@@ -125,19 +125,19 @@ export function FunnelChart({
       stepRate: metrics.copyRate,
       dropOffRate: copyDropOff,
       denominatorLabel: 'of AI Reviews Drafted',
-      helperText: 'Patrons who tapped copy to place the draft on their clipboard',
+      helperText: 'Patrons who tapped copy to place the draft on their clipboard (optional step)',
       barColor: 'bg-amber-600 dark:bg-amber-500',
     },
     {
       id: 'google-handoffs',
       stageNumber: 5,
-      label: 'Google Maps Outbound Handoffs',
+      label: 'Assisted Google Handoffs',
       count: googleHandoffClicks,
       denominatorCount: clipboardCopies,
       stepRate: metrics.handoffRate,
       dropOffRate: handoffDropOff,
       denominatorLabel: 'of Copied Reviews',
-      helperText: 'Patrons directed to Google Maps review form with copied review draft',
+      helperText: 'Patrons directed to Google Maps from the assisted AI draft journey',
       barColor: 'bg-emerald-600 dark:bg-emerald-500',
     },
   ];
@@ -231,7 +231,7 @@ export function FunnelChart({
                     <span className="truncate max-w-full">{stage.helperText}</span>
                     {idx > 0 && isAvailable && stage.stepRate < 1.0 && stage.dropOffRate > 0 && (
                       <span className="text-amber-600 dark:text-amber-400 font-medium shrink-0">
-                        {formatPercentage(stage.dropOffRate)} step drop-off
+                        {formatPercentage(stage.dropOffRate)} relative volume difference
                       </span>
                     )}
                   </div>
@@ -265,7 +265,7 @@ export function FunnelChart({
                   {directBypassClicks.toLocaleString()}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {qrVisits > 0 ? `${formatPercentage(metrics.directBypassRate)} of QR visits` : '—'}
+                  {qrVisits > 0 ? `${formatPercentage(metrics.directBypassRate)} of QR Link Visits` : '—'}
                 </div>
               </div>
             </div>
@@ -280,7 +280,7 @@ export function FunnelChart({
                   {totalHandoffs.toLocaleString()}
                 </span>
                 <Badge variant="secondary" className="font-semibold text-xs">
-                  {qrVisits > 0 ? `${formatPercentage(totalHandoffRate)} of QR visits` : '—'}
+                  {qrVisits > 0 ? `${formatPercentage(totalHandoffRate)} of QR Link Visits` : '—'}
                 </Badge>
               </div>
             </div>
@@ -335,13 +335,13 @@ export function FunnelChart({
                       Funnel Stage
                     </th>
                     <th scope="col" className="py-2 px-3 font-semibold text-foreground text-right">
-                      Patron Count
+                      Event Count
                     </th>
                     <th scope="col" className="py-2 px-3 font-semibold text-foreground text-right">
-                      Step Conversion
+                      Event Volume Ratio
                     </th>
                     <th scope="col" className="py-2 px-3 font-semibold text-foreground text-right">
-                      Step Drop-off
+                      Volume Difference
                     </th>
                     <th scope="col" className="py-2 px-3 font-semibold text-foreground">
                       Denominator Base
@@ -393,12 +393,12 @@ export function FunnelChart({
                       —
                     </td>
                     <td className="py-2 px-3 text-muted-foreground">
-                      of QR Landing Visits
+                      of QR Link Visits
                     </td>
                   </tr>
                   <tr className="hover:bg-muted/20 bg-muted/20 font-semibold border-t-2 border-border">
                     <th scope="row" className="py-2 px-3 text-foreground">
-                      Total Outbound Handoffs
+                      Total Outbound Handoffs (Assisted + Direct)
                     </th>
                     <td className="py-2 px-3 text-right tabular-nums text-foreground font-bold">
                       {totalHandoffs.toLocaleString()}
@@ -410,13 +410,13 @@ export function FunnelChart({
                       —
                     </td>
                     <td className="py-2 px-3 text-muted-foreground">
-                      of QR Landing Visits
+                      of QR Link Visits
                     </td>
                   </tr>
                 </tbody>
               </table>
               <p className="text-[11px] text-muted-foreground mt-2">
-                * Note: Event counts reflect deduplicated telemetry occurrences (60s rolling window). Ratios represent relative milestone event volumes rather than cohort-tracked individual customer lifecycles.
+                * Note: Event counts reflect deduplicated telemetry occurrences within fixed calendar-minute buckets. Ratios represent relative event volume comparisons between journey milestones rather than cohort-tracked individual customer lifecycles.
               </p>
             </div>
           )}

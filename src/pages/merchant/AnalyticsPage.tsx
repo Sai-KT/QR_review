@@ -291,11 +291,11 @@ export function AnalyticsPage(): React.JSX.Element {
             aria-label="Funnel Metric Summary Cards"
             data-testid="metrics-summary-grid"
           >
-            {/* Card 1: QR Landing Visits */}
+            {/* Card 1: QR Link Visits */}
             <Card className="border border-border bg-card shadow-xs">
               <CardHeader className="p-3 pb-1">
                 <CardTitle className="text-xs font-medium text-muted-foreground">
-                  QR Landing Visits
+                  QR Link Visits
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-3 pt-0 space-y-1">
@@ -369,7 +369,7 @@ export function AnalyticsPage(): React.JSX.Element {
             <Card className="border border-border bg-card shadow-xs">
               <CardHeader className="p-3 pb-1">
                 <CardTitle className="text-xs font-medium text-muted-foreground">
-                  Google Handoffs
+                  Assisted Google Handoffs
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-3 pt-0 space-y-1">
@@ -384,7 +384,7 @@ export function AnalyticsPage(): React.JSX.Element {
               </CardContent>
             </Card>
 
-            {/* Card 6: Direct Google Bypasses */}
+            {/* Card 6: Direct Bypasses */}
             <Card className="border border-border bg-card shadow-xs">
               <CardHeader className="p-3 pb-1">
                 <CardTitle className="text-xs font-medium text-muted-foreground">

@@ -94,8 +94,8 @@ test.describe('M5-T08: Funnel Analytics Dashboard & Conversion Attribution', () 
     // 7. Branching Direct Bypass Card
     const directCard = page.getByTestId('funnel-direct-bypass-card');
     await expect(directCard).toBeVisible();
-    await expect(page.getByText('Direct Google Bypasses')).toBeVisible();
-    await expect(page.getByText('Anti-Gating Direct Path')).toBeVisible();
+    await expect(directCard.getByText('Direct Google Bypasses')).toBeVisible();
+    await expect(directCard.getByText('Anti-Gating Direct Path')).toBeVisible();
 
     // 8. Secondary Quota Context Card
     const quotaCard = page.getByTestId('quota-context-card');
@@ -159,9 +159,9 @@ test.describe('M5-T08: Funnel Analytics Dashboard & Conversion Attribution', () 
     await expect(table).toBeVisible();
     await expect(page.getByText('Conversion Funnel Step-by-Step Breakdown')).toBeVisible();
     await expect(page.getByRole('columnheader', { name: /Funnel Stage/i })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: /Patron Count/i })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: /Step Conversion/i })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: /Step Drop-off/i })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: /Event Count/i })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: /Event Volume Ratio/i })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: /Volume Difference/i })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: /Denominator Base/i })).toBeVisible();
   });
 
